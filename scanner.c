@@ -1,11 +1,12 @@
 #include <assert.h>
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "adt/arena.h"
 #include "adt/hashset.h"
-#include "adt/obst.h"
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
@@ -102,7 +103,7 @@ struct symbol_table_bucket {
 struct symbol_table {
   struct hash_set             set;
   struct symbol_table_bucket *buckets;
-  struct obstack              obst;
+  struct arena                arena;
 };
 
 static unsigned fnv_hash_string(const char *string)
@@ -119,7 +120,9 @@ static struct symbol *symbol_table_new_symbol(struct symbol_table *symbol_table,
                                               const char *string,
                                               uint16_t token_kind)
 {
-  struct symbol *symbol = obstack_alloc(&symbol_table->obst, sizeof(symbol[0]));
+  struct symbol *symbol = arena_allocate(&symbol_table->arena,
+                                         sizeof(struct symbol),
+                                         alignof(struct symbol));
   symbol->string     = string;
   symbol->token_kind = token_kind;
   return symbol;
@@ -199,7 +202,7 @@ static void symbol_table_insert_predefined(struct symbol_table *symbol_table,
 
 static void init_symbol_table(struct symbol_table *symbol_table)
 {
-  obstack_init(&symbol_table->obst);
+  arena_init(&symbol_table->arena);
   unsigned num_buckets = 512;
   hash_set_init(&symbol_table->set, num_buckets);
   symbol_table->buckets = calloc(num_buckets, sizeof(symbol_table->buckets[0]));
@@ -215,7 +218,7 @@ static void init_symbol_table(struct symbol_table *symbol_table)
 
 static void exit_symbol_table(struct symbol_table *symbol_table)
 {
-  obstack_free(&symbol_table->obst, NULL);
+  arena_free_all(&symbol_table->arena);
 }
 
 static const unsigned TABSIZE   = 8;
@@ -274,6 +277,7 @@ static void next_char(struct scanner_state *s)
 
 static void eat(struct scanner_state *s, int c)
 {
+  (void)c;
   assert(s->c == c);
   next_char(s);
 }
@@ -304,13 +308,13 @@ static void eat_line_comment(struct scanner_state *s)
 static void parse_identifier(struct scanner_state *s, struct token *result,
                              char first_char)
 {
-  struct obstack *symbol_obst = &s->symbol_table->obst;
-  assert(obstack_object_size(symbol_obst) == 0);
-  obstack_1grow(symbol_obst, first_char);
+  struct arena *arena = &s->symbol_table->arena;
+  arena_begin_growing(arena, alignof(char));
+  arena_grow_char(arena, first_char);
   for (;;) {
     switch (s->c) {
     case IDENTIFIER_CASES:
-      obstack_1grow(symbol_obst, s->c);
+      arena_grow_char(arena, s->c);
       next_char(s);
       continue;
     default:
@@ -319,11 +323,11 @@ static void parse_identifier(struct scanner_state *s, struct token *result,
     break;
   }
 
-  obstack_1grow(symbol_obst, '\0');
-  char *string = obstack_finish(symbol_obst);
+  arena_grow_char(arena, '\0');
+  char *string = arena_grow_finish(arena);
   struct symbol *symbol = symbol_table_get_or_insert(s->symbol_table, string);
   if (symbol->string != string) {
-    obstack_free(symbol_obst, string);
+    arena_free(arena, string);
   }
 
   result->kind   = symbol->token_kind;

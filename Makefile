@@ -8,13 +8,11 @@ all: scanner
 .PHONY: scanner
 scanner: build/scanner
 
-adt/obst.h: obstack/obstack.h
+adt/arena.h : adt/bitfiddle.h
 
 adt/hashset.h: adt/bitfiddle.h
 
-obstack/obstack.c: obstack/obstack.h
-
-build/scanner: scanner.c obstack/obstack.c
+build/scanner: scanner.c
 	mkdir -p build
 	clang $(CFLAGS) $^ -o $@
 

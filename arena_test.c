@@ -1,0 +1,49 @@
+#include "adt/arena.h"
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+#include <assert.h>
+#include <string.h>
+
+void alloc_some(struct arena *arena)
+{
+  char *last_end;
+  for (int i = 0, e = rand() % 5000; i < e; ++i) {
+    size_t sz = rand() % 33;
+    char *m = arena_allocate(arena, sz, 1);
+
+    memset(m, rand(), sz);
+
+    last_end = m + sz;
+
+    if (rand() % 10 == 0) {
+      arena_begin_growing(arena, 1);
+      for (char *c = "Hello World!"; *c != '\0'; ++c) {
+        arena_grow_char(arena, *c);
+      }
+      arena_grow_char(arena, '\0');
+     char *str = (char*)arena_grow_finish(arena);
+      assert(strcmp(str, "Hello World!") == 0);
+    }
+  }
+}
+
+int main(int argc, char **argv)
+{
+  int seed;
+  if (argc > 1) {
+    seed = atoi(argv[1]);
+  } else {
+    seed = time(NULL);
+  }
+  printf("Seed: %d\n", seed);
+
+  struct arena arena;
+  arena_init(&arena);
+  for (int i = 0; i < 2000; ++i) {
+    alloc_some(&arena);
+    arena_free_all(&arena);
+  }
+}

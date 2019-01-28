@@ -21,12 +21,9 @@ struct token {
 
 struct scanner_state {
   int c;
-
   char  *p;
-  char  *buffer_end;
-  FILE  *input;
-  char  *read_buffer;
-  size_t read_buffer_size;
+
+  struct token token;
 
   unsigned line;
   unsigned paren_level;
@@ -39,6 +36,11 @@ struct scanner_state {
   unsigned last_line_indent;
   unsigned indentation_stack_top;
   unsigned indentation_stack[MAXINDENT];
+
+  char  *buffer_end;
+  FILE  *input;
+  char  *read_buffer;
+  size_t read_buffer_size;
 };
 
 void scanner_init(struct scanner_state *s, FILE* input,
@@ -46,6 +48,6 @@ void scanner_init(struct scanner_state *s, FILE* input,
 
 void scanner_free(struct scanner_state *s);
 
-void next_token(struct scanner_state *s, struct token *result);
+void next_token(struct scanner_state *s);
 
 #endif

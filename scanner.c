@@ -144,8 +144,7 @@ static void eat_line_comment(struct scanner_state *s)
   }
 }
 
-static void scan_identifier(struct scanner_state *s, struct token *result,
-                             char first_char)
+static void scan_identifier(struct scanner_state *s, char first_char)
 {
   struct arena *arena = &s->symbol_table->arena;
   arena_grow_begin(arena, string_alignment);
@@ -169,18 +168,17 @@ static void scan_identifier(struct scanner_state *s, struct token *result,
     arena_free(arena, string);
   }
 
-  result->kind     = symbol->token_kind;
-  result->u.symbol = symbol;
+  s->token.kind     = symbol->token_kind;
+  s->token.u.symbol = symbol;
 }
 
-static void scan_string_literal(struct scanner_state *s, struct token *result,
-                                uint16_t token_kind)
+static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
 {
   assert(s->c == '"' || s->c == '\'');
   char quote = s->c;
   next_char(s);
 
-  result->kind = token_kind;
+  s->token.kind = token_kind;
   struct arena *arena = s->strings;
   arena_grow_begin(arena, alignof(char));
   bool triplequote = false;
@@ -240,32 +238,30 @@ static void scan_string_literal(struct scanner_state *s, struct token *result,
 
 finish_string:
   arena_grow_char(arena, '\0');
-  result->u.string = (char*)arena_grow_finish(arena);
+  s->token.u.string = (char*)arena_grow_finish(arena);
 }
 
-static void scan_eof(struct scanner_state *s, struct token *result)
+static void scan_eof(struct scanner_state *s)
 {
   if (s->last_line_indent > 0) {
     s->last_line_indent = 0;
     s->pending_dedents  = s->indentation_stack_top;
     s->at_begin_of_line = true;
-    result->kind = T_DEDENT;
+    s->token.kind = T_DEDENT;
     return;
   }
-  result->kind = T_EOF;
+  s->token.kind = T_EOF;
 }
 
-static bool scan_indentation(struct scanner_state *s, struct token *result)
+static bool scan_indentation(struct scanner_state *s)
 {
-  (void)result;
-
   if (s->pending_dedents > 0) {
     --s->indentation_stack_top;
     --s->pending_dedents;
     if (s->pending_dedents == 0) {
       s->at_begin_of_line = false;
     }
-    result->kind = T_DEDENT;
+    s->token.kind = T_DEDENT;
     return true;
   }
 
@@ -299,7 +295,7 @@ static bool scan_indentation(struct scanner_state *s, struct token *result)
       eat_line_comment(s);
       continue;
     case C_EOF:
-      scan_eof(s, result);
+      scan_eof(s);
       return true;
     default:
       break;
@@ -310,14 +306,14 @@ static bool scan_indentation(struct scanner_state *s, struct token *result)
   unsigned last_line_indent = s->last_line_indent;
   if (column > last_line_indent) {
     if (s->indentation_stack_top >= MAXINDENT) {
-      result->kind = T_ETOODEEP;
+      s->token.kind = T_ETOODEEP;
       s->c = C_EOF;
     } else {
       if (last_line_indent > 0) {
         s->indentation_stack[s->indentation_stack_top++] = last_line_indent;
       }
       s->last_line_indent = column;
-      result->kind = T_INDENT;
+      s->token.kind = T_INDENT;
       s->at_begin_of_line = false;
     }
     return true;
@@ -337,9 +333,9 @@ static bool scan_indentation(struct scanner_state *s, struct token *result)
     s->at_begin_of_line = pending_dedents > 0;
     if (column != target_cols) {
       fprintf(stderr, "invalid indentation\n");
-      result->kind = T_EDEDENT;
+      s->token.kind = T_EDEDENT;
     } else {
-      result->kind = T_DEDENT;
+      s->token.kind = T_DEDENT;
     }
     return true;
   }
@@ -347,10 +343,10 @@ static bool scan_indentation(struct scanner_state *s, struct token *result)
   return false;
 }
 
-void next_token(struct scanner_state *s, struct token *result)
+void next_token(struct scanner_state *s)
 {
   if (s->at_begin_of_line) {
-    if (scan_indentation(s, result))
+    if (scan_indentation(s))
       return;
   }
 
@@ -368,7 +364,7 @@ void next_token(struct scanner_state *s, struct token *result)
       if (s->paren_level > 0)
         continue;
       s->at_begin_of_line = true;
-      result->kind = T_NEWLINE;
+      s->token.kind = T_NEWLINE;
       return;
 
     case ' ':
@@ -384,7 +380,7 @@ void next_token(struct scanner_state *s, struct token *result)
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
       char first_char = s->c;
       next_char(s);
-      scan_identifier(s, result, first_char);
+      scan_identifier(s, first_char);
       return;
     }
 
@@ -393,10 +389,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        scan_string_literal(s, result, T_BINARY_STRING);
+        scan_string_literal(s, T_BINARY_STRING);
         return;
       } else {
-        scan_identifier(s, result, first_char);
+        scan_identifier(s, first_char);
       }
       return;
     }
@@ -406,10 +402,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        scan_string_literal(s, result, T_FORMAT_STRING);
+        scan_string_literal(s, T_FORMAT_STRING);
         return;
       } else {
-        scan_identifier(s, result, first_char);
+        scan_identifier(s, first_char);
       }
       return;
     }
@@ -419,10 +415,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        scan_string_literal(s, result, T_RAW_STRING);
+        scan_string_literal(s, T_RAW_STRING);
         return;
       } else {
-        scan_identifier(s, result, first_char);
+        scan_identifier(s, first_char);
       }
       return;
     }
@@ -432,26 +428,26 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        scan_string_literal(s, result, T_UNICODE_STRING);
+        scan_string_literal(s, T_UNICODE_STRING);
         return;
       } else {
-        scan_identifier(s, result, first_char);
+        scan_identifier(s, first_char);
       }
       return;
     }
 
     case '\'':
     case '"':
-      scan_string_literal(s, result, T_STRING);
+      scan_string_literal(s, T_STRING);
       return;
 
     case '=':
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_EQUALS_EQUALS;
+        s->token.kind = T_EQUALS_EQUALS;
       } else {
-        result->kind = T_EQUALS;
+        s->token.kind = T_EQUALS;
       }
       return;
 
@@ -460,7 +456,7 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_EXCLAMATIONMARKEQUALS;
+        s->token.kind = T_EXCLAMATIONMARKEQUALS;
       } else {
         goto invalid_char;
       }
@@ -471,23 +467,23 @@ void next_token(struct scanner_state *s, struct token *result)
       switch (s->c) {
       case '>':
         next_char(s);
-        result->kind = T_LESS_THAN_GREATER_THAN;
+        s->token.kind = T_LESS_THAN_GREATER_THAN;
         return;
       case '=':
         next_char(s);
-        result->kind = T_LESS_THAN_EQUALS;
+        s->token.kind = T_LESS_THAN_EQUALS;
         return;
       case '<':
         next_char(s);
         if (s->c == '=') {
           next_char(s);
-          result->kind = T_LESS_THAN_LESS_THAN_EQUALS;
+          s->token.kind = T_LESS_THAN_LESS_THAN_EQUALS;
         } else {
-          result->kind = T_LESS_THAN_LESS_THAN;
+          s->token.kind = T_LESS_THAN_LESS_THAN;
         }
         return;
       default:
-        result->kind = T_LESS_THAN;
+        s->token.kind = T_LESS_THAN;
         return;
       }
 
@@ -498,16 +494,16 @@ void next_token(struct scanner_state *s, struct token *result)
         next_char(s);
         if (s->c == '=') {
           next_char(s);
-          result->kind = T_GREATER_THAN_GREATER_THAN_EQUALS;
+          s->token.kind = T_GREATER_THAN_GREATER_THAN_EQUALS;
         } else {
-          result->kind = T_GREATER_THAN_GREATER_THAN;
+          s->token.kind = T_GREATER_THAN_GREATER_THAN;
         }
         return;
       case '=':
-        result->kind = T_GREATER_THAN_EQUALS;
+        s->token.kind = T_GREATER_THAN_EQUALS;
         return;
       default:
-        result->kind = T_GREATER_THAN;
+        s->token.kind = T_GREATER_THAN;
         return;
       }
 
@@ -515,9 +511,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_PLUS_EQUALS;
+        s->token.kind = T_PLUS_EQUALS;
       } else {
-        result->kind = T_PLUS;
+        s->token.kind = T_PLUS;
       }
       return;
 
@@ -526,14 +522,14 @@ void next_token(struct scanner_state *s, struct token *result)
       switch (s->c) {
       case '=':
         next_char(s);
-        result->kind = T_MINUS_EQUALS;
+        s->token.kind = T_MINUS_EQUALS;
         return;
       case '>':
         next_char(s);
-        result->kind = T_MINUS_GREATER_THAN;
+        s->token.kind = T_MINUS_GREATER_THAN;
         return;
       default:
-        result->kind = T_MINUS;
+        s->token.kind = T_MINUS;
         return;
       }
 
@@ -542,19 +538,19 @@ void next_token(struct scanner_state *s, struct token *result)
       switch (s->c) {
       case '=':
         next_char(s);
-        result->kind = T_ASTERISK_EQUALS;
+        s->token.kind = T_ASTERISK_EQUALS;
         return;
       case '*':
         next_char(s);
         if (s->c == '=') {
           next_char(s);
-          result->kind = T_ASTERISK_ASTERISK_EQUALS;
+          s->token.kind = T_ASTERISK_ASTERISK_EQUALS;
         } else {
-          result->kind = T_ASTERISK_ASTERISK;
+          s->token.kind = T_ASTERISK_ASTERISK;
         }
         return;
       default:
-        result->kind = T_ASTERISK;
+        s->token.kind = T_ASTERISK;
         return;
       }
 
@@ -563,19 +559,19 @@ void next_token(struct scanner_state *s, struct token *result)
       switch (s->c) {
       case '=':
         next_char(s);
-        result->kind = T_SLASH_EQUALS;
+        s->token.kind = T_SLASH_EQUALS;
         return;
       case '/':
         next_char(s);
         if (s->c == '=') {
           next_char(s);
-          result->kind = T_SLASH_SLASH_EQUALS;
+          s->token.kind = T_SLASH_SLASH_EQUALS;
         } else {
-          result->kind = T_SLASH_SLASH;
+          s->token.kind = T_SLASH_SLASH;
         }
         return;
       default:
-        result->kind = T_SLASH;
+        s->token.kind = T_SLASH;
         return;
       }
 
@@ -583,9 +579,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_BAR_EQUALS;
+        s->token.kind = T_BAR_EQUALS;
       } else {
-        result->kind = T_BAR;
+        s->token.kind = T_BAR;
       }
       return;
 
@@ -593,9 +589,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_PERCENT_EQUALS;
+        s->token.kind = T_PERCENT_EQUALS;
       } else {
-        result->kind = T_PERCENT_EQUALS;
+        s->token.kind = T_PERCENT_EQUALS;
       }
       return;
 
@@ -603,9 +599,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_AMPERSAND_EQUALS;
+        s->token.kind = T_AMPERSAND_EQUALS;
       } else {
-        result->kind = T_AMPERSAND;
+        s->token.kind = T_AMPERSAND;
       }
       return;
 
@@ -613,9 +609,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_CARET_EQUALS;
+        s->token.kind = T_CARET_EQUALS;
       } else {
-        result->kind = T_CARET;
+        s->token.kind = T_CARET;
       }
       return;
 
@@ -623,9 +619,9 @@ void next_token(struct scanner_state *s, struct token *result)
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        result->kind = T_AT_EQUALS;
+        s->token.kind = T_AT_EQUALS;
       } else {
-        result->kind = T_AT;
+        s->token.kind = T_AT;
       }
       return;
 
@@ -636,14 +632,14 @@ void next_token(struct scanner_state *s, struct token *result)
         next_char(s);
         if (s->c == '.') {
           next_char(s);
-          result->kind = T_DOT_DOT_DOT;
+          s->token.kind = T_DOT_DOT_DOT;
         } else {
           // TODO: pushback? just for this?
-          result->kind = T_DOT_DOT_DOT;
+          s->token.kind = T_DOT_DOT_DOT;
         }
         return;
       default:
-        result->kind = T_DOT;
+        s->token.kind = T_DOT;
         return;
       }
 
@@ -664,12 +660,12 @@ void next_token(struct scanner_state *s, struct token *result)
     case ';':
     case '~':
 single_char_token:
-      result->kind = s->c;
+      s->token.kind = s->c;
       next_char(s);
       return;
 
     case C_EOF:
-      scan_eof(s, result);
+      scan_eof(s);
       return;
 
     default:

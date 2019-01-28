@@ -1,3 +1,5 @@
+#include "scanner.h"
+
 #include <assert.h>
 #include <stdalign.h>
 #include <stdbool.h>
@@ -6,7 +8,8 @@
 #include <stdlib.h>
 
 #include "adt/arena.h"
-#include "adt/hashset.h"
+#include "symbol_table.h"
+#include "token_kinds.h"
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
@@ -80,176 +83,12 @@
   case 'r': \
   case 'u'
 
-enum token_kind {
-#define TCHAR(val, name, desc)  name = val,
-#define TDES(name, desc)        name,
-#define TID(id, name)           name,
-#include "tokens.h"
-#undef TID
-#undef TDES
-#undef TCHAR
-};
-
-struct symbol {
-  const char *string;
-  uint16_t    token_kind;
-};
-
-struct symbol_table_bucket {
-  struct symbol *symbol;
-  unsigned       hash;
-};
-
-struct symbol_table {
-  struct hash_set             set;
-  struct symbol_table_bucket *buckets;
-  struct arena                arena;
-};
-
-static unsigned fnv_hash_string(const char *string)
-{
-  unsigned hash = 2166136261;
-  for(const char *p = string; *p != '\0'; ++p) {
-    hash *= 16777619;
-    hash ^= (unsigned char)*p;
-  }
-  return hash;
-}
-
-static struct symbol *symbol_table_new_symbol(struct symbol_table *symbol_table,
-                                              const char *string,
-                                              uint16_t token_kind)
-{
-  struct symbol *symbol = arena_allocate(&symbol_table->arena,
-                                         sizeof(struct symbol),
-                                         alignof(struct symbol));
-  symbol->string     = string;
-  symbol->token_kind = token_kind;
-  return symbol;
-}
-
-static struct symbol *symbol_table_insert_new(struct symbol_table *symbol_table,
-                                              struct symbol *symbol,
-                                              unsigned hash)
-{
-  hash_set_increment_num_elements(&symbol_table->set);
-  struct hash_set_chain_iteration_state c;
-  hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
-  struct symbol_table_bucket *buckets = symbol_table->buckets;
-  for (;; hash_set_chain_iteration_next(&c)) {
-    struct symbol_table_bucket *bucket = &buckets[c.index];
-    if (bucket->symbol == NULL) {
-      bucket->symbol = symbol;
-      bucket->hash   = hash;
-      return symbol;
-    }
-  }
-}
-
-static void symbol_table_resize(struct symbol_table *symbol_table,
-                                unsigned new_size)
-{
-  struct symbol_table_bucket *old_buckets = symbol_table->buckets;
-  unsigned num_old_buckets = hash_set_num_buckets(&symbol_table->set);
-  symbol_table->buckets = calloc(new_size, sizeof(symbol_table->buckets[0]));
-  hash_set_init(&symbol_table->set, new_size);
-  for (unsigned i = 0; i < num_old_buckets; ++i) {
-    struct symbol_table_bucket *bucket = &old_buckets[i];
-    if (bucket->symbol != NULL) {
-      symbol_table_insert_new(symbol_table, bucket->symbol, bucket->hash);
-    }
-  }
-}
-
-static struct symbol *symbol_table_get_or_insert(
-    struct symbol_table *symbol_table, const char *string)
-{
-  unsigned new_size = hash_set_should_resize(&symbol_table->set);
-  if (UNLIKELY(new_size != 0)) {
-    symbol_table_resize(symbol_table, new_size);
-  }
-
-  unsigned hash = fnv_hash_string(string);
-
-  struct hash_set_chain_iteration_state c;
-  hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
-  struct symbol_table_bucket *buckets = symbol_table->buckets;
-  for (;; hash_set_chain_iteration_next(&c)) {
-    struct symbol_table_bucket *bucket = &buckets[c.index];
-    if (bucket->symbol == NULL) {
-      // not found: create a new entry.
-      struct symbol *symbol =
-          symbol_table_new_symbol(symbol_table, string, T_ID);
-      bucket->symbol = symbol;
-      bucket->hash = hash;
-      return symbol;
-    } else if (bucket->hash == hash &&
-               strcmp(bucket->symbol->string, string) == 0) {
-      return bucket->symbol;
-    }
-  }
-}
-
-static void symbol_table_insert_predefined(struct symbol_table *symbol_table,
-                                           const char *string,
-                                           uint16_t token_kind)
-{
-  struct symbol *symbol =
-      symbol_table_new_symbol(symbol_table, string, token_kind);
-  unsigned hash = fnv_hash_string(string);
-  symbol_table_insert_new(symbol_table, symbol, hash);
-}
-
-static void init_symbol_table(struct symbol_table *symbol_table)
-{
-  arena_init(&symbol_table->arena);
-  unsigned num_buckets = 512;
-  hash_set_init(&symbol_table->set, num_buckets);
-  symbol_table->buckets = calloc(num_buckets, sizeof(symbol_table->buckets[0]));
-
-#define TCHAR(val, name, desc)
-#define TDES(name, desc)
-#define TID(id, name)  symbol_table_insert_predefined(symbol_table, #id, name);
-#include "tokens.h"
-#undef TID
-#undef TDES
-#undef TCHAR
-}
-
-static void exit_symbol_table(struct symbol_table *symbol_table)
-{
-  arena_free_all(&symbol_table->arena);
-}
-
 static const unsigned TABSIZE   = 8;
 static const int      C_EOF     = -1;
-static const unsigned MAXINDENT = 100;
 
-struct token {
-  uint16_t       kind;
-  struct symbol *symbol;
-};
-
-struct scanner_state {
-  int c;
-
-  char  *p;
-  char  *buffer_end;
-  FILE  *input;
-  char  *read_buffer;
-  size_t read_buffer_size;
-
-  unsigned line;
-  unsigned paren_level;
-
-  struct symbol_table *symbol_table;
-
-  bool     at_begin_of_line;
-  uint8_t  pending_dedents;
-  unsigned last_line_indent;
-  unsigned indentation_stack_top;
-  unsigned indentation_stack[MAXINDENT];
-};
+// TODO: Measure if the faster string operations on aligned addresses make up
+// for less dense packing...
+static const unsigned string_alignment = alignof(void*);
 
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
@@ -305,11 +144,11 @@ static void eat_line_comment(struct scanner_state *s)
   }
 }
 
-static void parse_identifier(struct scanner_state *s, struct token *result,
+static void scan_identifier(struct scanner_state *s, struct token *result,
                              char first_char)
 {
   struct arena *arena = &s->symbol_table->arena;
-  arena_begin_growing(arena, alignof(char));
+  arena_grow_begin(arena, string_alignment);
   arena_grow_char(arena, first_char);
   for (;;) {
     switch (s->c) {
@@ -330,41 +169,81 @@ static void parse_identifier(struct scanner_state *s, struct token *result,
     arena_free(arena, string);
   }
 
-  result->kind   = symbol->token_kind;
-  result->symbol = symbol;
+  result->kind     = symbol->token_kind;
+  result->u.symbol = symbol;
 }
 
-static void parse_string_literal(struct scanner_state *s, struct token *result,
-                                 uint16_t token_kind)
+static void scan_string_literal(struct scanner_state *s, struct token *result,
+                                uint16_t token_kind)
 {
   assert(s->c == '"' || s->c == '\'');
-  // TODO: check for triple quotes
+  char quote = s->c;
   next_char(s);
+
+  result->kind = token_kind;
+  struct arena *arena = s->strings;
+  arena_grow_begin(arena, alignof(char));
+  bool triplequote = false;
+  if (s->c == quote) {
+    next_char(s);
+    if (s->c == quote) {
+      next_char(s);
+      triplequote = true;
+      fprintf(stderr, "TODO\n");
+      abort();
+    } else {
+      goto finish_string;
+    }
+  }
   for (;;) {
     switch (s->c) {
     case '"':
-    case '\'':
+    case '\'': {
+      bool end = s->c == quote;
       // TODO: check if it matches the begin
       next_char(s);
-      break;
+      if (end)
+        break;
+      continue;
+    }
     case '\\':
       next_char(s);
       next_char(s);
-      continue;
+      fprintf(stderr, "TODO\n");
+      abort();
+    case '\r':
+      next_char(s);
+      if (s->c == '\n') {
+        /* fallthrough */
+    case '\n':
+        next_char(s);
+      }
+      ++s->line;
+      fprintf(stderr, "TODO: complain about newline\n");
+      abort();
+      break;
     case C_EOF:
       // TODO: complain
-      break;
+      fprintf(stderr, "TODO\n");
+      abort();
     default:
+      if (s->c & 0x80) {
+        fprintf(stderr, "TODO: non-ascii\n");
+        abort();
+      }
+      arena_grow_char(arena, s->c);
       next_char(s);
       continue;
     }
     break;
   }
-  result->kind = token_kind;
-  // TODO
+
+finish_string:
+  arena_grow_char(arena, '\0');
+  result->u.string = (char*)arena_grow_finish(arena);
 }
 
-static void eof(struct scanner_state *s, struct token *result)
+static void scan_eof(struct scanner_state *s, struct token *result)
 {
   if (s->last_line_indent > 0) {
     s->last_line_indent = 0;
@@ -376,7 +255,7 @@ static void eof(struct scanner_state *s, struct token *result)
   result->kind = T_EOF;
 }
 
-static bool parse_indentation(struct scanner_state *s, struct token *result)
+static bool scan_indentation(struct scanner_state *s, struct token *result)
 {
   (void)result;
 
@@ -420,7 +299,7 @@ static bool parse_indentation(struct scanner_state *s, struct token *result)
       eat_line_comment(s);
       continue;
     case C_EOF:
-      eof(s, result);
+      scan_eof(s, result);
       return true;
     default:
       break;
@@ -468,11 +347,10 @@ static bool parse_indentation(struct scanner_state *s, struct token *result)
   return false;
 }
 
-static __attribute__((noinline))
 void next_token(struct scanner_state *s, struct token *result)
 {
   if (s->at_begin_of_line) {
-    if (parse_indentation(s, result))
+    if (scan_indentation(s, result))
       return;
   }
 
@@ -506,7 +384,7 @@ void next_token(struct scanner_state *s, struct token *result)
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
       char first_char = s->c;
       next_char(s);
-      parse_identifier(s, result, first_char);
+      scan_identifier(s, result, first_char);
       return;
     }
 
@@ -515,10 +393,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        parse_string_literal(s, result, T_BINARY_STRING);
+        scan_string_literal(s, result, T_BINARY_STRING);
         return;
       } else {
-        parse_identifier(s, result, first_char);
+        scan_identifier(s, result, first_char);
       }
       return;
     }
@@ -528,10 +406,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        parse_string_literal(s, result, T_FORMAT_STRING);
+        scan_string_literal(s, result, T_FORMAT_STRING);
         return;
       } else {
-        parse_identifier(s, result, first_char);
+        scan_identifier(s, result, first_char);
       }
       return;
     }
@@ -541,10 +419,10 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        parse_string_literal(s, result, T_RAW_STRING);
+        scan_string_literal(s, result, T_RAW_STRING);
         return;
       } else {
-        parse_identifier(s, result, first_char);
+        scan_identifier(s, result, first_char);
       }
       return;
     }
@@ -554,17 +432,17 @@ void next_token(struct scanner_state *s, struct token *result)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        parse_string_literal(s, result, T_UNICODE_STRING);
+        scan_string_literal(s, result, T_UNICODE_STRING);
         return;
       } else {
-        parse_identifier(s, result, first_char);
+        scan_identifier(s, result, first_char);
       }
       return;
     }
 
     case '\'':
     case '"':
-      parse_string_literal(s, result, T_STRING);
+      scan_string_literal(s, result, T_STRING);
       return;
 
     case '=':
@@ -791,7 +669,7 @@ single_char_token:
       return;
 
     case C_EOF:
-      eof(s, result);
+      scan_eof(s, result);
       return;
 
     default:
@@ -807,53 +685,20 @@ invalid_char:
   }
 }
 
-static const char*const token_names[] = {
-#define TCHAR(val, name, desc)  TDES(name, desc)
-#define TDES(name, desc)        [name] = desc,
-#define TID(id, name)           [name] = #id,
-#include "tokens.h"
-#undef TID
-#undef TDES
-#undef TCHAR
-};
-
-int main(int argc, char **argv)
+void scanner_init(struct scanner_state *s, FILE *input,
+                  struct symbol_table *symbol_table, struct arena *strings)
 {
-  FILE *input = stdin;
-  if (argc > 1) {
-    const char *filename = argv[1];
-    input = fopen(filename, "r");
-    if (input == NULL) {
-      fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
-      return 1;
-    }
-  }
+  memset(s, 0, sizeof(*s));
+  s->input            = input,
+  s->at_begin_of_line = true,
+  s->read_buffer      = malloc(16 * 1024 - 16),
+  s->read_buffer_size = 4096,
+  s->symbol_table     = symbol_table,
+  s->strings          = strings,
+  next_char(s);
+}
 
-  struct symbol_table symbol_table;
-  init_symbol_table(&symbol_table);
-
-  struct scanner_state s = {
-    .input            = input,
-    .at_begin_of_line = true,
-    .read_buffer      = malloc(4096),
-    .read_buffer_size = 4096,
-    .symbol_table     = &symbol_table,
-  };
-  next_char(&s);
-  struct token t;
-  do {
-    next_token(&s, &t);
-    if (t.kind == T_ID) {
-      printf("identifier %s\n", t.symbol->string);
-    } else {
-      printf("%s\n", token_names[t.kind]);
-    }
-  } while(t.kind != T_EOF);
-
-  if (input != stdin) {
-    fclose(input);
-  }
-
-  exit_symbol_table(&symbol_table);
-  return 0;
+void scanner_free(struct scanner_state *s)
+{
+  free(s->read_buffer);
 }

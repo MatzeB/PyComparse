@@ -42,7 +42,7 @@ struct hash_set_chain_iteration_state {
   unsigned num_probes;
 };
 
-static void hash_set_chain_iteration_begin(
+static inline void hash_set_chain_iteration_begin(
     struct hash_set_chain_iteration_state *state,
     const struct hash_set *set,
     unsigned hash)
@@ -94,7 +94,7 @@ static inline void hash_set_increment_num_deleted(struct hash_set *set) {
   ++set->num_deleted;
 }
 
-static unsigned hash_set_num_buckets(const struct hash_set *set) {
+static inline unsigned hash_set_num_buckets(const struct hash_set *set) {
   return set->num_buckets;
 }
 

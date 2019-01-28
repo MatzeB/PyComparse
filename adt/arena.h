@@ -106,7 +106,7 @@ static inline void arena_free(struct arena *arena, const void *free_up_to)
   arena->limit     = block->block_size;
 }
 
-static inline void arena_begin_growing(struct arena *arena, unsigned alignment)
+static inline void arena_grow_begin(struct arena *arena, unsigned alignment)
 {
   assert(arena->grow == 0);
 

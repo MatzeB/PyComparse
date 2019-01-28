@@ -1,6 +1,7 @@
 #ifndef BITFIDDLE_H
 #define BITFIDDLE_H
 
+#include <assert.h>
 #include <limits.h>
 
 static inline __attribute__((const))

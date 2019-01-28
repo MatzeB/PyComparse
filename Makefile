@@ -3,16 +3,16 @@ CFLAGS += -O0 -g -std=c11
 CFLAGS += -Wall -Wextra -Wmissing-prototypes
 
 .PHONY: all
-all: scanner
+all: scanner_test
 
-.PHONY: scanner
-scanner: build/scanner
+.PHONY: scanner_test
+scanner_test: build/scanner_test
 
 adt/arena.h : adt/bitfiddle.h
 
 adt/hashset.h: adt/bitfiddle.h
 
-build/scanner: scanner.c
+build/scanner_test: scanner.c scanner_test.c symbol_table.c
 	mkdir -p build
 	clang $(CFLAGS) $^ -o $@
 

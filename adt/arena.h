@@ -169,4 +169,7 @@ static inline void *arena_grow_finish(struct arena *arena)
   return result;
 }
 
+#define arena_allocate_type(arena, type) \
+  ((type*)arena_allocate((arena), sizeof(type), alignof(type)))
+
 #endif

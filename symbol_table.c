@@ -80,7 +80,7 @@ struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
     if (bucket->symbol == NULL) {
       // not found: create a new entry.
       struct symbol *symbol =
-          symbol_table_new_symbol(symbol_table, string, T_ID);
+          symbol_table_new_symbol(symbol_table, string, T_IDENTIFIER);
       bucket->symbol = symbol;
       bucket->hash = hash;
       return symbol;

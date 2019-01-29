@@ -343,7 +343,7 @@ static bool scan_indentation(struct scanner_state *s)
   return false;
 }
 
-void next_token(struct scanner_state *s)
+void scanner_next_token(struct scanner_state *s)
 {
   if (s->at_begin_of_line) {
     if (scan_indentation(s))
@@ -389,7 +389,7 @@ void next_token(struct scanner_state *s)
       char first_char = s->c;
       next_char(s);
       if (s->c == '"') {
-        scan_string_literal(s, T_BINARY_STRING);
+        scan_string_literal(s, T_BYTE_STRING);
         return;
       } else {
         scan_identifier(s, first_char);
@@ -697,4 +697,41 @@ void scanner_init(struct scanner_state *s, FILE *input,
 void scanner_free(struct scanner_state *s)
 {
   free(s->read_buffer);
+}
+
+static const char* const token_names[] = {
+#define TCHAR(val, name, desc)  TDES(name, desc)
+#define TDES(name, desc)        [name] = desc,
+#define TID(id, name)           [name] = #id,
+#include "tokens.h"
+#undef TID
+#undef TDES
+#undef TCHAR
+};
+
+const char *token_kind_name(uint16_t token_kind)
+{
+  assert(token_kind < sizeof(token_names)/sizeof(token_names[0]));
+  assert(token_names[token_kind] != NULL);
+  return token_names[token_kind];
+}
+
+void print_token(FILE *out, const struct token *token)
+{
+  switch (token->kind) {
+  case T_FORMAT_STRING:  fputc('f', out); goto string;
+  case T_RAW_STRING:     fputc('r', out); goto string;
+  case T_UNICODE_STRING: fputc('u', out); goto string;
+  case T_BYTE_STRING:    fputc('b', out); goto string;
+  case T_STRING:
+string:
+    fprintf(out, "\"%s\"\n", token->u.string);
+    break;
+  case T_IDENTIFIER:
+    fprintf(out, "identifier %s\n", token->u.symbol->string);
+    break;
+  default:
+    fprintf(out, "%s\n", token_kind_name(token->kind));
+    break;
+  }
 }

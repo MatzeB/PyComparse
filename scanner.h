@@ -48,6 +48,10 @@ void scanner_init(struct scanner_state *s, FILE* input,
 
 void scanner_free(struct scanner_state *s);
 
-void next_token(struct scanner_state *s);
+void scanner_next_token(struct scanner_state *s);
+
+const char *token_kind_name(uint16_t token_kind);
+
+void print_token(FILE *out, const struct token *token);
 
 #endif

@@ -5,9 +5,15 @@
 #include <string.h>
 
 #include "adt/arena.h"
+#include "opcodes.h"
 #include "scanner.h"
 #include "token_kinds.h"
 #include "writer.h"
+
+#define MAX(a,b) \
+  ({ typeof (a) _a = (a); \
+     typeof (b) _b = (b); \
+     _a > _b ? _a : _b; })
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
@@ -43,6 +49,30 @@ static void unimplemented(void)
 {
   fprintf(stderr, "unimplemented\n");
   abort();
+}
+
+static void emit_op(struct parser_state *s, enum opcode opcode,
+                    uint32_t arg)
+{
+  if (arg >= 256) {
+    assert(arg <= 0xffff);
+    arena_grow_char(&s->opcodes, (char)OPCODE_EXTENDED_ARG);
+    arena_grow_char(&s->opcodes, arg >> 8);
+    arg &= 0xff;
+  }
+  arena_grow_char(&s->opcodes, opcode);
+  arena_grow_char(&s->opcodes, arg);
+}
+
+static void push(struct parser_state *s) {
+  s->stacksize++;
+  if (s->stacksize > s->code->stacksize)
+    s->code->stacksize = s->stacksize;
+}
+
+static void pop(struct parser_state *s) {
+  assert(s->stacksize > 0);
+  s->stacksize--;
 }
 
 static inline bool peek(const struct parser_state *s, uint16_t token_kind)
@@ -287,23 +317,72 @@ static void parse_expression_statement(struct parser_state *s)
   expect(s, T_NEWLINE);
 }
 
+#if 0
+static struct object_list_or_tuple *allocate_list(struct arena *arena,
+                                                  unsigned n_elements)
+{
+  struct object_list_or_tuple *list;
+  size_t size = sizeof(struct object_list_or_tuple) +
+      n_elements * sizeof(list->elements[0]);
+  list = (struct object_list_or_tuple*)
+      arena_allocate(arena, size, alignof(struct object_list_or_tuple));
+  memset(list, 0, sizeof(*list));
+  list->base.type = TYPE_LIST;
+  list->n_elements = n_elements;
+  return list;
+}
+#endif
+
+static struct object_list_or_tuple *allocate_tuple(struct arena *arena,
+                                                   unsigned n_elements)
+{
+  struct object_list_or_tuple *tuple;
+  size_t size = sizeof(struct object_list_or_tuple) +
+      n_elements * sizeof(tuple->elements[0]);
+  tuple = (struct object_list_or_tuple*)
+      arena_allocate(arena, size, alignof(struct object_list_or_tuple));
+  memset(tuple, 0, sizeof(*tuple));
+  tuple->base.type = TYPE_TUPLE;
+  tuple->n_elements = n_elements;
+  return tuple;
+}
+
 static struct object_code *allocate_code(struct arena *arena)
 {
   struct object_code *code = arena_allocate_type(arena, struct object_code);
   memset(code, 0, sizeof(*code));
+  code->base.type = TYPE_CODE;
 
   return code;
 }
 
-static union object *make_string(struct arena *arena, uint32_t len,
-                                 const char *chars)
+static struct object_base *allocate_singleton(struct arena *arena, char type) {
+  assert(type == TYPE_NONE || type == TYPE_NULL || type == TYPE_TRUE ||
+         type == TYPE_FALSE);
+  struct object_base *object = arena_allocate_type(arena, struct object_base);
+  object->type = type;
+  return object;
+}
+
+static struct object_string *make_bytes_len(struct arena *arena, uint32_t len,
+                                             const char *chars)
 {
   struct object_string *string =
       arena_allocate_type(arena, struct object_string);
   string->base.type = TYPE_STRING;
   string->len = len;
   string->chars = chars;
-  return (union object*)string;
+  return string;
+}
+
+static struct object_string *make_ascii(struct arena *arena, const char *str)
+{
+  struct object_string *string =
+      arena_allocate_type(arena, struct object_string);
+  string->base.type = TYPE_ASCII;
+  string->len = strlen(str);
+  string->chars = str;
+  return string;
 }
 
 void parse(struct parser_state *s)
@@ -313,6 +392,9 @@ void parse(struct parser_state *s)
   writer_begin(&s->writer, stdout);
   arena_init(&s->objects);
   s->code = allocate_code(&s->objects);
+
+  struct object_list_or_tuple *consts = allocate_tuple(&s->objects, 1);
+  consts->elements[0] = (union object*)allocate_singleton(&s->objects, TYPE_NONE);
 
   arena_init(&s->opcodes);
   arena_grow_begin(&s->opcodes, 4);
@@ -348,14 +430,34 @@ void parse(struct parser_state *s)
   }
 #endif
 
+  if (!s->had_return) {
+    emit_op(s, OPCODE_LOAD_CONST, 0);
+    push(s);
+    emit_op(s, OPCODE_RETURN_VALUE, 0);
+    pop(s);
+  }
+
+  assert(s->stacksize == 0);
+
   uint32_t len = arena_grow_current_size(&s->opcodes);
   char *opcodes = arena_grow_finish(&s->opcodes);
-  s->code->code = make_string(&s->objects, len, opcodes);
+  s->code->code = (union object*)make_bytes_len(&s->objects, len, opcodes);
+  s->code->consts = (union object*)consts;
+  s->code->names = (union object*)allocate_tuple(&s->objects, 0);
+  s->code->varnames = (union object*)allocate_tuple(&s->objects, 0);
+  s->code->freevars = (union object*)allocate_tuple(&s->objects, 0);
+  s->code->cellvars = (union object*)allocate_tuple(&s->objects, 0);
+  s->code->filename = (union object*)make_ascii(&s->objects, "simple.py");
+  s->code->name = (union object*)make_ascii(&s->objects, "<module>");
+  s->code->lnotab = (union object*)make_bytes_len(&s->objects, 0, NULL);
+
+  write(&s->writer, (const union object*)s->code);
+  fflush(stdout);
 }
 
 void parser_init(struct parser_state *s)
 {
-  s->error = false;
+  memset(s, 0, sizeof(*s));
   memset(s->anchor_set, 0, sizeof(s->anchor_set));
 }
 

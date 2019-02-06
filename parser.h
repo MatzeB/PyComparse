@@ -16,6 +16,8 @@ struct parser_state {
   struct object_code *code;
   struct arena objects;
   struct arena opcodes;
+  bool had_return;
+  unsigned stacksize;
 };
 
 void parser_init(struct parser_state *s);

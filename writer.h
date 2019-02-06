@@ -1,6 +1,7 @@
 #ifndef WRITER_H
 #define WRITER_H
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 
@@ -19,6 +20,9 @@ enum object_type {
   TYPE_TUPLE   = '(',
   TYPE_LIST    = '[',
 
+  TYPE_ASCII   = 'a',
+
+  TYPE_SHORT_ASCII = 'z',
   TYPE_SMALL_TUPLE = ')',
 };
 
@@ -70,5 +74,7 @@ union object {
 void writer_begin(struct bytecode_writer_state *s, FILE *out);
 
 void write(struct bytecode_writer_state *s, const union object *object);
+
+bool objects_equal(const union object *object0, const union object *object1);
 
 #endif

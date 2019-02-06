@@ -48,7 +48,7 @@ static void write_list_or_tuple(struct bytecode_writer_state *s,
   assert(type == TYPE_LIST || type == TYPE_TUPLE);
   uint32_t n_elements = list_or_tuple->n_elements;
   if (n_elements < 256 && type == TYPE_TUPLE) {
-    write_uint32(s, TYPE_SMALL_TUPLE);
+    write_uint8(s, TYPE_SMALL_TUPLE);
     write_uint8(s, n_elements);
   } else {
     write_uint8(s, type);
@@ -62,9 +62,16 @@ static void write_list_or_tuple(struct bytecode_writer_state *s,
 static void write_string(struct bytecode_writer_state *s,
                          const struct object_string *string)
 {
-  write_uint8(s, TYPE_STRING);
+  char type = string->base.type;
+  assert(type == TYPE_STRING || type == TYPE_ASCII);
   uint32_t len = string->len;
-  write_uint32(s, len);
+  if (len < 256 && type == TYPE_ASCII) {
+    write_uint8(s, TYPE_SHORT_ASCII);
+    write_uint8(s, len);
+  } else {
+    write_uint8(s, type);
+    write_uint32(s, len);
+  }
   for (uint32_t i = 0; i < len; ++i)
     write_uint8(s, string->chars[i]);
 }
@@ -109,10 +116,39 @@ void write(struct bytecode_writer_state *s, const union object *object)
   case TYPE_CODE:
     write_code(s, &object->code);
     break;
+  case TYPE_ASCII:
   case TYPE_STRING:
     write_string(s, &object->string);
     break;
   case TYPE_NULL:
+  default:
+    abort();
+  }
+}
+
+bool objects_equal(const union object *object0, const union object *object1)
+{
+  if (object0 == NULL) {
+    return object1 == NULL;
+  }
+  char type = object0->type;
+  if (type != object1->type)
+    return false;
+  switch (type) {
+  case TYPE_NONE:
+  case TYPE_TRUE:
+  case TYPE_FALSE:
+    return true;
+
+  case TYPE_STRING:
+  case TYPE_ASCII: {
+    uint32_t len = object0->string.len;
+    if (len != object1->string.len)
+      return false;
+    return memcmp(object0->string.chars, object1->string.chars, len) == 0;
+  }
+
+  default:
     abort();
   }
 }

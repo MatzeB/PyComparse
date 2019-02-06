@@ -11,7 +11,9 @@
 
 #include "bitfiddle.h"
 
+#ifndef UNLIKELY
 #define UNLIKELY(x)    __builtin_expect((x), 0)
+#endif
 
 struct block_header {
   struct block_header *prev;

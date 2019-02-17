@@ -3,12 +3,16 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdnoreturn.h>
 
 #include "adt/arena.h"
 #include "opcodes.h"
 #include "scanner.h"
+#include "symbol_table.h"
 #include "token_kinds.h"
 #include "writer.h"
+
+#include "objects.h"
 
 #define MAX(a,b) \
   ({ typeof (a) _a = (a); \
@@ -45,34 +49,10 @@ enum precedence {
   PREC_PRIMARY,
 };
 
-static void unimplemented(void)
+static noreturn void unimplemented(void)
 {
   fprintf(stderr, "unimplemented\n");
   abort();
-}
-
-static void emit_op(struct parser_state *s, enum opcode opcode,
-                    uint32_t arg)
-{
-  if (arg >= 256) {
-    assert(arg <= 0xffff);
-    arena_grow_char(&s->opcodes, (char)OPCODE_EXTENDED_ARG);
-    arena_grow_char(&s->opcodes, arg >> 8);
-    arg &= 0xff;
-  }
-  arena_grow_char(&s->opcodes, opcode);
-  arena_grow_char(&s->opcodes, arg);
-}
-
-static void push(struct parser_state *s) {
-  s->stacksize++;
-  if (s->stacksize > s->code->stacksize)
-    s->code->stacksize = s->stacksize;
-}
-
-static void pop(struct parser_state *s) {
-  assert(s->stacksize > 0);
-  s->stacksize--;
 }
 
 static inline bool peek(const struct parser_state *s, uint16_t token_kind)
@@ -197,10 +177,10 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
     eat(s, expected_token_kind);
 }
 
-static void parse_subexpression(struct parser_state *s,
-                                enum precedence precedence);
+static union object *parse_subexpression(struct parser_state *s,
+                                         enum precedence precedence);
 
-static void parse_argument(struct parser_state *s)
+static union object *parse_argument(struct parser_state *s)
 {
   switch (s->scanner.token.kind) {
   case '*':
@@ -209,30 +189,42 @@ static void parse_argument(struct parser_state *s)
   case T_ASTERISK_ASTERISK:
     parse_subexpression(s, PREC_TEST);
     unimplemented();
-  default:
-    parse_subexpression(s, PREC_TEST);
+  default: {
+    union object *result = parse_subexpression(s, PREC_TEST);
     if (accept(s, '=')) {
       parse_subexpression(s, PREC_TEST);
+      return result;
+    } else {
+      return result;
     }
+  }
   }
 }
 
-static void parse_call(struct parser_state *s)
+static union object *parse_call(struct parser_state *s, union object *left)
 {
+  struct object_ast_call *call = arena_allocate_type(&s->writer.objects,
+                                                     struct object_ast_call);
+  memset(call, 0, sizeof(*call));
+  call->base.type = TYPE_AST_CALL;
+  call->callee = left;
+  call->arguments = object_new_list(&s->writer.objects);
+
   eat(s, '(');
   add_anchor(s, ')');
   add_anchor(s, ',');
 
   if (!peek(s, ')')) {
     do {
-      parse_argument(s);
+      union object *argument = parse_argument(s);
+      object_list_append(call->arguments, argument);
     } while(accept(s, ',') && !peek(s, ')'));
   }
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
 
-  /* TODO: semantic */
+  return (union object*)call;
 }
 
 #if 0
@@ -247,28 +239,54 @@ static inline void parse_binexpr(struct parser_state *s,
 }
 #endif
 
-static void parse_identifier(struct parser_state *s)
+static union object *parse_identifier(struct parser_state *s)
 {
+  struct symbol *symbol = s->scanner.token.u.symbol;
   eat(s, T_IDENTIFIER);
+
+  uint16_t index = symbol->name_index;
+  if (index == 0) {
+    index = writer_register_name(&s->writer, symbol->string) + 1;
+    symbol->name_index = index;
+  }
+
+  struct object_ast_name *name
+    = arena_allocate_type(&s->writer.objects, struct object_ast_name);
+  name->base.type = TYPE_AST_NAME;
+  name->index = index - 1;
+  return (union object*)name;
 }
 
-static void parse_string(struct parser_state *s)
+static union object *parse_string(struct parser_state *s)
 {
+  const char *chars = s->scanner.token.u.string;
+  uint32_t length = strlen(chars);
+  unsigned index = writer_register_string(&s->writer, chars, length);
   eat(s, T_STRING);
+
+  struct object_ast_const *ast_const
+    = arena_allocate_type(&s->writer.objects, struct object_ast_const);
+  ast_const->base.type = TYPE_AST_CONST;
+  ast_const->index = index;
+  return (union object*)ast_const;
 }
 
-static void parse_atom(struct parser_state *s)
+static union object *parse_atom(struct parser_state *s)
 {
   switch (s->scanner.token.kind) {
-  case T_IDENTIFIER: parse_identifier(s); return;
-  case T_STRING:     parse_string(s); return;
+  case T_IDENTIFIER: return parse_identifier(s);
+  case T_STRING:     return parse_string(s);
+  default:
+    unimplemented();
   }
 }
 
-typedef void (*parser_func)(struct parser_state *s);
+typedef union object *(*prefix_parser_func)(struct parser_state *s);
+typedef union object *(*infix_parser_func)(struct parser_state *s,
+                                           union object *left);
 struct expression_parser {
-  parser_func prefix;
-  parser_func infix;
+  prefix_parser_func prefix;
+  infix_parser_func infix;
   enum precedence precedence;
 };
 
@@ -279,37 +297,67 @@ static const struct expression_parser parsers[] = {
   },
 };
 
-void parse_subexpression(struct parser_state *s, enum precedence precedence)
+union object *parse_subexpression(struct parser_state *s,
+                                  enum precedence precedence)
 {
+  union object *result;
   uint16_t token_kind = s->scanner.token.kind;
-  if (token_kind >= sizeof(parsers) / sizeof(parsers[0])) {
-    parse_atom(s);
+  if (token_kind < sizeof(parsers) / sizeof(parsers[0]) &&
+      parsers[token_kind].prefix != NULL) {
+    prefix_parser_func prefix_parser = parsers[token_kind].prefix;
+    result = prefix_parser(s);
   } else {
-    parser_func prefix_parser = parsers[token_kind].prefix;
-    if (prefix_parser != NULL) {
-      prefix_parser(s);
-    } else {
-      parse_atom(s);
-    }
+    result = parse_atom(s);
   }
 
   for (;;) {
     uint16_t infix_token_kind = s->scanner.token.kind;
     if (infix_token_kind >= sizeof(parsers) / sizeof(parsers[0]))
       break;
-    parser_func infix_parser = parsers[infix_token_kind].infix;
+    infix_parser_func infix_parser = parsers[infix_token_kind].infix;
     if (infix_parser == NULL ||
         parsers[infix_token_kind].precedence < precedence)
       break;
-    infix_parser(s);
+    result = infix_parser(s, result);
+  }
+  return result;
+}
+
+static void emit_expression(struct parser_state *s, union object *expression)
+{
+  switch (expression->type) {
+  case TYPE_AST_CONST:
+    write_push_op(&s->writer, OPCODE_LOAD_CONST, expression->ast_const.index);
+    break;
+  case TYPE_AST_NAME:
+    write_push_op(&s->writer, OPCODE_LOAD_NAME, expression->ast_name.index);
+    break;
+  case TYPE_AST_CALL: {
+    struct object_ast_call *call = &expression->ast_call;
+    emit_expression(s, call->callee);
+    unsigned n_arguments = call->arguments->length;
+    for (unsigned i = 0; i < n_arguments; ++i) {
+      emit_expression(s, call->arguments->items[i]);
+    }
+    write_op(&s->writer, OPCODE_CALL_FUNCTION, n_arguments);
+    writer_pop(&s->writer, n_arguments);
+    write_pop_op(&s->writer, OPCODE_POP_TOP, 0);
+    break;
+  }
+  default:
+    fprintf(stderr, "unexpected expression");
+    abort();
   }
 }
 
 static void parse_expression_statement(struct parser_state *s)
 {
+  assert(s->writer.stacksize == 0);
   do {
     /* TODO: star_expr, etc. */
-    parse_subexpression(s, PREC_TEST);
+    union object *expression = parse_subexpression(s, PREC_TEST);
+    emit_expression(s, expression);
+    assert(s->writer.stacksize == 0);
   } while (accept(s, ';'));
 
   if (peek(s, T_EOF))
@@ -317,87 +365,11 @@ static void parse_expression_statement(struct parser_state *s)
   expect(s, T_NEWLINE);
 }
 
-#if 0
-static struct object_list_or_tuple *allocate_list(struct arena *arena,
-                                                  unsigned n_elements)
-{
-  struct object_list_or_tuple *list;
-  size_t size = sizeof(struct object_list_or_tuple) +
-      n_elements * sizeof(list->elements[0]);
-  list = (struct object_list_or_tuple*)
-      arena_allocate(arena, size, alignof(struct object_list_or_tuple));
-  memset(list, 0, sizeof(*list));
-  list->base.type = TYPE_LIST;
-  list->n_elements = n_elements;
-  return list;
-}
-#endif
-
-static struct object_list_or_tuple *allocate_tuple(struct arena *arena,
-                                                   unsigned n_elements)
-{
-  struct object_list_or_tuple *tuple;
-  size_t size = sizeof(struct object_list_or_tuple) +
-      n_elements * sizeof(tuple->elements[0]);
-  tuple = (struct object_list_or_tuple*)
-      arena_allocate(arena, size, alignof(struct object_list_or_tuple));
-  memset(tuple, 0, sizeof(*tuple));
-  tuple->base.type = TYPE_TUPLE;
-  tuple->n_elements = n_elements;
-  return tuple;
-}
-
-static struct object_code *allocate_code(struct arena *arena)
-{
-  struct object_code *code = arena_allocate_type(arena, struct object_code);
-  memset(code, 0, sizeof(*code));
-  code->base.type = TYPE_CODE;
-
-  return code;
-}
-
-static struct object_base *allocate_singleton(struct arena *arena, char type) {
-  assert(type == TYPE_NONE || type == TYPE_NULL || type == TYPE_TRUE ||
-         type == TYPE_FALSE);
-  struct object_base *object = arena_allocate_type(arena, struct object_base);
-  object->type = type;
-  return object;
-}
-
-static struct object_string *make_bytes_len(struct arena *arena, uint32_t len,
-                                             const char *chars)
-{
-  struct object_string *string =
-      arena_allocate_type(arena, struct object_string);
-  string->base.type = TYPE_STRING;
-  string->len = len;
-  string->chars = chars;
-  return string;
-}
-
-static struct object_string *make_ascii(struct arena *arena, const char *str)
-{
-  struct object_string *string =
-      arena_allocate_type(arena, struct object_string);
-  string->base.type = TYPE_ASCII;
-  string->len = strlen(str);
-  string->chars = str;
-  return string;
-}
-
 void parse(struct parser_state *s)
 {
   next_token(s);
 
   writer_begin(&s->writer, stdout);
-  arena_init(&s->objects);
-  s->code = allocate_code(&s->objects);
-
-  struct object_list_or_tuple *consts = allocate_tuple(&s->objects, 1);
-  consts->elements[0] = (union object*)allocate_singleton(&s->objects, TYPE_NONE);
-
-  arena_init(&s->opcodes);
-  arena_grow_begin(&s->opcodes, 4);
 
   add_anchor(s, T_EOF);
   struct token *t = &s->scanner.token;
@@ -430,29 +402,7 @@ void parse(struct parser_state *s)
   }
 #endif
 
-  if (!s->had_return) {
-    emit_op(s, OPCODE_LOAD_CONST, 0);
-    push(s);
-    emit_op(s, OPCODE_RETURN_VALUE, 0);
-    pop(s);
-  }
-
-  assert(s->stacksize == 0);
-
-  uint32_t len = arena_grow_current_size(&s->opcodes);
-  char *opcodes = arena_grow_finish(&s->opcodes);
-  s->code->code = (union object*)make_bytes_len(&s->objects, len, opcodes);
-  s->code->consts = (union object*)consts;
-  s->code->names = (union object*)allocate_tuple(&s->objects, 0);
-  s->code->varnames = (union object*)allocate_tuple(&s->objects, 0);
-  s->code->freevars = (union object*)allocate_tuple(&s->objects, 0);
-  s->code->cellvars = (union object*)allocate_tuple(&s->objects, 0);
-  s->code->filename = (union object*)make_ascii(&s->objects, "simple.py");
-  s->code->name = (union object*)make_ascii(&s->objects, "<module>");
-  s->code->lnotab = (union object*)make_bytes_len(&s->objects, 0, NULL);
-
-  write(&s->writer, (const union object*)s->code);
-  fflush(stdout);
+  writer_finish(&s->writer);
 }
 
 void parser_init(struct parser_state *s)

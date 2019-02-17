@@ -5,76 +5,45 @@
 #include <stdio.h>
 #include <stdint.h>
 
-struct bytecode_writer_state {
-  FILE *out;
-};
+#include "adt/arena.h"
 
-enum object_type {
-  TYPE_NULL    = '0',
-  TYPE_NONE    = 'N',
-  TYPE_TRUE    = 'T',
-  TYPE_FALSE   = 'F',
-  TYPE_STRING  = 's',
-  TYPE_UNICODE = 'u',
-  TYPE_CODE    = 'c',
-  TYPE_TUPLE   = '(',
-  TYPE_LIST    = '[',
-
-  TYPE_ASCII   = 'a',
-
-  TYPE_SHORT_ASCII = 'z',
-  TYPE_SMALL_TUPLE = ')',
-};
-
+struct object_list;
 union object;
 
-struct object_base {
-  char type;
-};
+struct bytecode_writer_state {
+  FILE *out;
 
-struct object_string {
-  struct object_base base;
-  uint32_t len;
-  const char *chars;
-};
-
-struct object_list_or_tuple {
-  struct object_base base;
-  uint32_t n_elements;
-  union object *elements[];
-};
-
-struct object_code {
-  struct object_base base;
-  uint32_t argcount;
-  uint32_t kwonlyargcount;
-  uint32_t nlocals;
-  uint32_t stacksize;
-  uint32_t flags;
-  uint32_t firstlineno;
-  union object *code;
-  union object *consts;
-  union object *names;
-  union object *varnames;
-  union object *freevars;
-  union object *cellvars;
-  union object *filename;
-  union object *name;
-  union object *lnotab;
-};
-
-union object {
-  char                        type;
-  struct object_base          base;
-  struct object_list_or_tuple list_or_tuple;
-  struct object_string        string;
-  struct object_code          code;
+  struct arena objects;
+  struct arena opcodes;
+  bool had_return;
+  unsigned stacksize;
+  unsigned max_stacksize;
+  struct object_list *consts;
+  struct object_list *names;
 };
 
 void writer_begin(struct bytecode_writer_state *s, FILE *out);
 
+void writer_finish(struct bytecode_writer_state *s);
+
 void write(struct bytecode_writer_state *s, const union object *object);
 
-bool objects_equal(const union object *object0, const union object *object1);
+void write_op(struct bytecode_writer_state *s, uint8_t opcoode, uint32_t arg);
+
+void write_push_op(struct bytecode_writer_state *s, uint8_t opcode,
+                   uint32_t arg);
+
+void writer_pop(struct bytecode_writer_state *s, unsigned n);
+
+void write_pop_op(struct bytecode_writer_state *s, uint8_t opcode,
+                  uint32_t arg);
+
+unsigned writer_register_name(struct bytecode_writer_state *s,
+                              const char *name);
+
+unsigned writer_register_string(struct bytecode_writer_state *s,
+                                const char *chars, uint32_t length);
+
+unsigned writer_register_singleton(struct bytecode_writer_state *s, char type);
 
 #endif

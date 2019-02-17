@@ -26,6 +26,7 @@ static struct symbol *symbol_table_new_symbol(struct symbol_table *symbol_table,
                                          alignof(struct symbol));
   symbol->string     = string;
   symbol->token_kind = token_kind;
+  symbol->name_index = 0;
   return symbol;
 }
 

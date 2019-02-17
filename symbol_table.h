@@ -10,6 +10,7 @@ struct arena;
 struct symbol {
   const char *string;
   uint16_t    token_kind;
+  uint16_t    name_index;
 };
 
 struct symbol_table {

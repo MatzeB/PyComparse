@@ -228,6 +228,40 @@ static union object *parse_call(struct parser_state *s, union object *left)
   return (union object*)call;
 }
 
+static inline union object *parse_unexpr(struct parser_state *s,
+                                         enum precedence prec_op,
+                                         char ast_object_type)
+{
+  next_token(s);
+  union object *op = parse_subexpression(s, prec_op);
+
+  struct object_ast_unexpr *result
+    = arena_allocate_type(&s->writer.objects, struct object_ast_unexpr);
+  result->base.type = ast_object_type;
+  result->op = op;
+  return (union object*)result;
+}
+
+static union object *parse_plus(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_FACTOR, TYPE_AST_UNEXPR_PLUS);
+}
+
+static union object *parse_negative(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_FACTOR, TYPE_AST_UNEXPR_NEGATIVE);
+}
+
+static union object *parse_invert(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_FACTOR, TYPE_AST_UNEXPR_INVERT);
+}
+
+static union object *parse_not(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_LOGICAL_NOT, TYPE_AST_UNEXPR_NOT);
+}
+
 static inline union object *parse_binexpr(struct parser_state *s,
                                           enum precedence prec_right,
                                           char ast_object_type,
@@ -244,6 +278,11 @@ static inline union object *parse_binexpr(struct parser_state *s,
   return (union object*)result;
 }
 
+static union object *parse_matmul(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_TERM, TYPE_AST_BINEXPR_MATMUL, left);
+}
+
 static union object *parse_add(struct parser_state *s, union object *left)
 {
   return parse_binexpr(s, PREC_ARITH, TYPE_AST_BINEXPR_ADD, left);
@@ -251,8 +290,44 @@ static union object *parse_add(struct parser_state *s, union object *left)
 
 static union object *parse_mul(struct parser_state *s, union object *left)
 {
-  return parse_binexpr(s, PREC_FACTOR, TYPE_AST_BINEXPR_MUL, left);
+  return parse_binexpr(s, PREC_TERM, TYPE_AST_BINEXPR_MUL, left);
 }
+
+static union object *parse_sub(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_ARITH, TYPE_AST_BINEXPR_SUB, left);
+}
+
+static union object *parse_floor_div(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_TERM, TYPE_AST_BINEXPR_FLOORDIV, left);
+}
+
+static union object *parse_true_div(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_TERM, TYPE_AST_BINEXPR_TRUEDIV, left);
+}
+
+typedef union object *(*prefix_parser_func)(struct parser_state *s);
+typedef union object *(*infix_parser_func)(struct parser_state *s,
+                                           union object *left);
+struct expression_parser {
+  prefix_parser_func prefix;
+  infix_parser_func infix;
+  enum precedence precedence;
+};
+
+static const struct expression_parser parsers[] = {
+  ['(']           = { .infix = parse_call,      .precedence = PREC_POSTFIX, },
+  ['+']           = { .prefix = parse_plus, .infix = parse_add, .precedence = PREC_ARITH,   },
+  ['*']           = { .infix = parse_mul,       .precedence = PREC_TERM,    },
+  ['@']           = { .infix = parse_matmul,    .precedence = PREC_TERM,    },
+  ['-']           = { .prefix = parse_negative, .infix = parse_sub,       .precedence = PREC_ARITH,   },
+  ['/']           = { .infix = parse_true_div,  .precedence = PREC_TERM,    },
+  [T_SLASH_SLASH] = { .infix = parse_floor_div, .precedence = PREC_TERM,    },
+  [T_NOT]         = { .prefix = parse_not,    },
+  ['~']           = { .prefix = parse_invert, },
+};
 
 static union object *parse_identifier(struct parser_state *s)
 {
@@ -319,30 +394,6 @@ static union object *parse_atom(struct parser_state *s)
   }
 }
 
-typedef union object *(*prefix_parser_func)(struct parser_state *s);
-typedef union object *(*infix_parser_func)(struct parser_state *s,
-                                           union object *left);
-struct expression_parser {
-  prefix_parser_func prefix;
-  infix_parser_func infix;
-  enum precedence precedence;
-};
-
-static const struct expression_parser parsers[] = {
-  ['('] = {
-    .infix      = parse_call,
-    .precedence = PREC_POSTFIX,
-  },
-  ['+'] = {
-    .infix      = parse_add,
-    .precedence = PREC_ARITH,
-  },
-  ['*'] = {
-    .infix      = parse_mul,
-    .precedence = PREC_TERM,
-  },
-};
-
 union object *parse_subexpression(struct parser_state *s,
                                   enum precedence precedence)
 {
@@ -379,6 +430,13 @@ static void emit_binexpr(struct parser_state *s,
   write_pop_op(&s->writer, opcode, 0);
 }
 
+static void emit_unexpr(struct parser_state *s,
+                        struct object_ast_unexpr *unexpr, int opcode)
+{
+  emit_expression(s, unexpr->op);
+  write_op(&s->writer, opcode, 0);
+}
+
 static void emit_expression(struct parser_state *s, union object *expression)
 {
   switch (expression->type) {
@@ -391,8 +449,32 @@ static void emit_expression(struct parser_state *s, union object *expression)
   case TYPE_AST_BINEXPR_ADD:
     emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_ADD);
     break;
+  case TYPE_AST_BINEXPR_FLOORDIV:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_FLOOR_DIVIDE);
+    break;
+  case TYPE_AST_BINEXPR_TRUEDIV:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_TRUE_DIVIDE);
+    break;
+  case TYPE_AST_BINEXPR_MATMUL:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_MATRIX_MULTIPLY);
+    break;
+  case TYPE_AST_BINEXPR_SUB:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_SUBTRACT);
+    break;
   case TYPE_AST_BINEXPR_MUL:
     emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_MULTIPLY);
+    break;
+  case TYPE_AST_UNEXPR_PLUS:
+    emit_unexpr(s, &expression->ast_unexpr, OPCODE_UNARY_POSITIVE);
+    break;
+  case TYPE_AST_UNEXPR_NEGATIVE:
+    emit_unexpr(s, &expression->ast_unexpr, OPCODE_UNARY_NEGATIVE);
+    break;
+  case TYPE_AST_UNEXPR_NOT:
+    emit_unexpr(s, &expression->ast_unexpr, OPCODE_UNARY_NOT);
+    break;
+  case TYPE_AST_UNEXPR_INVERT:
+    emit_unexpr(s, &expression->ast_unexpr, OPCODE_UNARY_INVERT);
     break;
   case TYPE_AST_CALL: {
     struct object_ast_call *call = &expression->ast_call;

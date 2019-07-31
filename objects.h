@@ -21,10 +21,18 @@ enum object_type {
   TYPE_SMALL_TUPLE = ')',
 
   TYPE_AST_CALL = -100,
-  TYPE_AST_NAME,
-  TYPE_AST_CONST,
   TYPE_AST_BINEXPR_ADD,
+  TYPE_AST_BINEXPR_FLOORDIV,
+  TYPE_AST_BINEXPR_MATMUL,
   TYPE_AST_BINEXPR_MUL,
+  TYPE_AST_BINEXPR_SUB,
+  TYPE_AST_BINEXPR_TRUEDIV,
+  TYPE_AST_CONST,
+  TYPE_AST_NAME,
+  TYPE_AST_UNEXPR_INVERT,
+  TYPE_AST_UNEXPR_NEGATIVE,
+  TYPE_AST_UNEXPR_NOT,
+  TYPE_AST_UNEXPR_PLUS,
 };
 
 union object;
@@ -98,6 +106,11 @@ struct object_ast_binexpr {
   union object       *right;
 };
 
+struct object_ast_unexpr {
+  struct object_base base;
+  union object       *op;
+};
+
 union object {
   char               type;
   struct object_base base;
@@ -106,6 +119,7 @@ union object {
   struct object_ast_call    ast_call;
   struct object_ast_const   ast_const;
   struct object_ast_name    ast_name;
+  struct object_ast_unexpr  ast_unexpr;
   struct object_code        code;
   struct object_int         int_obj;
   struct object_list        list;

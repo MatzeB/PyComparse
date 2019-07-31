@@ -172,6 +172,87 @@ static void scan_identifier(struct scanner_state *s, char first_char)
   s->token.u.symbol = symbol;
 }
 
+static void scan_hexinteger(struct scanner_state *s, struct arena* arena) {
+  (void)s;
+  (void)arena;
+  abort();
+}
+
+static void scan_octinteger(struct scanner_state *s, struct arena* arena) {
+  (void)s;
+  (void)arena;
+  abort();
+}
+
+static void scan_bininteger(struct scanner_state *s, struct arena* arena) {
+  (void)s;
+  (void)arena;
+  abort();
+}
+
+static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena) {
+  for (;;) {
+    switch (s->c) {
+    case '0':
+    case '_':
+      break;
+    default:
+      return;
+    }
+    arena_grow_char(arena, s->c);
+    next_char(s);
+  }
+}
+
+static void scan_decinteger(struct scanner_state *s, struct arena *arena) {
+  for (;;) {
+    next_char(s);
+    switch (s->c) {
+    case DIGIT_CASES:
+    case '_':
+      break;
+    default:
+      return;
+    }
+    arena_grow_char(arena, s->c);
+  }
+}
+
+static void scan_number(struct scanner_state *s)
+{
+  struct arena *arena = s->strings;
+  arena_grow_begin(arena, alignof(char));
+  arena_grow_char(arena, s->c);
+  if (s->c == '0') {
+    next_char(s);
+    switch (s->c) {
+    case 'x':
+    case 'X':
+      scan_hexinteger(s, arena);
+      break;
+    case 'b':
+      scan_bininteger(s, arena);
+      break;
+    case 'o':
+      scan_octinteger(s, arena);
+      break;
+    default:
+      scan_decinteger_zero(s, arena);
+      break;
+    }
+  } else {
+    scan_decinteger(s, arena);
+  }
+
+  if (s->c == '.' || s->c == 'e') {
+    abort();
+  }
+
+  arena_grow_char(arena, '\0');
+  s->token.u.string = (char*)arena_grow_finish(arena);
+  s->token.kind = T_INTEGER;
+}
+
 static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
 {
   assert(s->c == '"' || s->c == '\'');
@@ -381,6 +462,11 @@ void scanner_next_token(struct scanner_state *s)
       char first_char = s->c;
       next_char(s);
       scan_identifier(s, first_char);
+      return;
+    }
+
+    case DIGIT_CASES: {
+      scan_number(s);
       return;
     }
 
@@ -727,6 +813,9 @@ void print_token(FILE *out, const struct token *token)
 string:
     fprintf(out, "\"%s\"\n", token->u.string);
     break;
+  case T_INTEGER:
+    fprintf(out, "integer %s\n", token->u.string);
+    break;
   case T_IDENTIFIER:
     fprintf(out, "identifier %s\n", token->u.symbol->string);
     break;
@@ -734,4 +823,10 @@ string:
     fprintf(out, "%s\n", token_kind_name(token->kind));
     break;
   }
+}
+
+__attribute__((used)) void dump_token(const struct token *token);
+__attribute__((used)) void dump_token(const struct token *token)
+{
+  print_token(stderr, token);
 }

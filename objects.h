@@ -15,6 +15,7 @@ enum object_type {
   TYPE_LIST    = '[',
 
   TYPE_ASCII   = 'a',
+  TYPE_INT     = 'i',
 
   TYPE_SHORT_ASCII = 'z',
   TYPE_SMALL_TUPLE = ')',
@@ -47,6 +48,11 @@ struct object_tuple {
   struct object_base base;
   uint32_t length;
   union object *items[];
+};
+
+struct object_int {
+  struct object_base base;
+  int32_t value;
 };
 
 struct object_code {
@@ -87,13 +93,15 @@ struct object_ast_call {
 union object {
   char                    type;
   struct object_base      base;
-  struct object_list      list;
-  struct object_tuple     tuple;
-  struct object_string    string;
-  struct object_code      code;
-  struct object_ast_name  ast_name;
-  struct object_ast_const ast_const;
+
   struct object_ast_call  ast_call;
+  struct object_ast_const ast_const;
+  struct object_ast_name  ast_name;
+  struct object_code      code;
+  struct object_int       int_obj;
+  struct object_list      list;
+  struct object_string    string;
+  struct object_tuple     tuple;
 };
 
 bool objects_equal(const union object *object0, const union object *object1);

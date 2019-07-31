@@ -44,6 +44,8 @@ unsigned writer_register_name(struct bytecode_writer_state *s,
 unsigned writer_register_string(struct bytecode_writer_state *s,
                                 const char *chars, uint32_t length);
 
+unsigned writer_register_int(struct bytecode_writer_state *s, int32_t value);
+
 unsigned writer_register_singleton(struct bytecode_writer_state *s, char type);
 
 #endif

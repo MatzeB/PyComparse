@@ -95,6 +95,13 @@ static void write_string(struct bytecode_writer_state *s,
     write_uint8(s, string->chars[i]);
 }
 
+static void write_int(struct bytecode_writer_state *s,
+                      const struct object_int *obj_int)
+{
+  write_uint8(s, TYPE_INT);
+  write_uint32(s, (uint32_t)obj_int->value);
+}
+
 static void write_code(struct bytecode_writer_state *s,
                        const struct object_code *code)
 {
@@ -142,6 +149,9 @@ void write(struct bytecode_writer_state *s, const union object *object)
   case TYPE_ASCII:
   case TYPE_STRING:
     write_string(s, &object->string);
+    break;
+  case TYPE_INT:
+    write_int(s, &object->int_obj);
     break;
   case TYPE_NULL:
   default:
@@ -234,12 +244,20 @@ static struct object_base *object_new_singleton(struct arena *arena,
 static struct object_string *make_string(struct arena *arena, char type,
                                          uint32_t length, const char *chars)
 {
-  struct object_string *string =
+  struct object_string *result =
       arena_allocate_type(arena, struct object_string);
-  string->base.type = type;
-  string->length = length;
-  string->chars = chars;
-  return string;
+  result->base.type = type;
+  result->length = length;
+  result->chars = chars;
+  return result;
+}
+
+static struct object_int *make_int(struct arena *arena, int32_t value)
+{
+  struct object_int *result = arena_allocate_type(arena, struct object_int);
+  result->base.type = TYPE_INT;
+  result->value = value;
+  return result;
 }
 
 static struct object_string *make_bytes(struct arena *arena, uint32_t length,
@@ -320,7 +338,22 @@ unsigned writer_register_string(struct bytecode_writer_state *s,
   struct object_string *string = make_string(&s->objects, TYPE_ASCII,
                                              length, chars);
   object_list_append(s->consts, (union object*)string);
-  return s->names->length - 1;
+  return s->consts->length - 1;
+}
+
+unsigned writer_register_int(struct bytecode_writer_state *s, int32_t value)
+{
+  for (unsigned i = 0; i < s->consts->length; ++i) {
+    const union object *object = s->consts->items[i];
+    if (object->type != TYPE_INT)
+      continue;
+    const struct object_int *int_obj = &object->int_obj;
+    if (int_obj->value == value)
+      return i;
+  }
+  struct object_int *int_obj = make_int(&s->objects, value);
+  object_list_append(s->consts, (union object*)int_obj);
+  return s->consts->length - 1;
 }
 
 unsigned writer_register_name(struct bytecode_writer_state *s,

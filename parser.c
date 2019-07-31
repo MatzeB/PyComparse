@@ -1,9 +1,10 @@
 #include "parser.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdnoreturn.h>
+#include <string.h>
 
 #include "adt/arena.h"
 #include "opcodes.h"
@@ -271,11 +272,34 @@ static union object *parse_string(struct parser_state *s)
   return (union object*)ast_const;
 }
 
+static union object *parse_integer(struct parser_state *s)
+{
+  const char *string = s->scanner.token.u.string;
+  char *endptr;
+  errno = 0;
+  unsigned long value = strtoul(string, &endptr, 0);
+  assert(endptr != NULL);
+  assert(*endptr == '\0');
+  if (value == 0) {
+    assert(errno == 0);
+  }
+  assert(value <= INT32_MAX);
+  unsigned index = writer_register_int(&s->writer, (int32_t)value);
+  eat(s, T_INTEGER);
+
+  struct object_ast_const *ast_const
+    = arena_allocate_type(&s->writer.objects, struct object_ast_const);
+  ast_const->base.type = TYPE_AST_CONST;
+  ast_const->index = index;
+  return (union object*)ast_const;
+}
+
 static union object *parse_atom(struct parser_state *s)
 {
   switch (s->scanner.token.kind) {
   case T_IDENTIFIER: return parse_identifier(s);
   case T_STRING:     return parse_string(s);
+  case T_INTEGER:    return parse_integer(s);
   default:
     unimplemented();
   }
@@ -358,7 +382,7 @@ static void parse_expression_statement(struct parser_state *s)
     union object *expression = parse_subexpression(s, PREC_TEST);
     emit_expression(s, expression);
     assert(s->writer.stacksize == 0);
-  } while (accept(s, ';'));
+  } while(accept(s, ';') && !peek(s, T_NEWLINE) && !peek(s, T_EOF));
 
   if (peek(s, T_EOF))
     return;

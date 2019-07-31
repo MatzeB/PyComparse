@@ -228,17 +228,31 @@ static union object *parse_call(struct parser_state *s, union object *left)
   return (union object*)call;
 }
 
-#if 0
-static inline void parse_binexpr(struct parser_state *s,
-                                 uint16_t token_kind,
-                                 enum precedence prec_right)
+static inline union object *parse_binexpr(struct parser_state *s,
+                                          enum precedence prec_right,
+                                          char ast_object_type,
+                                          union object *left)
 {
-  eat(s, token_kind);
-  parse_subexpression(s, prec_right);
+  next_token(s);
+  union object *right = parse_subexpression(s, prec_right);
 
-  // TODO: Semantic
+  struct object_ast_binexpr *result
+    = arena_allocate_type(&s->writer.objects, struct object_ast_binexpr);
+  result->base.type = ast_object_type;
+  result->left = left;
+  result->right = right;
+  return (union object*)result;
 }
-#endif
+
+static union object *parse_add(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_ARITH, TYPE_AST_BINEXPR_ADD, left);
+}
+
+static union object *parse_mul(struct parser_state *s, union object *left)
+{
+  return parse_binexpr(s, PREC_FACTOR, TYPE_AST_BINEXPR_MUL, left);
+}
 
 static union object *parse_identifier(struct parser_state *s)
 {
@@ -319,6 +333,14 @@ static const struct expression_parser parsers[] = {
     .infix      = parse_call,
     .precedence = PREC_POSTFIX,
   },
+  ['+'] = {
+    .infix      = parse_add,
+    .precedence = PREC_ARITH,
+  },
+  ['*'] = {
+    .infix      = parse_mul,
+    .precedence = PREC_TERM,
+  },
 };
 
 union object *parse_subexpression(struct parser_state *s,
@@ -347,6 +369,16 @@ union object *parse_subexpression(struct parser_state *s,
   return result;
 }
 
+static void emit_expression(struct parser_state *s, union object *expression);
+
+static void emit_binexpr(struct parser_state *s,
+                         struct object_ast_binexpr *binexpr, int opcode)
+{
+  emit_expression(s, binexpr->left);
+  emit_expression(s, binexpr->right);
+  write_pop_op(&s->writer, opcode, 0);
+}
+
 static void emit_expression(struct parser_state *s, union object *expression)
 {
   switch (expression->type) {
@@ -355,6 +387,12 @@ static void emit_expression(struct parser_state *s, union object *expression)
     break;
   case TYPE_AST_NAME:
     write_push_op(&s->writer, OPCODE_LOAD_NAME, expression->ast_name.index);
+    break;
+  case TYPE_AST_BINEXPR_ADD:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_ADD);
+    break;
+  case TYPE_AST_BINEXPR_MUL:
+    emit_binexpr(s, &expression->ast_binexpr, OPCODE_BINARY_MULTIPLY);
     break;
   case TYPE_AST_CALL: {
     struct object_ast_call *call = &expression->ast_call;

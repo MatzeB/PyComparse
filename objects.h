@@ -20,9 +20,11 @@ enum object_type {
   TYPE_SHORT_ASCII = 'z',
   TYPE_SMALL_TUPLE = ')',
 
-  TYPE_AST_CALL = -1,
+  TYPE_AST_CALL = -100,
   TYPE_AST_NAME,
   TYPE_AST_CONST,
+  TYPE_AST_BINEXPR_ADD,
+  TYPE_AST_BINEXPR_MUL,
 };
 
 union object;
@@ -90,18 +92,25 @@ struct object_ast_call {
   struct object_list *arguments;
 };
 
-union object {
-  char                    type;
-  struct object_base      base;
+struct object_ast_binexpr {
+  struct object_base base;
+  union object       *left;
+  union object       *right;
+};
 
-  struct object_ast_call  ast_call;
-  struct object_ast_const ast_const;
-  struct object_ast_name  ast_name;
-  struct object_code      code;
-  struct object_int       int_obj;
-  struct object_list      list;
-  struct object_string    string;
-  struct object_tuple     tuple;
+union object {
+  char               type;
+  struct object_base base;
+
+  struct object_ast_binexpr ast_binexpr;
+  struct object_ast_call    ast_call;
+  struct object_ast_const   ast_const;
+  struct object_ast_name    ast_name;
+  struct object_code        code;
+  struct object_int         int_obj;
+  struct object_list        list;
+  struct object_string      string;
+  struct object_tuple       tuple;
 };
 
 bool objects_equal(const union object *object0, const union object *object1);

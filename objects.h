@@ -4,15 +4,16 @@
 struct arena;
 
 enum object_type {
-  TYPE_NULL    = '0',
-  TYPE_NONE    = 'N',
-  TYPE_TRUE    = 'T',
-  TYPE_FALSE   = 'F',
-  TYPE_STRING  = 's',
-  TYPE_UNICODE = 'u',
-  TYPE_CODE    = 'c',
-  TYPE_TUPLE   = '(',
-  TYPE_LIST    = '[',
+  TYPE_NULL     = '0',
+  TYPE_NONE     = 'N',
+  TYPE_TRUE     = 'T',
+  TYPE_FALSE    = 'F',
+  TYPE_STRING   = 's',
+  TYPE_UNICODE  = 'u',
+  TYPE_CODE     = 'c',
+  TYPE_TUPLE    = '(',
+  TYPE_LIST     = '[',
+  TYPE_ELLIPSIS = '.',
 
   TYPE_ASCII   = 'a',
   TYPE_INT     = 'i',

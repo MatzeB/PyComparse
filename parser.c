@@ -383,12 +383,28 @@ static union object *parse_integer(struct parser_state *s)
   return (union object*)ast_const;
 }
 
+static union object *parse_singleton(struct parser_state *s, char type)
+{
+  next_token(s);
+  unsigned index = writer_register_singleton(&s->writer, type);
+
+  struct object_ast_const *ast_const
+    = arena_allocate_type(&s->writer.objects, struct object_ast_const);
+  ast_const->base.type = TYPE_AST_CONST;
+  ast_const->index = index;
+  return (union object*)ast_const;
+}
+
 static union object *parse_atom(struct parser_state *s)
 {
   switch (s->scanner.token.kind) {
-  case T_IDENTIFIER: return parse_identifier(s);
-  case T_STRING:     return parse_string(s);
-  case T_INTEGER:    return parse_integer(s);
+  case T_IDENTIFIER:  return parse_identifier(s);
+  case T_STRING:      return parse_string(s);
+  case T_INTEGER:     return parse_integer(s);
+  case T_TRUE:        return parse_singleton(s, TYPE_TRUE);
+  case T_FALSE:       return parse_singleton(s, TYPE_FALSE);
+  case T_NONE:        return parse_singleton(s, TYPE_NONE);
+  case T_DOT_DOT_DOT: return parse_singleton(s, TYPE_ELLIPSIS);
   default:
     unimplemented();
   }

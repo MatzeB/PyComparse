@@ -135,6 +135,7 @@ void write(struct bytecode_writer_state *s, const union object *object)
   case TYPE_NONE:
   case TYPE_TRUE:
   case TYPE_FALSE:
+  case TYPE_ELLIPSIS:
     write_uint8(s, object->type);
     break;
   case TYPE_LIST:
@@ -230,7 +231,8 @@ static struct object_code *object_new_code(struct arena *arena)
 }
 
 static bool is_singleton_type(char type) {
-  return type == TYPE_NONE || type == TYPE_TRUE || type == TYPE_FALSE;
+  return type == TYPE_NONE || type == TYPE_TRUE || type == TYPE_FALSE
+    || type == TYPE_ELLIPSIS;
 }
 
 static struct object_base *object_new_singleton(struct arena *arena,

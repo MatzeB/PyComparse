@@ -2,4 +2,6 @@
 print("hello")
 print(20 / 3)
 print(not 4 - 4)
+print(...)
+print(False)
 print("Look: " + "Na" * 16 + "  Batman!")

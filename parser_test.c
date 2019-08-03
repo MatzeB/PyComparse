@@ -24,7 +24,8 @@ int main(int argc, char **argv)
   parser_init(&s);
   scanner_init(&s.scanner, input, &symbol_table, &strings);
 
-  parse(&s);
+  struct object_code *code = parse(&s);
+  write(stdout, (union object*)code);
 
   if (input != stdin) {
     fclose(input);

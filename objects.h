@@ -1,6 +1,9 @@
 #ifndef OBJECTS_H
 #define OBJECTS_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 struct arena;
 
 enum object_type {
@@ -20,20 +23,6 @@ enum object_type {
 
   TYPE_SHORT_ASCII = 'z',
   TYPE_SMALL_TUPLE = ')',
-
-  TYPE_AST_CALL = -100,
-  TYPE_AST_BINEXPR_ADD,
-  TYPE_AST_BINEXPR_FLOORDIV,
-  TYPE_AST_BINEXPR_MATMUL,
-  TYPE_AST_BINEXPR_MUL,
-  TYPE_AST_BINEXPR_SUB,
-  TYPE_AST_BINEXPR_TRUEDIV,
-  TYPE_AST_CONST,
-  TYPE_AST_NAME,
-  TYPE_AST_UNEXPR_INVERT,
-  TYPE_AST_UNEXPR_NEGATIVE,
-  TYPE_AST_UNEXPR_NOT,
-  TYPE_AST_UNEXPR_PLUS,
 };
 
 union object;
@@ -85,53 +74,32 @@ struct object_code {
   union object *lnotab;
 };
 
-struct object_ast_name {
-  struct object_base base;
-  uint16_t index;
-};
-
-struct object_ast_const {
-  struct object_base base;
-  uint16_t index;
-};
-
-struct object_ast_call {
-  struct object_base base;
-  union object       *callee;
-  struct object_list *arguments;
-};
-
-struct object_ast_binexpr {
-  struct object_base base;
-  union object       *left;
-  union object       *right;
-};
-
-struct object_ast_unexpr {
-  struct object_base base;
-  union object       *op;
-};
-
 union object {
   char               type;
   struct object_base base;
 
-  struct object_ast_binexpr ast_binexpr;
-  struct object_ast_call    ast_call;
-  struct object_ast_const   ast_const;
-  struct object_ast_name    ast_name;
-  struct object_ast_unexpr  ast_unexpr;
-  struct object_code        code;
-  struct object_int         int_obj;
-  struct object_list        list;
-  struct object_string      string;
-  struct object_tuple       tuple;
+  struct object_code   code;
+  struct object_int    int_obj;
+  struct object_list   list;
+  struct object_string string;
+  struct object_tuple  tuple;
 };
 
-bool objects_equal(const union object *object0, const union object *object1);
+struct object_base *object_new_singleton(struct arena *arena, char type);
+struct object_code *object_new_code(struct arena *arena);
+struct object_list *object_new_list(struct arena *arena);
+struct object_tuple *object_new_tuple(struct arena *arena, uint32_t length);
+struct object_string *make_string(struct arena *arena, char type,
+                                  uint32_t length, const char *chars);
+struct object_int *make_int(struct arena *arena, int32_t value);
+struct object_string *make_bytes(struct arena *arena, uint32_t length,
+                                 const char *chars);
+struct object_string *make_ascii(struct arena *arena, const char *str);
 
 void object_list_append(struct object_list *list, union object *object);
 
-struct object_list *object_new_list(struct arena *arena);
+bool object_type_is_singleton(char type);
+
+bool objects_equal(const union object *object0, const union object *object1);
 
 #endif

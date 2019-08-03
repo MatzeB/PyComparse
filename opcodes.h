@@ -120,3 +120,33 @@ enum opcode {
   OPCODE_LOAD_METHOD                  = 160,
   OPCODE_CALL_METHOD                  = 161,
 };
+
+static inline bool is_absjump(uint32_t opcode) {
+  switch (opcode) {
+  case OPCODE_JUMP_ABSOLUTE:
+  case OPCODE_JUMP_IF_FALSE_OR_POP:
+  case OPCODE_JUMP_IF_TRUE_OR_POP:
+  case OPCODE_POP_JUMP_IF_FALSE:
+  case OPCODE_POP_JUMP_IF_TRUE:
+    return true;
+  }
+  return false;
+}
+
+static inline bool is_jump(uint8_t opcode) {
+  switch (opcode) {
+  case OPCODE_FOR_ITER:
+  case OPCODE_JUMP_ABSOLUTE:
+  case OPCODE_JUMP_FORWARD:
+  case OPCODE_JUMP_IF_FALSE_OR_POP:
+  case OPCODE_JUMP_IF_TRUE_OR_POP:
+  case OPCODE_POP_JUMP_IF_FALSE:
+  case OPCODE_POP_JUMP_IF_TRUE:
+  case OPCODE_SETUP_EXCEPT:
+  case OPCODE_SETUP_FINALLY:
+  case OPCODE_SETUP_LOOP:
+  case OPCODE_SETUP_WITH:
+    return true;
+  }
+  return false;
+}

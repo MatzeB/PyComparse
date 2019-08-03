@@ -1,6 +1,6 @@
 CFLAGS += -I.
 CFLAGS += -O0 -g -std=c11
-CFLAGS += -Wall -Wextra -Wmissing-prototypes
+CFLAGS += -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant
 
 .PHONY: all
 all: scanner_test parser_test

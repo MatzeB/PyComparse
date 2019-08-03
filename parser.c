@@ -56,6 +56,13 @@ static noreturn void unimplemented(void)
   abort();
 }
 
+static void parse_error_expected(struct parser_state *s, const char *what)
+{
+  fprintf(stderr, "error: expected %s, got ", what);
+  print_token(stderr, &s->scanner.token);
+  fputc('\n', stderr);
+}
+
 static inline bool peek(const struct parser_state *s, uint16_t token_kind)
 {
   return s->scanner.token.kind == token_kind;
@@ -512,12 +519,12 @@ static void emit_expression(struct parser_state *s, union object *expression)
 
 static void parse_expression_statement(struct parser_state *s)
 {
-  assert(s->writer.stacksize == 0);
+  assert(s->writer.code.stacksize == 0);
   do {
     /* TODO: star_expr, etc. */
     union object *expression = parse_subexpression(s, PREC_TEST);
     emit_expression(s, expression);
-    assert(s->writer.stacksize == 0);
+    assert(s->writer.code.stacksize == 0);
   } while(accept(s, ';') && !peek(s, T_NEWLINE) && !peek(s, T_EOF));
 
   if (peek(s, T_EOF))
@@ -525,31 +532,96 @@ static void parse_expression_statement(struct parser_state *s)
   expect(s, T_NEWLINE);
 }
 
+static void parse_small_statement(struct parser_state *s)
+{
+  switch (s->scanner.token.kind) {
+  case EXPRESSION_START_CASES:
+    parse_expression_statement(s);
+    break;
+  case T_PASS:
+    eat(s, T_PASS);
+    break;
+  /* TODO: del, break, continue, return, raise, yield,
+   * import, global, nonlocal, assert */
+  default:
+    parse_error_expected(s, "simple statement");
+    unimplemented(); /* recovery */
+  }
+}
+
+static void parse_simple_statement(struct parser_state *s)
+{
+  do {
+    parse_small_statement(s);
+  } while (accept(s, ';') && !peek(s, T_NEWLINE));
+  expect(s, T_NEWLINE);
+}
+
+static void parse_if(struct parser_state *s);
+
+static void parse_statement(struct parser_state *s) {
+  switch (s->scanner.token.kind) {
+  case EXPRESSION_START_CASES:
+    parse_expression_statement(s);
+    return;
+  case T_IF:
+    parse_if(s);
+    return;
+  case T_EOF:
+    return;
+  default:
+    parse_error_expected(s, "statement");
+    unimplemented(); /* recovery */
+  }
+}
+
+static void parse_suite(struct parser_state *s)
+{
+  if (accept(s, T_NEWLINE)) {
+    expect(s, T_INDENT);
+    do {
+      parse_statement(s);
+    } while(!accept(s, T_DEDENT));
+  } else {
+    parse_simple_statement(s);
+  }
+}
+
+static void parse_if(struct parser_state *s)
+{
+  eat(s, T_IF);
+
+  union object *expression = parse_subexpression(s, PREC_TEST);
+  emit_expression(s, expression);
+  expect(s, ':');
+
+  struct basic_block *header = writer_end_block(&s->writer);
+  struct basic_block *body = writer_allocate_block(&s->writer);
+  struct basic_block *footer = writer_allocate_block(&s->writer);
+  writer_pop(&s->writer, 1);
+  header->jump_opcode = OPCODE_POP_JUMP_IF_FALSE;
+  header->jump_target = footer;
+  header->default_target = body;
+  writer_begin_block(&s->writer, body);
+
+  parse_suite(s);
+
+  struct basic_block *body_end = writer_end_block(&s->writer);
+  body_end->default_target = footer;
+  writer_begin_block(&s->writer, footer);
+}
+
 void parse(struct parser_state *s)
 {
   next_token(s);
 
-  writer_begin(&s->writer, stdout);
+  writer_begin_file(&s->writer, stdout);
 
   add_anchor(s, T_EOF);
-  struct token *t = &s->scanner.token;
-  for (;;) {
-    switch (t->kind) {
-    case T_NEWLINE:
+  while (s->scanner.token.kind != T_EOF) {
+    if (accept(s, T_NEWLINE))
       continue;
-    case EXPRESSION_START_CASES:
-      parse_expression_statement(s);
-      continue;
-    case T_EOF:
-      break;
-    default:
-      fprintf(stderr, "Unexpected token:");
-      print_token(stderr, t);
-      fputc('\n', stderr);
-      next_token(s);
-      continue;
-    }
-    break;
+    parse_statement(s);
   }
 
 #ifndef NDEBUG
@@ -562,7 +634,7 @@ void parse(struct parser_state *s)
   }
 #endif
 
-  writer_finish(&s->writer);
+  writer_end_file(&s->writer);
 }
 
 void parser_init(struct parser_state *s)

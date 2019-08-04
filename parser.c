@@ -137,6 +137,10 @@ static inline bool peek(const struct parser_state *s, uint16_t token_kind)
 static inline void next_token(struct parser_state *s)
 {
   scanner_next_token(&s->scanner);
+#if 0
+  print_token(stderr, &s->scanner.token);
+  fputc('\n', stderr);
+#endif
 }
 
 static inline void eat(struct parser_state *s, uint16_t token_kind)
@@ -412,20 +416,30 @@ static const struct expression_parser parsers[] = {
   ['=']           = { .infix = parse_assignment, .precedence = PREC_ASSIGN, },
 };
 
+static uint16_t name_index_from_symbol(struct parser_state *s,
+                                       struct symbol *symbol)
+{
+  if (s->cg.code.module_level) {
+    uint16_t index = symbol->name_index;
+    if (index > 0)
+      return index - 1;
+
+    index = cg_append_name(&s->cg, symbol->string);
+    symbol->name_index = index + 1;
+    return index;
+  } else {
+    return cg_register_name(&s->cg, symbol->string);
+  }
+}
+
 static union ast_node *parse_identifier(struct parser_state *s)
 {
   struct symbol *symbol = s->scanner.token.u.symbol;
   eat(s, T_IDENTIFIER);
 
-  uint16_t index = symbol->name_index;
-  if (index == 0) {
-    index = cg_register_name(&s->cg, symbol->string) + 1;
-    symbol->name_index = index;
-  }
-
   struct ast_name *name = arena_allocate_type(&s->ast, struct ast_name);
   name->base.type = AST_NAME;
-  name->index = index - 1;
+  name->index = name_index_from_symbol(s, symbol);
   return (union ast_node*)name;
 }
 
@@ -623,11 +637,13 @@ static void emit_expression(struct parser_state *s, union ast_node *expression,
 
 static void parse_expression_statement(struct parser_state *s)
 {
-  assert(s->cg.code.stacksize == 0);
+#ifndef NDEBUG
+  unsigned prev_stacksize = s->cg.code.stacksize;
+#endif
   do {
     union ast_node *expression = parse_subexpression(s, PREC_ASSIGN);
     emit_expression(s, expression, true);
-    assert(s->cg.code.stacksize == 0);
+    assert(s->cg.code.stacksize == prev_stacksize);
   } while(accept(s, ';') && !peek(s, T_NEWLINE) && !peek(s, T_EOF));
 
   if (peek(s, T_EOF))
@@ -660,37 +676,22 @@ static void parse_simple_statement(struct parser_state *s)
   expect(s, T_NEWLINE);
 }
 
-static void parse_if(struct parser_state *s);
-static void parse_while(struct parser_state *s);
-
-static void parse_statement(struct parser_state *s) {
-  switch (s->scanner.token.kind) {
-  case EXPRESSION_START_CASES:
-    parse_expression_statement(s);
-    return;
-  case T_IF:
-    parse_if(s);
-    return;
-  case T_WHILE:
-    parse_while(s);
-    return;
-  case T_EOF:
-    return;
-  default:
-    parse_error_expected(s, "statement");
-    unimplemented(); /* recovery */
-  }
-}
+static void parse_statement(struct parser_state *s);
 
 static void parse_suite(struct parser_state *s)
 {
+#ifndef NDEBUG
+  unsigned prev_stacksize = s->cg.code.stacksize;
+#endif
   if (accept(s, T_NEWLINE)) {
     expect(s, T_INDENT);
     do {
       parse_statement(s);
+      assert(s->cg.code.stacksize == prev_stacksize);
     } while(!accept(s, T_DEDENT));
   } else {
     parse_simple_statement(s);
+    assert(s->cg.code.stacksize == prev_stacksize);
   }
 }
 
@@ -773,17 +774,80 @@ static void parse_while(struct parser_state *s)
   cg_begin_block(&s->cg, after);
 }
 
+static void parse_parameters(struct parser_state *s)
+{
+  expect(s, '(');
+  /* TODO */
+  expect(s, ')');
+}
+
+static void parse_def(struct parser_state *s)
+{
+  eat(s, T_DEF);
+  skip_till(s, T_IDENTIFIER);
+  struct symbol *symbol = s->scanner.token.u.symbol;
+  next_token(s);
+
+  parse_parameters(s);
+  if (accept(s, T_MINUS_GREATER_THAN)) {
+    parse_subexpression(s, PREC_TEST);
+    unimplemented();
+  }
+  expect(s, ':');
+
+  struct code_state *saved = cg_push_code(&s->cg);
+
+  parse_suite(s);
+
+  struct object_code *code = cg_pop_code(&s->cg, saved, symbol->string);
+  unsigned code_index = cg_register_code(&s->cg, code);
+  cg_push_op(&s->cg, OPCODE_LOAD_CONST, code_index);
+
+  const char *chars = symbol->string;
+  uint32_t length = strlen(chars);
+  unsigned name_const_index = cg_register_string(&s->cg, chars, length);
+  cg_push_op(&s->cg, OPCODE_LOAD_CONST, name_const_index);
+
+  cg_op(&s->cg, OPCODE_MAKE_FUNCTION, 0);
+  cg_pop(&s->cg, 1);
+  uint16_t name_index = name_index_from_symbol(s, symbol);
+  cg_pop_op(&s->cg, OPCODE_STORE_NAME, name_index);
+}
+
+static void parse_statement(struct parser_state *s) {
+  switch (s->scanner.token.kind) {
+  case EXPRESSION_START_CASES:
+    parse_expression_statement(s);
+    return;
+  case T_IF:
+    parse_if(s);
+    return;
+  case T_WHILE:
+    parse_while(s);
+    return;
+  case T_DEF:
+    parse_def(s);
+    return;
+  case T_EOF:
+    return;
+  default:
+    parse_error_expected(s, "statement");
+    unimplemented(); /* recovery */
+  }
+}
+
 struct object_code *parse(struct parser_state *s)
 {
   next_token(s);
 
-  cg_begin_file(&s->cg);
+  cg_begin(&s->cg);
 
   add_anchor(s, T_EOF);
   while (s->scanner.token.kind != T_EOF) {
     if (accept(s, T_NEWLINE))
       continue;
     parse_statement(s);
+    assert(s->cg.code.stacksize == 0);
   }
 
 #ifndef NDEBUG
@@ -796,7 +860,7 @@ struct object_code *parse(struct parser_state *s)
   }
 #endif
 
-  return cg_end_file(&s->cg);
+  return cg_end(&s->cg);
 }
 
 void parser_init(struct parser_state *s)

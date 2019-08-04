@@ -1,19 +1,22 @@
 #include "codegen.h"
 
-#include <string.h>
 #include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "objects.h"
 #include "opcodes.h"
 
-struct basic_block *cg_allocate_block(struct cg_state *s) {
+struct basic_block *cg_allocate_block(struct cg_state *s)
+{
   struct basic_block *block = arena_allocate_type(&s->objects,
                                                   struct basic_block);
   memset(block, 0, sizeof(*block));
   return block;
 }
 
-void cg_begin_block(struct cg_state *s, struct basic_block *block) {
+void cg_begin_block(struct cg_state *s, struct basic_block *block)
+{
   if (s->code.current_block != NULL) {
     assert(s->code.current_block->next == NULL);
     s->code.current_block->next = block;
@@ -21,20 +24,21 @@ void cg_begin_block(struct cg_state *s, struct basic_block *block) {
 
   assert(block->code_length == 0 && block->code_bytes == NULL);
   s->code.current_block = block;
-  arena_grow_begin(&s->opcodes, 1);
+  arena_grow_begin(&s->code.opcodes, 1);
 }
 
-struct basic_block *cg_end_block(struct cg_state *s) {
+struct basic_block *cg_end_block(struct cg_state *s)
+{
   struct basic_block *block = s->code.current_block;
-  block->code_length = arena_grow_current_size(&s->opcodes);
-  block->code_bytes = arena_grow_finish(&s->opcodes);
+  block->code_length = arena_grow_current_size(&s->code.opcodes);
+  block->code_bytes = arena_grow_finish(&s->code.opcodes);
   return block;
 }
 
-static void cg_begin_code(struct cg_state *s, struct code_writer_state *code) {
-  code->had_return = false;
-  code->max_stacksize = 0;
-  code->stacksize = 0;
+static void cg_init_code(struct cg_state *s, struct code_state *code)
+{
+  memset(code, 0, sizeof(*code));
+  arena_init(&code->opcodes);
   code->consts = object_new_list(&s->objects);
   code->names = object_new_list(&s->objects);
 
@@ -43,7 +47,8 @@ static void cg_begin_code(struct cg_state *s, struct code_writer_state *code) {
   cg_begin_block(s, first);
 }
 
-static struct object_code *cg_end_code(struct cg_state *s) {
+static struct object_code *cg_end_code(struct cg_state *s, const char *name)
+{
   assert(s->code.stacksize == 0);
   if (!s->code.had_return) {
     unsigned i_none = cg_register_singleton(s, TYPE_NONE);
@@ -59,13 +64,13 @@ static struct object_code *cg_end_code(struct cg_state *s) {
     offset += b->code_length;
 
 #if 0
-    printf("%u: block %p --\n", b->offset, (void*)b);
+    fprintf(stderr, "%u: block %p --\n", b->offset, (void*)b);
     assert(b->code_length % 2 == 0);
     for (unsigned i = 0; i < b->code_length; i += 2) {
-      printf("  %02x %u\n", b->code_bytes[i], b->code_bytes[i+1]);
+      fprintf(stderr, "  %02x %u\n", b->code_bytes[i], b->code_bytes[i+1]);
     }
-    printf("Jump %u -> %p\n", b->jump_opcode, (void*)b->jump_target);
-    printf("Default -> %p\n", (void*)b->default_target);
+    fprintf(stderr, "Jump %u -> %p\n", b->jump_opcode, (void*)b->jump_target);
+    fprintf(stderr, "Default -> %p\n", (void*)b->default_target);
 #endif
 
     unsigned jump_length = 0;
@@ -81,7 +86,7 @@ static struct object_code *cg_end_code(struct cg_state *s) {
     offset += jump_length;
   }
 
-  arena_grow_begin(&s->opcodes, 1);
+  arena_grow_begin(&s->objects, 1);
   struct basic_block *first_block = s->code.first_block;
   for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     unsigned jump_length = 0;
@@ -92,7 +97,7 @@ static struct object_code *cg_end_code(struct cg_state *s) {
     unsigned block_length = b->code_length + jump_length;
     assert(b->next == NULL || b->next->offset == b->offset + block_length);
 
-    void* dst = arena_grow(&s->opcodes, block_length);
+    void* dst = arena_grow(&s->objects, block_length);
     memcpy(dst, b->code_bytes, b->code_length);
     uint8_t* j = (uint8_t*)dst + b->code_length;
     if (b->jump_opcode != 0) {
@@ -133,8 +138,8 @@ static struct object_code *cg_end_code(struct cg_state *s) {
     }
   }
 
-  unsigned code_length = arena_grow_current_size(&s->opcodes);
-  char* code_bytes = arena_grow_finish(&s->opcodes);
+  unsigned code_length = arena_grow_current_size(&s->objects);
+  char* code_bytes = arena_grow_finish(&s->objects);
 
   struct object_code *code = object_new_code(&s->objects);
   code->code = (union object*)make_bytes(&s->objects, code_length, code_bytes);
@@ -144,23 +149,51 @@ static struct object_code *cg_end_code(struct cg_state *s) {
   code->freevars = (union object*)object_new_tuple(&s->objects, 0);
   code->cellvars = (union object*)object_new_tuple(&s->objects, 0);
   code->filename = (union object*)make_ascii(&s->objects, "simple.py");
-  code->name = (union object*)make_ascii(&s->objects, "<module>");
+  code->name = (union object*)make_ascii(&s->objects, name);
   code->lnotab = (union object*)make_bytes(&s->objects, 0, NULL);
+
+  arena_free_all(&s->code.opcodes);
   return code;
 }
 
-void cg_begin_file(struct cg_state *s)
+struct code_state *cg_push_code(struct cg_state *s)
+{
+  struct code_state *saved = arena_allocate_type(&s->codestack,
+                                                 struct code_state);
+  memcpy(saved, &s->code, sizeof(*saved));
+  cg_init_code(s, &s->code);
+  return saved;
+}
+
+struct object_code *cg_pop_code(struct cg_state *s, struct code_state *saved,
+                                const char *name)
+{
+  struct object_code *result = cg_end_code(s, name);
+  memcpy(&s->code, saved, sizeof(s->code));
+  arena_free(&s->codestack, saved);
+  return result;
+}
+
+void cg_begin(struct cg_state *s)
 {
   memset(s, 0, sizeof(*s));
   arena_init(&s->objects);
-  arena_init(&s->opcodes);
+  arena_init(&s->codestack);
 
-  cg_begin_code(s, &s->code);
+  cg_init_code(s, &s->code);
+  s->code.module_level = true;
 }
 
-struct object_code *cg_end_file(struct cg_state *s)
+struct object_code *cg_end(struct cg_state *s)
 {
-  return cg_end_code(s);
+  return cg_end_code(s, "<module>");
+}
+
+void cg_free(struct cg_state *s)
+{
+  arena_free_all(&s->code.opcodes);
+  arena_free_all(&s->objects);
+  arena_free_all(&s->codestack);
 }
 
 void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
@@ -168,12 +201,12 @@ void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
   assert(!is_jump(opcode));
   if (arg >= 256) {
     assert(arg <= 0xffff);
-    arena_grow_char(&s->opcodes, (char)OPCODE_EXTENDED_ARG);
-    arena_grow_char(&s->opcodes, arg >> 8);
+    arena_grow_char(&s->code.opcodes, (char)OPCODE_EXTENDED_ARG);
+    arena_grow_char(&s->code.opcodes, arg >> 8);
     arg &= 0xff;
   }
-  arena_grow_char(&s->opcodes, opcode);
-  arena_grow_char(&s->opcodes, arg);
+  arena_grow_char(&s->code.opcodes, opcode);
+  arena_grow_char(&s->code.opcodes, arg);
 }
 
 static void push(struct cg_state *s)
@@ -254,20 +287,29 @@ unsigned cg_register_int(struct cg_state *s, int32_t value)
 unsigned cg_register_name(struct cg_state *s, const char *name)
 {
   struct object_list *names = s->code.names;
-#ifndef NDEBUG
   unsigned name_length = strlen(name);
   for (unsigned i = 0, length = names->length; i < length; ++i) {
     const union object *object = names->items[i];
     assert(object->type == TYPE_ASCII);
-    if (object->string.length != name_length)
-      continue;
-    assert(memcmp(object->string.chars, name, name_length) != 0);
+    if (object->string.length == name_length &&
+        memcmp(object->string.chars, name, name_length) == 0) {
+      return i;
+    }
   }
-#endif
+  return cg_append_name(s, name);
+}
 
+unsigned cg_append_name(struct cg_state *s, const char *name)
+{
+  struct object_list *names = s->code.names;
   const struct object_string *string = make_ascii(&s->objects, name);
   object_list_append(names, (union object*)string);
   return names->length - 1;
 }
 
-
+unsigned cg_register_code(struct cg_state *s, struct object_code *code)
+{
+  struct object_list *consts = s->code.consts;
+  object_list_append(consts, (union object*)code);
+  return consts->length - 1;
+}

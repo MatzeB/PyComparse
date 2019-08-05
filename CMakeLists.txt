@@ -6,6 +6,10 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGUREATION_TYPES)
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
 
+add_executable(arena_test
+  arena_test.c
+  adt/arena.h
+)
 add_executable(scanner_test
   scanner.c
   scanner.h

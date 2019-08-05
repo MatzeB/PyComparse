@@ -30,10 +30,7 @@ struct arena {
 
 static inline void arena_init(struct arena *arena)
 {
-  arena->block      = NULL;
-  arena->grow       = 0;
-  arena->allocated  = 0;
-  arena->limit      = 0;
+  memset(arena, 0, sizeof(*arena));
 }
 
 static __attribute__((noinline))

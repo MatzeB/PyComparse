@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <string.h>
 
-void alloc_some(struct arena *arena)
+static void alloc_some(struct arena *arena)
 {
   char *last_end;
   for (int i = 0, e = rand() % 5000; i < e; ++i) {
@@ -19,12 +19,13 @@ void alloc_some(struct arena *arena)
     last_end = m + sz;
 
     if (rand() % 10 == 0) {
-      arena_begin_growing(arena, 1);
+      arena_grow_begin(arena, 1);
       for (char *c = "Hello World!"; *c != '\0'; ++c) {
         arena_grow_char(arena, *c);
       }
       arena_grow_char(arena, '\0');
-     char *str = (char*)arena_grow_finish(arena);
+      assert(arena_grow_current_size(arena) == 13);
+      char *str = (char*)arena_grow_finish(arena);
       assert(strcmp(str, "Hello World!") == 0);
     }
   }

@@ -60,6 +60,16 @@ enum ast_node_type {
   AST_BINEXPR_MUL,
   AST_BINEXPR_SUB,
   AST_BINEXPR_TRUEDIV,
+  AST_BINEXPR_GREATER,
+  AST_BINEXPR_LESS,
+  AST_BINEXPR_EQUAL,
+  AST_BINEXPR_GREATER_EQUAL,
+  AST_BINEXPR_LESS_EQUAL,
+  AST_BINEXPR_UNEQUAL,
+  AST_BINEXPR_IN,
+  AST_BINEXPR_NOT_IN,
+  AST_BINEXPR_IS,
+  AST_BINEXPR_IS_NOT,
   AST_CONST,
   AST_NAME,
   AST_UNEXPR_INVERT,
@@ -127,6 +137,7 @@ static void parse_error_expected(struct parser_state *s, const char *what)
   fprintf(stderr, "error: expected %s, got ", what);
   print_token(stderr, &s->scanner.token);
   fputc('\n', stderr);
+  s->error = true;
 }
 
 static inline bool peek(const struct parser_state *s, uint16_t token_kind)
@@ -235,10 +246,7 @@ static void eat_until_anchor(struct parser_state *s)
 static bool skip_till(struct parser_state *s, uint16_t expected_token_kind)
 {
   if (UNLIKELY(!peek(s, expected_token_kind))) {
-    fprintf(stderr, "expected %s, got ", token_kind_name(expected_token_kind));
-    print_token(stderr, &s->scanner.token);
-    fputc('\n', stderr);
-    s->error = true;
+    parse_error_expected(s, token_kind_name(expected_token_kind));
 
     add_anchor(s, expected_token_kind);
     eat_until_anchor(s);
@@ -384,14 +392,88 @@ static union ast_node *parse_sub(struct parser_state *s, union ast_node *left)
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_SUB, left);
 }
 
-static union ast_node *parse_floor_div(struct parser_state *s, union ast_node *left)
+static union ast_node *parse_floor_div(struct parser_state *s,
+                                       union ast_node *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_FLOORDIV, left);
 }
 
-static union ast_node *parse_true_div(struct parser_state *s, union ast_node *left)
+static union ast_node *parse_true_div(struct parser_state *s,
+                                      union ast_node *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_TRUEDIV, left);
+}
+
+static union ast_node *parse_greater(struct parser_state *s,
+                                     union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER, left);
+}
+
+static union ast_node *parse_less(struct parser_state *s, union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS, left);
+}
+
+static union ast_node *parse_equal(struct parser_state *s, union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_EQUAL, left);
+}
+
+static union ast_node *parse_greater_equal(struct parser_state *s,
+                                           union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER_EQUAL, left);
+}
+
+static union ast_node *parse_less_equal(struct parser_state *s,
+                                        union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
+}
+
+static union ast_node *parse_unequal(struct parser_state *s,
+                                     union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_UNEQUAL, left);
+}
+
+static union ast_node *parse_in(struct parser_state *s,
+                                union ast_node *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
+}
+
+static union ast_node *parse_not_in(struct parser_state *s,
+                                    union ast_node *left)
+{
+  eat(s, T_NOT);
+  if (!accept(s, T_IN)) {
+    parse_error_expected(s, "in");
+  }
+
+  union ast_node *right = parse_subexpression(s, PREC_COMPARISON + 1);
+
+  struct ast_binexpr *result = arena_allocate_type(&s->ast, struct ast_binexpr);
+  result->base.type = AST_BINEXPR_NOT_IN;
+  result->left = left;
+  result->right = right;
+  return (union ast_node*)result;
+}
+
+static union ast_node *parse_is(struct parser_state *s, union ast_node *left)
+{
+  eat(s, T_IS);
+  enum ast_node_type type = accept(s, T_NOT) ? AST_BINEXPR_IS_NOT
+                                             : AST_BINEXPR_IS;
+
+  union ast_node *right = parse_subexpression(s, PREC_COMPARISON + 1);
+
+  struct ast_binexpr *result = arena_allocate_type(&s->ast, struct ast_binexpr);
+  result->base.type = type;
+  result->left = left;
+  result->right = right;
+  return (union ast_node*)result;
 }
 
 typedef union ast_node *(*prefix_parser_func)(struct parser_state *s);
@@ -404,16 +486,32 @@ struct expression_parser {
 };
 
 static const struct expression_parser parsers[] = {
-  ['(']           = { .infix = parse_call,      .precedence = PREC_POSTFIX, },
-  ['+']           = { .prefix = parse_plus, .infix = parse_add, .precedence = PREC_ARITH,   },
-  ['*']           = { .infix = parse_mul,       .precedence = PREC_TERM,    },
-  ['@']           = { .infix = parse_matmul,    .precedence = PREC_TERM,    },
-  ['-']           = { .prefix = parse_negative, .infix = parse_sub,       .precedence = PREC_ARITH,   },
-  ['/']           = { .infix = parse_true_div,  .precedence = PREC_TERM,    },
-  [T_SLASH_SLASH] = { .infix = parse_floor_div, .precedence = PREC_TERM,    },
-  [T_NOT]         = { .prefix = parse_not,    },
-  ['~']           = { .prefix = parse_invert, },
-  ['=']           = { .infix = parse_assignment, .precedence = PREC_ASSIGN, },
+  ['(']    = { .infix = parse_call,       .precedence = PREC_POSTFIX    },
+  ['+']    = { .prefix = parse_plus,
+               .infix = parse_add,        .precedence = PREC_ARITH      },
+  ['*']    = { .infix = parse_mul,        .precedence = PREC_TERM       },
+  ['@']    = { .infix = parse_matmul,     .precedence = PREC_TERM       },
+  ['-']    = { .prefix = parse_negative,
+               .infix = parse_sub,        .precedence = PREC_ARITH      },
+  ['/']    = { .infix = parse_true_div,   .precedence = PREC_TERM       },
+  [T_NOT]  = { .prefix = parse_not,
+               .infix = parse_not_in,     .precedence = PREC_COMPARISON },
+  ['~']    = { .prefix = parse_invert, },
+  ['=']    = { .infix = parse_assignment, .precedence = PREC_ASSIGN     },
+  ['<']    = { .infix = parse_less,       .precedence = PREC_COMPARISON },
+  ['>']    = { .infix = parse_greater,    .precedence = PREC_COMPARISON },
+  [T_IN]   = { .infix = parse_in,         .precedence = PREC_COMPARISON },
+  [T_IS]   = { .infix = parse_is,         .precedence = PREC_COMPARISON },
+  [T_SLASH_SLASH]
+      = { .infix = parse_floor_div,     .precedence = PREC_TERM       },
+  [T_EQUALS_EQUALS]
+      = { .infix = parse_equal,         .precedence = PREC_COMPARISON },
+  [T_GREATER_THAN_EQUALS]
+      = { .infix = parse_greater_equal, .precedence = PREC_COMPARISON },
+  [T_LESS_THAN_EQUALS]
+      = { .infix = parse_less_equal,    .precedence = PREC_COMPARISON },
+  [T_EXCLAMATIONMARKEQUALS]
+      = { .infix = parse_unequal,       .precedence = PREC_COMPARISON },
 };
 
 static uint16_t name_index_from_symbol(struct parser_state *s,
@@ -540,6 +638,14 @@ static void emit_binexpr(struct parser_state *s, struct ast_binexpr *binexpr,
   cg_pop_op(&s->cg, opcode, 0);
 }
 
+static void emit_comparison(struct parser_state *s, struct ast_binexpr *binexpr,
+                            enum compare_op_arg arg)
+{
+  emit_expression(s, binexpr->left, false);
+  emit_expression(s, binexpr->right, false);
+  cg_pop_op(&s->cg, OPCODE_COMPARE_OP, arg);
+}
+
 static void emit_unexpr(struct parser_state *s, struct ast_unexpr *unexpr,
                         uint8_t opcode)
 {
@@ -610,6 +716,36 @@ static void emit_expression(struct parser_state *s, union ast_node *expression,
   case AST_BINEXPR_MUL:
     emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_MULTIPLY);
     break;
+  case AST_BINEXPR_LESS:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_LT);
+    break;
+  case AST_BINEXPR_LESS_EQUAL:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_LE);
+    break;
+  case AST_BINEXPR_EQUAL:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_EQ);
+    break;
+  case AST_BINEXPR_UNEQUAL:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_NE);
+    break;
+  case AST_BINEXPR_GREATER:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_GT);
+    break;
+  case AST_BINEXPR_GREATER_EQUAL:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_GE);
+    break;
+  case AST_BINEXPR_IN:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_IN);
+    break;
+  case AST_BINEXPR_NOT_IN:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_NOT_IN);
+    break;
+  case AST_BINEXPR_IS:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_IS);
+    break;
+  case AST_BINEXPR_IS_NOT:
+    emit_comparison(s, &expression->binexpr, COMPARE_OP_IS_NOT);
+    break;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);
     break;
@@ -640,15 +776,9 @@ static void parse_expression_statement(struct parser_state *s)
 #ifndef NDEBUG
   unsigned prev_stacksize = s->cg.code.stacksize;
 #endif
-  do {
-    union ast_node *expression = parse_subexpression(s, PREC_ASSIGN);
-    emit_expression(s, expression, true);
-    assert(s->cg.code.stacksize == prev_stacksize);
-  } while(accept(s, ';') && !peek(s, T_NEWLINE) && !peek(s, T_EOF));
-
-  if (peek(s, T_EOF))
-    return;
-  expect(s, T_NEWLINE);
+  union ast_node *expression = parse_subexpression(s, PREC_ASSIGN);
+  emit_expression(s, expression, true);
+  assert(s->cg.code.stacksize == prev_stacksize);
 }
 
 static void parse_small_statement(struct parser_state *s)
@@ -663,7 +793,7 @@ static void parse_small_statement(struct parser_state *s)
   /* TODO: del, break, continue, return, raise, yield,
    * import, global, nonlocal, assert */
   default:
-    parse_error_expected(s, "simple statement");
+    parse_error_expected(s, "statement");
     unimplemented(); /* recovery */
   }
 }
@@ -816,9 +946,6 @@ static void parse_def(struct parser_state *s)
 
 static void parse_statement(struct parser_state *s) {
   switch (s->scanner.token.kind) {
-  case EXPRESSION_START_CASES:
-    parse_expression_statement(s);
-    return;
   case T_IF:
     parse_if(s);
     return;
@@ -831,8 +958,8 @@ static void parse_statement(struct parser_state *s) {
   case T_EOF:
     return;
   default:
-    parse_error_expected(s, "statement");
-    unimplemented(); /* recovery */
+    parse_simple_statement(s);
+    return;
   }
 }
 

@@ -331,6 +331,12 @@ static void scan_eof(struct scanner_state *s)
     s->token.kind = T_DEDENT;
     return;
   }
+  /* Add artificial newline, for EOF in the middle of a line. */
+  if (!s->at_begin_of_line) {
+    s->at_begin_of_line = true;
+    s->token.kind = T_NEWLINE;
+    return;
+  }
   s->token.kind = T_EOF;
 }
 
@@ -586,6 +592,7 @@ void scanner_next_token(struct scanner_state *s)
         }
         return;
       case '=':
+        next_char(s);
         s->token.kind = T_GREATER_THAN_EQUALS;
         return;
       default:

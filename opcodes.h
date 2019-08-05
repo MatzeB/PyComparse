@@ -121,6 +121,20 @@ enum opcode {
   OPCODE_CALL_METHOD                  = 161,
 };
 
+enum compare_op_arg {
+  COMPARE_OP_LT        = 0,
+  COMPARE_OP_LE        = 1,
+  COMPARE_OP_EQ        = 2,
+  COMPARE_OP_NE        = 3,
+  COMPARE_OP_GT        = 4,
+  COMPARE_OP_GE        = 5,
+  COMPARE_OP_IN        = 6,
+  COMPARE_OP_NOT_IN    = 7,
+  COMPARE_OP_IS        = 8,
+  COMPARE_OP_IS_NOT    = 9,
+  COMPARE_OP_EXC_MATCH = 10,
+};
+
 static inline bool is_absjump(uint32_t opcode) {
   switch (opcode) {
   case OPCODE_JUMP_ABSOLUTE:

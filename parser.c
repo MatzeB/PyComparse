@@ -48,7 +48,7 @@ enum precedence {
   PREC_POWER,       /* prefix ** */
 
   PREC_POSTFIX,     /* postfix ( */
-  PREC_PRIMARY,
+  PREC_ATOM,        /* name, number, string, ..., None, True, False */
 };
 
 enum ast_node_type {
@@ -263,6 +263,22 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
     eat(s, expected_token_kind);
 }
 
+static uint16_t name_index_from_symbol(struct parser_state *s,
+                                       struct symbol *symbol)
+{
+  if (s->cg.code.module_level) {
+    uint16_t index = symbol->name_index;
+    if (index > 0)
+      return index - 1;
+
+    index = cg_append_name(&s->cg, symbol->string);
+    symbol->name_index = index + 1;
+    return index;
+  } else {
+    return cg_register_name(&s->cg, symbol->string);
+  }
+}
+
 static union ast_node *parse_subexpression(struct parser_state *s,
                                            enum precedence precedence);
 
@@ -350,6 +366,103 @@ static union ast_node *parse_not(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_LOGICAL_NOT, AST_UNEXPR_NOT);
 }
+
+static union ast_node *parse_identifier(struct parser_state *s)
+{
+  struct symbol *symbol = s->scanner.token.u.symbol;
+  eat(s, T_IDENTIFIER);
+
+  struct ast_name *name = arena_allocate_type(&s->ast, struct ast_name);
+  name->base.type = AST_NAME;
+  name->index = name_index_from_symbol(s, symbol);
+  return (union ast_node*)name;
+}
+
+static union ast_node *parse_string(struct parser_state *s)
+{
+  const char *chars = s->scanner.token.u.string;
+  uint32_t length = strlen(chars);
+  unsigned index = cg_register_string(&s->cg, chars, length);
+  eat(s, T_STRING);
+
+  struct ast_const *cnst = arena_allocate_type(&s->ast, struct ast_const);
+  cnst->base.type = AST_CONST;
+  cnst->index = index;
+  return (union ast_node*)cnst;
+}
+
+static union ast_node *parse_integer(struct parser_state *s)
+{
+  const char *string = s->scanner.token.u.string;
+  char *endptr;
+  errno = 0;
+  unsigned long value = strtoul(string, &endptr, 0);
+  assert(endptr != NULL);
+  assert(*endptr == '\0');
+  if (value == 0) {
+    assert(errno == 0);
+  }
+  assert(value <= INT32_MAX);
+  unsigned index = cg_register_int(&s->cg, (int32_t)value);
+  eat(s, T_INTEGER);
+
+  struct ast_const *ast_const = arena_allocate_type(&s->ast, struct ast_const);
+  ast_const->base.type = AST_CONST;
+  ast_const->index = index;
+  return (union ast_node*)ast_const;
+}
+
+static union ast_node *parse_singleton(struct parser_state *s, char type)
+{
+  next_token(s);
+  unsigned index = cg_register_singleton(&s->cg, type);
+
+  struct ast_const *ast_const = arena_allocate_type(&s->ast, struct ast_const);
+  ast_const->base.type = AST_CONST;
+  ast_const->index = index;
+  return (union ast_node*)ast_const;
+}
+
+static union ast_node *parse_true(struct parser_state *s)
+{
+  return parse_singleton(s, TYPE_TRUE);
+}
+
+static union ast_node *parse_false(struct parser_state *s)
+{
+  return parse_singleton(s, TYPE_FALSE);
+}
+
+static union ast_node *parse_none(struct parser_state *s)
+{
+  return parse_singleton(s, TYPE_NONE);
+}
+
+static union ast_node *parse_ellipsis(struct parser_state *s)
+{
+  return parse_singleton(s, TYPE_ELLIPSIS);
+}
+
+typedef union ast_node *(*prefix_parser_func)(struct parser_state *s);
+struct prefix_expression_parser {
+  prefix_parser_func func;
+  enum precedence precedence;
+};
+
+static const struct prefix_expression_parser prefix_parsers[] = {
+  ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
+  ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
+  ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
+  [T_NOT]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
+  [T_IDENTIFIER]  = { .func = parse_identifier, .precedence = PREC_ATOM },
+  [T_STRING]      = { .func = parse_string,     .precedence = PREC_ATOM },
+  [T_INTEGER]     = { .func = parse_integer,    .precedence = PREC_ATOM },
+  [T_TRUE]        = { .func = parse_true,       .precedence = PREC_ATOM },
+  [T_FALSE]       = { .func = parse_false,      .precedence = PREC_ATOM },
+  [T_NONE]        = { .func = parse_none,       .precedence = PREC_ATOM },
+  [T_DOT_DOT_DOT] = { .func = parse_ellipsis,   .precedence = PREC_ATOM },
+};
+
 
 static inline union ast_node *parse_binexpr(struct parser_state *s,
                                             enum precedence prec_right,
@@ -476,153 +589,64 @@ static union ast_node *parse_is(struct parser_state *s, union ast_node *left)
   return (union ast_node*)result;
 }
 
-typedef union ast_node *(*prefix_parser_func)(struct parser_state *s);
-typedef union ast_node *(*infix_parser_func)(struct parser_state *s,
-                                             union ast_node *left);
-struct expression_parser {
-  prefix_parser_func prefix;
-  infix_parser_func infix;
+typedef union ast_node *(*postfix_parser_func)(struct parser_state *s,
+                                               union ast_node *prefix);
+
+struct postfix_expression_parser {
+  postfix_parser_func func;
   enum precedence precedence;
 };
 
-static const struct expression_parser parsers[] = {
-  ['(']    = { .infix = parse_call,       .precedence = PREC_POSTFIX    },
-  ['+']    = { .prefix = parse_plus,
-               .infix = parse_add,        .precedence = PREC_ARITH      },
-  ['*']    = { .infix = parse_mul,        .precedence = PREC_TERM       },
-  ['@']    = { .infix = parse_matmul,     .precedence = PREC_TERM       },
-  ['-']    = { .prefix = parse_negative,
-               .infix = parse_sub,        .precedence = PREC_ARITH      },
-  ['/']    = { .infix = parse_true_div,   .precedence = PREC_TERM       },
-  [T_NOT]  = { .prefix = parse_not,
-               .infix = parse_not_in,     .precedence = PREC_COMPARISON },
-  ['~']    = { .prefix = parse_invert, },
-  ['=']    = { .infix = parse_assignment, .precedence = PREC_ASSIGN     },
-  ['<']    = { .infix = parse_less,       .precedence = PREC_COMPARISON },
-  ['>']    = { .infix = parse_greater,    .precedence = PREC_COMPARISON },
-  [T_IN]   = { .infix = parse_in,         .precedence = PREC_COMPARISON },
-  [T_IS]   = { .infix = parse_is,         .precedence = PREC_COMPARISON },
+static const struct postfix_expression_parser postfix_parsers[] = {
+  ['(']    = { .func = parse_call,       .precedence = PREC_POSTFIX    },
+  ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
+  ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
+  ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
+  ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
+  ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
+  [T_NOT]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
+  ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
+  ['<']    = { .func = parse_less,       .precedence = PREC_COMPARISON },
+  ['>']    = { .func = parse_greater,    .precedence = PREC_COMPARISON },
+  [T_IN]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
+  [T_IS]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
   [T_SLASH_SLASH]
-      = { .infix = parse_floor_div,     .precedence = PREC_TERM       },
+      = { .func = parse_floor_div,     .precedence = PREC_TERM       },
   [T_EQUALS_EQUALS]
-      = { .infix = parse_equal,         .precedence = PREC_COMPARISON },
+      = { .func = parse_equal,         .precedence = PREC_COMPARISON },
   [T_GREATER_THAN_EQUALS]
-      = { .infix = parse_greater_equal, .precedence = PREC_COMPARISON },
+      = { .func = parse_greater_equal, .precedence = PREC_COMPARISON },
   [T_LESS_THAN_EQUALS]
-      = { .infix = parse_less_equal,    .precedence = PREC_COMPARISON },
+      = { .func = parse_less_equal,    .precedence = PREC_COMPARISON },
   [T_EXCLAMATIONMARKEQUALS]
-      = { .infix = parse_unequal,       .precedence = PREC_COMPARISON },
+      = { .func = parse_unequal,       .precedence = PREC_COMPARISON },
 };
-
-static uint16_t name_index_from_symbol(struct parser_state *s,
-                                       struct symbol *symbol)
-{
-  if (s->cg.code.module_level) {
-    uint16_t index = symbol->name_index;
-    if (index > 0)
-      return index - 1;
-
-    index = cg_append_name(&s->cg, symbol->string);
-    symbol->name_index = index + 1;
-    return index;
-  } else {
-    return cg_register_name(&s->cg, symbol->string);
-  }
-}
-
-static union ast_node *parse_identifier(struct parser_state *s)
-{
-  struct symbol *symbol = s->scanner.token.u.symbol;
-  eat(s, T_IDENTIFIER);
-
-  struct ast_name *name = arena_allocate_type(&s->ast, struct ast_name);
-  name->base.type = AST_NAME;
-  name->index = name_index_from_symbol(s, symbol);
-  return (union ast_node*)name;
-}
-
-static union ast_node *parse_string(struct parser_state *s)
-{
-  const char *chars = s->scanner.token.u.string;
-  uint32_t length = strlen(chars);
-  unsigned index = cg_register_string(&s->cg, chars, length);
-  eat(s, T_STRING);
-
-  struct ast_const *cnst = arena_allocate_type(&s->ast, struct ast_const);
-  cnst->base.type = AST_CONST;
-  cnst->index = index;
-  return (union ast_node*)cnst;
-}
-
-static union ast_node *parse_integer(struct parser_state *s)
-{
-  const char *string = s->scanner.token.u.string;
-  char *endptr;
-  errno = 0;
-  unsigned long value = strtoul(string, &endptr, 0);
-  assert(endptr != NULL);
-  assert(*endptr == '\0');
-  if (value == 0) {
-    assert(errno == 0);
-  }
-  assert(value <= INT32_MAX);
-  unsigned index = cg_register_int(&s->cg, (int32_t)value);
-  eat(s, T_INTEGER);
-
-  struct ast_const *ast_const = arena_allocate_type(&s->ast, struct ast_const);
-  ast_const->base.type = AST_CONST;
-  ast_const->index = index;
-  return (union ast_node*)ast_const;
-}
-
-static union ast_node *parse_singleton(struct parser_state *s, char type)
-{
-  next_token(s);
-  unsigned index = cg_register_singleton(&s->cg, type);
-
-  struct ast_const *ast_const = arena_allocate_type(&s->ast, struct ast_const);
-  ast_const->base.type = AST_CONST;
-  ast_const->index = index;
-  return (union ast_node*)ast_const;
-}
-
-static union ast_node *parse_atom(struct parser_state *s)
-{
-  switch (s->scanner.token.kind) {
-  case T_IDENTIFIER:  return parse_identifier(s);
-  case T_STRING:      return parse_string(s);
-  case T_INTEGER:     return parse_integer(s);
-  case T_TRUE:        return parse_singleton(s, TYPE_TRUE);
-  case T_FALSE:       return parse_singleton(s, TYPE_FALSE);
-  case T_NONE:        return parse_singleton(s, TYPE_NONE);
-  case T_DOT_DOT_DOT: return parse_singleton(s, TYPE_ELLIPSIS);
-  default:
-    unimplemented();
-  }
-}
 
 union ast_node *parse_subexpression(struct parser_state *s,
                                     enum precedence precedence)
 {
-  union ast_node *result;
   uint16_t token_kind = s->scanner.token.kind;
-  if (token_kind < sizeof(parsers) / sizeof(parsers[0]) &&
-      parsers[token_kind].prefix != NULL) {
-    prefix_parser_func prefix_parser = parsers[token_kind].prefix;
-    result = prefix_parser(s);
-  } else {
-    result = parse_atom(s);
+  if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
+    parse_error_expected(s, "expression");
+    unimplemented();
   }
+  const struct prefix_expression_parser *parser = &prefix_parsers[token_kind];
+  if (parser->func == NULL || parser->precedence < precedence) {
+    parse_error_expected(s, "expression");
+    unimplemented();
+  }
+  union ast_node *result = parser->func(s);
 
   for (;;) {
-    uint16_t infix_token_kind = s->scanner.token.kind;
-    if (infix_token_kind >= sizeof(parsers) / sizeof(parsers[0]))
+    uint16_t postifx_token_kind = s->scanner.token.kind;
+    if (postifx_token_kind >= sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
       break;
-    infix_parser_func infix_parser = parsers[infix_token_kind].infix;
-    if (infix_parser == NULL ||
-        parsers[infix_token_kind].precedence < precedence)
+    const struct postfix_expression_parser *parser =
+      &postfix_parsers[postifx_token_kind];
+    if (parser->func == NULL || parser->precedence < precedence) {
       break;
-    result = infix_parser(s, result);
+    }
+    result = parser->func(s, result);
   }
   return result;
 }

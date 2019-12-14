@@ -453,13 +453,13 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
   ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
   ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
-  [T_NOT]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
+  [T_not]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
   [T_IDENTIFIER]  = { .func = parse_identifier, .precedence = PREC_ATOM },
   [T_STRING]      = { .func = parse_string,     .precedence = PREC_ATOM },
   [T_INTEGER]     = { .func = parse_integer,    .precedence = PREC_ATOM },
-  [T_TRUE]        = { .func = parse_true,       .precedence = PREC_ATOM },
-  [T_FALSE]       = { .func = parse_false,      .precedence = PREC_ATOM },
-  [T_NONE]        = { .func = parse_none,       .precedence = PREC_ATOM },
+  [T_True]        = { .func = parse_true,       .precedence = PREC_ATOM },
+  [T_False]       = { .func = parse_false,      .precedence = PREC_ATOM },
+  [T_None]        = { .func = parse_none,       .precedence = PREC_ATOM },
   [T_DOT_DOT_DOT] = { .func = parse_ellipsis,   .precedence = PREC_ATOM },
 };
 
@@ -560,8 +560,8 @@ static union ast_node *parse_in(struct parser_state *s,
 static union ast_node *parse_not_in(struct parser_state *s,
                                     union ast_node *left)
 {
-  eat(s, T_NOT);
-  if (!accept(s, T_IN)) {
+  eat(s, T_not);
+  if (!accept(s, T_in)) {
     parse_error_expected(s, "in");
   }
 
@@ -576,8 +576,8 @@ static union ast_node *parse_not_in(struct parser_state *s,
 
 static union ast_node *parse_is(struct parser_state *s, union ast_node *left)
 {
-  eat(s, T_IS);
-  enum ast_node_type type = accept(s, T_NOT) ? AST_BINEXPR_IS_NOT
+  eat(s, T_is);
+  enum ast_node_type type = accept(s, T_not) ? AST_BINEXPR_IS_NOT
                                              : AST_BINEXPR_IS;
 
   union ast_node *right = parse_subexpression(s, PREC_COMPARISON + 1);
@@ -604,12 +604,12 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
   ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
   ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
-  [T_NOT]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
+  [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
   ['<']    = { .func = parse_less,       .precedence = PREC_COMPARISON },
   ['>']    = { .func = parse_greater,    .precedence = PREC_COMPARISON },
-  [T_IN]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
-  [T_IS]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
+  [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
+  [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
   [T_SLASH_SLASH]
       = { .func = parse_floor_div,     .precedence = PREC_TERM       },
   [T_EQUALS_EQUALS]
@@ -811,8 +811,8 @@ static void parse_small_statement(struct parser_state *s)
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
     break;
-  case T_PASS:
-    eat(s, T_PASS);
+  case T_pass:
+    eat(s, T_pass);
     break;
   /* TODO: del, break, continue, return, raise, yield,
    * import, global, nonlocal, assert */
@@ -870,7 +870,7 @@ static void emit_jump(struct parser_state *s, struct basic_block *target)
 
 static void parse_if(struct parser_state *s)
 {
-  eat(s, T_IF);
+  eat(s, T_if);
   union ast_node *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
@@ -882,7 +882,7 @@ static void parse_if(struct parser_state *s)
   parse_suite(s);
 
   struct basic_block *footer;
-  if (accept(s, T_ELSE)) {
+  if (accept(s, T_else)) {
     expect(s, ':');
 
     footer = cg_allocate_block(&s->cg);
@@ -900,7 +900,7 @@ static void parse_if(struct parser_state *s)
 
 static void parse_while(struct parser_state *s)
 {
-  eat(s, T_WHILE);
+  eat(s, T_while);
   union ast_node *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
@@ -937,7 +937,7 @@ static void parse_parameters(struct parser_state *s)
 
 static void parse_def(struct parser_state *s)
 {
-  eat(s, T_DEF);
+  eat(s, T_def);
   skip_till(s, T_IDENTIFIER);
   struct symbol *symbol = s->scanner.token.u.symbol;
   next_token(s);
@@ -970,13 +970,13 @@ static void parse_def(struct parser_state *s)
 
 static void parse_statement(struct parser_state *s) {
   switch (s->scanner.token.kind) {
-  case T_IF:
+  case T_if:
     parse_if(s);
     return;
-  case T_WHILE:
+  case T_while:
     parse_while(s);
     return;
-  case T_DEF:
+  case T_def:
     parse_def(s);
     return;
   case T_EOF:

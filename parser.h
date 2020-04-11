@@ -1,5 +1,4 @@
-#ifndef PARSER_H
-#define PARSER_H
+#pragma once
 
 #include "adt/arena.h"
 #include "scanner.h"
@@ -20,5 +19,3 @@ void parser_init(struct parser_state *s);
 void parser_free(struct parser_state *s);
 
 struct object_code *parse(struct parser_state *s);
-
-#endif

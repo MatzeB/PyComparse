@@ -1,10 +1,7 @@
-#ifndef WRITER_H
-#define WRITER_H
+#pragma once
 
 #include <stdio.h>
 
 union object;
 
 void write(FILE *out, const union object *object);
-
-#endif

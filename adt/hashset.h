@@ -1,5 +1,4 @@
-#ifndef HASH_SET
-#define HASH_SET
+#pragma once
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -97,5 +96,3 @@ static inline void hash_set_increment_num_deleted(struct hash_set *set) {
 static inline unsigned hash_set_num_buckets(const struct hash_set *set) {
   return set->num_buckets;
 }
-
-#endif

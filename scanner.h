@@ -1,5 +1,4 @@
-#ifndef SCANNER_H
-#define SCANNER_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -53,5 +52,3 @@ void scanner_next_token(struct scanner_state *s);
 const char *token_kind_name(uint16_t token_kind);
 
 void print_token(FILE *out, const struct token *token);
-
-#endif

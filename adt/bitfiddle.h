@@ -1,5 +1,4 @@
-#ifndef BITFIDDLE_H
-#define BITFIDDLE_H
+#pragma once
 
 #include <assert.h>
 #include <limits.h>
@@ -13,5 +12,3 @@ unsigned ceil_po2(unsigned x)
   assert(x < just_high_bit);
   return just_high_bit >> (__builtin_clz(x) - 1);
 }
-
-#endif

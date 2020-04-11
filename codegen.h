@@ -1,5 +1,4 @@
-#ifndef CODEGEN_H
-#define CODEGEN_H
+#pragma once
 
 #include <stdint.h>
 
@@ -64,5 +63,3 @@ struct object_code *cg_pop_code(struct cg_state *s, struct code_state *saved,
 void cg_begin(struct cg_state *s);
 struct object_code *cg_end(struct cg_state *s);
 void cg_free(struct cg_state *s);
-
-#endif

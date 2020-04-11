@@ -1,5 +1,4 @@
-#ifndef TOKEN_KINDS_H
-#define TOKEN_KINDS_H
+#pragma once
 
 enum token_kind {
 #define TCHAR(val, name, desc)  name = val,
@@ -10,5 +9,3 @@ enum token_kind {
 #undef TDES
 #undef TCHAR
 };
-
-#endif

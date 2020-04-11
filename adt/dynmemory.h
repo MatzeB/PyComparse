@@ -1,5 +1,4 @@
-#ifndef DYNMEMORY_H
-#define DYNMEMORY_H
+#pragma once
 
 #include "bitfiddle.h"
 
@@ -12,5 +11,3 @@ static inline void *dynmemory_grow(void *memory, unsigned *capacity,
   *capacity = new_capacity;
   return memory;
 }
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef OBJECTS_H
-#define OBJECTS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -101,5 +100,3 @@ void object_list_append(struct object_list *list, union object *object);
 bool object_type_is_singleton(char type);
 
 bool objects_equal(const union object *object0, const union object *object1);
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef SYMBOL_TABLE_H
-#define SYMBOL_TABLE_H
+#pragma once
 
 #include "adt/arena.h"
 #include "adt/hashset.h"
@@ -25,5 +24,3 @@ struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
 void init_symbol_table(struct symbol_table *symbol_table);
 
 void exit_symbol_table(struct symbol_table *symbol_table);
-
-#endif

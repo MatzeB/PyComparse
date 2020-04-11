@@ -1,5 +1,4 @@
-#ifndef ARENA_H
-#define ARENA_H
+#pragma once
 
 #include <assert.h>
 #include <stdalign.h>
@@ -170,5 +169,3 @@ static inline void *arena_grow_finish(struct arena *arena)
 
 #define arena_allocate_type(arena, type) \
   ((type*)arena_allocate((arena), sizeof(type), alignof(type)))
-
-#endif

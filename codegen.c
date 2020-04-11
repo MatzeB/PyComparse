@@ -1,11 +1,19 @@
 #include "codegen.h"
+#include "codegen_types.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "adt/arena.h"
 #include "objects.h"
+#include "objects_types.h"
 #include "opcodes.h"
+
+static inline void arena_grow_u8(struct arena *arena, uint8_t value)
+{
+  arena_grow_char(arena, (char)value);
+}
 
 struct basic_block *cg_allocate_block(struct cg_state *s)
 {
@@ -47,7 +55,7 @@ static void cg_init_code(struct cg_state *s, struct code_state *code)
   cg_begin_block(s, first);
 }
 
-static struct object_code *cg_end_code(struct cg_state *s, const char *name)
+static union object *cg_end_code(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
   if (!s->code.had_return) {
@@ -141,19 +149,19 @@ static struct object_code *cg_end_code(struct cg_state *s, const char *name)
   unsigned code_length = arena_grow_current_size(&s->objects);
   char* code_bytes = arena_grow_finish(&s->objects);
 
-  struct object_code *code = object_new_code(&s->objects);
-  code->code = (union object*)make_bytes(&s->objects, code_length, code_bytes);
-  code->consts = (union object*)s->code.consts;
-  code->names = (union object*)s->code.names;
-  code->varnames = (union object*)object_new_tuple(&s->objects, 0);
-  code->freevars = (union object*)object_new_tuple(&s->objects, 0);
-  code->cellvars = (union object*)object_new_tuple(&s->objects, 0);
-  code->filename = (union object*)make_ascii(&s->objects, "simple.py");
-  code->name = (union object*)make_ascii(&s->objects, name);
-  code->lnotab = (union object*)make_bytes(&s->objects, 0, NULL);
+  union object *object = object_new_code(&s->objects);
+  object->code.code = make_bytes(&s->objects, code_length, code_bytes);
+  object->code.consts = s->code.consts;
+  object->code.names = s->code.names;
+  object->code.varnames = object_new_tuple(&s->objects, 0);
+  object->code.freevars = object_new_tuple(&s->objects, 0);
+  object->code.cellvars = object_new_tuple(&s->objects, 0);
+  object->code.filename = make_ascii(&s->objects, "simple.py");
+  object->code.name = make_ascii(&s->objects, name);
+  object->code.lnotab = make_bytes(&s->objects, 0, NULL);
 
   arena_free_all(&s->code.opcodes);
-  return code;
+  return object;
 }
 
 struct code_state *cg_push_code(struct cg_state *s)
@@ -165,13 +173,13 @@ struct code_state *cg_push_code(struct cg_state *s)
   return saved;
 }
 
-struct object_code *cg_pop_code(struct cg_state *s, struct code_state *saved,
-                                const char *name)
+union object *cg_pop_code(struct cg_state *s, struct code_state *saved,
+                          const char *name)
 {
-  struct object_code *result = cg_end_code(s, name);
+  union object *object = cg_end_code(s, name);
   memcpy(&s->code, saved, sizeof(s->code));
   arena_free(&s->codestack, saved);
-  return result;
+  return object;
 }
 
 void cg_begin(struct cg_state *s)
@@ -184,7 +192,7 @@ void cg_begin(struct cg_state *s)
   s->code.module_level = true;
 }
 
-struct object_code *cg_end(struct cg_state *s)
+union object *cg_end(struct cg_state *s)
 {
   return cg_end_code(s, "<module>");
 }
@@ -202,11 +210,11 @@ void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
   if (arg >= 256) {
     assert(arg <= 0xffff);
     arena_grow_char(&s->code.opcodes, (char)OPCODE_EXTENDED_ARG);
-    arena_grow_char(&s->code.opcodes, arg >> 8);
+    arena_grow_u8(&s->code.opcodes, (uint8_t)(arg >> 8));
     arg &= 0xff;
   }
-  arena_grow_char(&s->code.opcodes, opcode);
-  arena_grow_char(&s->code.opcodes, arg);
+  arena_grow_u8(&s->code.opcodes, opcode);
+  arena_grow_u8(&s->code.opcodes, (uint8_t)arg);
 }
 
 static void push(struct cg_state *s)
@@ -239,57 +247,57 @@ void cg_pop_op(struct cg_state *s, uint8_t opcode,
 unsigned cg_register_singleton(struct cg_state *s, char type)
 {
   assert(object_type_is_singleton(type));
-  struct object_list *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->length; ++i) {
-    const union object *object = consts->items[i];
+  union object *consts = s->code.consts;
+  for (unsigned i = 0; i < consts->list.length; ++i) {
+    const union object *object = consts->list.items[i];
     if (object->type == type)
       return i;
   }
-  struct object_base *singleton = object_new_singleton(&s->objects, type);
-  object_list_append(consts, (union object*)singleton);
-  return consts->length - 1;
+  union object *singleton = object_new_singleton(&s->objects, type);
+  object_list_append(consts, singleton);
+  return consts->list.length - 1;
 }
 
 unsigned cg_register_string(struct cg_state *s,
                                 const char *chars, uint32_t length)
 {
-  struct object_list *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->length; ++i) {
-    const union object *object = consts->items[i];
+  union object *consts = s->code.consts;
+  for (unsigned i = 0; i < consts->list.length; ++i) {
+    const union object *object = consts->list.items[i];
     if (object->type != TYPE_ASCII)
       continue;
     const struct object_string *string = &object->string;
-    if (string->length == length && memcmp(string->chars, chars, length) == 0)
+    if (string->length == length && memcmp(string->chars, chars, length) == 0) {
       return i;
+    }
   }
-  struct object_string *string = make_string(&s->objects, TYPE_ASCII,
-                                             length, chars);
-  object_list_append(consts, (union object*)string);
-  return consts->length - 1;
+  union object *string = make_string(&s->objects, TYPE_ASCII, length, chars);
+  object_list_append(consts, string);
+  return consts->list.length - 1;
 }
 
 unsigned cg_register_int(struct cg_state *s, int32_t value)
 {
-  struct object_list *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->length; ++i) {
-    const union object *object = consts->items[i];
+  union object *consts = s->code.consts;
+  for (unsigned i = 0; i < consts->list.length; ++i) {
+    const union object *object = consts->list.items[i];
     if (object->type != TYPE_INT)
       continue;
     const struct object_int *int_obj = &object->int_obj;
     if (int_obj->value == value)
       return i;
   }
-  struct object_int *int_obj = make_int(&s->objects, value);
-  object_list_append(consts, (union object*)int_obj);
-  return consts->length - 1;
+  union object *int_obj = make_int(&s->objects, value);
+  object_list_append(consts, int_obj);
+  return consts->list.length - 1;
 }
 
 unsigned cg_register_name(struct cg_state *s, const char *name)
 {
-  struct object_list *names = s->code.names;
+  union object *names = s->code.names;
   unsigned name_length = strlen(name);
-  for (unsigned i = 0, length = names->length; i < length; ++i) {
-    const union object *object = names->items[i];
+  for (unsigned i = 0, length = names->list.length; i < length; ++i) {
+    const union object *object = names->list.items[i];
     assert(object->type == TYPE_ASCII);
     if (object->string.length == name_length &&
         memcmp(object->string.chars, name, name_length) == 0) {
@@ -301,15 +309,16 @@ unsigned cg_register_name(struct cg_state *s, const char *name)
 
 unsigned cg_append_name(struct cg_state *s, const char *name)
 {
-  struct object_list *names = s->code.names;
-  const struct object_string *string = make_ascii(&s->objects, name);
-  object_list_append(names, (union object*)string);
-  return names->length - 1;
+  union object *names = s->code.names;
+  union object *string = make_ascii(&s->objects, name);
+  object_list_append(names, string);
+  return names->list.length - 1;
 }
 
-unsigned cg_register_code(struct cg_state *s, struct object_code *code)
+unsigned cg_register_code(struct cg_state *s, union object *code)
 {
-  struct object_list *consts = s->code.consts;
-  object_list_append(consts, (union object*)code);
-  return consts->length - 1;
+  assert(code->type == TYPE_CODE);
+  union object *consts = s->code.consts;
+  object_list_append(consts, code);
+  return consts->list.length - 1;
 }

@@ -1,7 +1,11 @@
-#include "parser.h"
-
 #include "adt/arena.h"
+#include "parser.h"
+#include "parser_types.h"
+#include "scanner.h"
+#include "scanner_types.h"
 #include "symbol_table.h"
+#include "symbol_table_types.h"
+#include "writer.h"
 
 int main(int argc, char **argv)
 {
@@ -24,8 +28,8 @@ int main(int argc, char **argv)
   parser_init(&s);
   scanner_init(&s.scanner, input, &symbol_table, &strings);
 
-  struct object_code *code = parse(&s);
-  write(stdout, (union object*)code);
+  union object *code = parse(&s);
+  write(stdout, code);
 
   if (input != stdin) {
     fclose(input);

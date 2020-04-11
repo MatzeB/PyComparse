@@ -1,4 +1,5 @@
 #include "scanner.h"
+#include "scanner_types.h"
 
 #include <assert.h>
 #include <stdalign.h>
@@ -9,6 +10,8 @@
 
 #include "adt/arena.h"
 #include "symbol_table.h"
+#include "symbol_table_types.h"
+#include "symbol_types.h"
 #include "token_kinds.h"
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
@@ -152,7 +155,7 @@ static void scan_identifier(struct scanner_state *s, char first_char)
   for (;;) {
     switch (s->c) {
     case IDENTIFIER_CASES:
-      arena_grow_char(arena, s->c);
+      arena_grow_char(arena, (char)s->c);
       next_char(s);
       continue;
     default:
@@ -199,7 +202,7 @@ static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena) {
     default:
       return;
     }
-    arena_grow_char(arena, s->c);
+    arena_grow_char(arena, (char)s->c);
     next_char(s);
   }
 }
@@ -214,7 +217,7 @@ static void scan_decinteger(struct scanner_state *s, struct arena *arena) {
     default:
       return;
     }
-    arena_grow_char(arena, s->c);
+    arena_grow_char(arena, (char)s->c);
   }
 }
 
@@ -222,7 +225,7 @@ static void scan_number(struct scanner_state *s)
 {
   struct arena *arena = s->strings;
   arena_grow_begin(arena, alignof(char));
-  arena_grow_char(arena, s->c);
+  arena_grow_char(arena, (char)s->c);
   if (s->c == '0') {
     next_char(s);
     switch (s->c) {
@@ -256,7 +259,7 @@ static void scan_number(struct scanner_state *s)
 static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
 {
   assert(s->c == '"' || s->c == '\'');
-  char quote = s->c;
+  int quote = s->c;
   next_char(s);
 
   s->token.kind = token_kind;
@@ -300,7 +303,6 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
       ++s->line;
       fprintf(stderr, "TODO: complain about newline\n");
       abort();
-      break;
     case C_EOF:
       // TODO: complain
       fprintf(stderr, "TODO\n");
@@ -310,7 +312,7 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
         fprintf(stderr, "TODO: non-ascii\n");
         abort();
       }
-      arena_grow_char(arena, s->c);
+      arena_grow_char(arena, (char)s->c);
       next_char(s);
       continue;
     }
@@ -437,7 +439,7 @@ void scanner_next_token(struct scanner_state *s)
       return;
   }
 
-  unsigned invalid_c;
+  int invalid_c;
   for (;;) {
     switch (s->c) {
     case '\r':
@@ -465,7 +467,7 @@ void scanner_next_token(struct scanner_state *s)
       continue;
 
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
-      char first_char = s->c;
+      char first_char = (char)s->c;
       next_char(s);
       scan_identifier(s, first_char);
       return;
@@ -478,7 +480,7 @@ void scanner_next_token(struct scanner_state *s)
 
     case 'b':
     case 'B': {
-      char first_char = s->c;
+      char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"') {
         scan_string_literal(s, T_BYTE_STRING);
@@ -491,7 +493,7 @@ void scanner_next_token(struct scanner_state *s)
 
     case 'f':
     case 'F': {
-      char first_char = s->c;
+      char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"') {
         scan_string_literal(s, T_FORMAT_STRING);
@@ -504,7 +506,7 @@ void scanner_next_token(struct scanner_state *s)
 
     case 'r':
     case 'R': {
-      char first_char = s->c;
+      char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"') {
         scan_string_literal(s, T_RAW_STRING);
@@ -517,7 +519,7 @@ void scanner_next_token(struct scanner_state *s)
 
     case 'u':
     case 'U': {
-      char first_char = s->c;
+      char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"') {
         scan_string_literal(s, T_UNICODE_STRING);
@@ -753,7 +755,7 @@ void scanner_next_token(struct scanner_state *s)
     case ';':
     case '~':
 single_char_token:
-      s->token.kind = s->c;
+      s->token.kind = (uint16_t)s->c;
       next_char(s);
       return;
 
@@ -778,12 +780,12 @@ void scanner_init(struct scanner_state *s, FILE *input,
                   struct symbol_table *symbol_table, struct arena *strings)
 {
   memset(s, 0, sizeof(*s));
-  s->input            = input,
-  s->at_begin_of_line = true,
-  s->read_buffer      = malloc(16 * 1024 - 16),
-  s->read_buffer_size = 4096,
-  s->symbol_table     = symbol_table,
-  s->strings          = strings,
+  s->input            = input;
+  s->at_begin_of_line = true;
+  s->read_buffer      = malloc(16 * 1024 - 16);
+  s->read_buffer_size = 4096;
+  s->symbol_table     = symbol_table;
+  s->strings          = strings;
   next_char(s);
 }
 

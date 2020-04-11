@@ -1,4 +1,5 @@
 #include "objects.h"
+#include "objects_types.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,12 +34,21 @@ bool objects_equal(const union object *object0, const union object *object1)
   }
 }
 
-struct object_list *object_new_list(struct arena *arena)
+static union object *object_allocate_zero_(struct arena *arena,
+                                           size_t size, char type) {
+  union object *object =
+      (union object*)arena_allocate(arena, size, alignof(union object));
+  memset(object, 0, size);
+  object->type = type;
+  return object;
+}
+
+#define object_allocate_zero(arena, type, type_id) \
+    object_allocate_zero_((arena), sizeof(type), type_id)
+
+union object *object_new_list(struct arena *arena)
 {
-  struct object_list *list = arena_allocate_type(arena, struct object_list);
-  memset(list, 0, sizeof(*list));
-  list->base.type = TYPE_LIST;
-  return list;
+  return object_allocate_zero(arena, struct object_list, TYPE_LIST);
 }
 
 static void object_list_grow(struct object_list *list, unsigned size)
@@ -47,32 +57,29 @@ static void object_list_grow(struct object_list *list, unsigned size)
                                                  size, sizeof(list->items[0]));
 }
 
-void object_list_append(struct object_list *list, union object *object)
+void object_list_append(union object *list, union object *object)
 {
-  unsigned new_size = list->length + 1;
-  if (UNLIKELY(new_size >= list->capacity)) {
-    object_list_grow(list, new_size);
+  assert(list->type == TYPE_LIST);
+  unsigned new_size = list->list.length + 1;
+  if (UNLIKELY(new_size >= list->list.capacity)) {
+    object_list_grow(&list->list, new_size);
   }
-  list->items[list->length++] = object;
+  list->list.items[list->list.length++] = object;
 }
 
-struct object_tuple *object_new_tuple(struct arena *arena, uint32_t length)
+union object *object_new_tuple(struct arena *arena, uint32_t length)
 {
-  struct object_tuple *tuple;
-  unsigned size = sizeof(struct object_tuple) + length * sizeof(tuple->items[0]);
-  tuple = arena_allocate(arena, size, alignof(struct object_tuple));
-  tuple->base.type = TYPE_TUPLE;
-  tuple->length = length;
-  return tuple;
+  union object *object;
+  size_t size =
+      sizeof(struct object_tuple) + length * sizeof(object->tuple.items[0]);
+  object = object_allocate_zero_(arena, size, TYPE_TUPLE);
+  object->tuple.length = length;
+  return object;
 }
 
-struct object_code *object_new_code(struct arena *arena)
+union object *object_new_code(struct arena *arena)
 {
-  struct object_code *code = arena_allocate_type(arena, struct object_code);
-  memset(code, 0, sizeof(*code));
-  code->base.type = TYPE_CODE;
-
-  return code;
+  return object_allocate_zero(arena, struct object_code, TYPE_CODE);
 }
 
 bool object_type_is_singleton(char type)
@@ -88,40 +95,37 @@ bool object_type_is_singleton(char type)
   }
 }
 
-struct object_base *object_new_singleton(struct arena *arena, char type)
+union object *object_new_singleton(struct arena *arena, char type)
 {
   assert(object_type_is_singleton(type));
-  struct object_base *object = arena_allocate_type(arena, struct object_base);
-  object->type = type;
+  return object_allocate_zero(arena, struct object_base, type);
+}
+
+union object *make_string(struct arena *arena, char type,
+                          uint32_t length, const char *chars)
+{
+  union object *object = object_allocate_zero(arena, struct object_string,
+                                              type);
+  object->string.length = length;
+  object->string.chars = chars;
   return object;
 }
 
-struct object_string *make_string(struct arena *arena, char type,
-                                  uint32_t length, const char *chars)
+union object *make_int(struct arena *arena, int32_t value)
 {
-  struct object_string *result =
-      arena_allocate_type(arena, struct object_string);
-  result->base.type = type;
-  result->length = length;
-  result->chars = chars;
-  return result;
+  union object *object = object_allocate_zero(arena, struct object_int,
+                                              TYPE_INT);
+  object->int_obj.value = value;
+  return object;
 }
 
-struct object_int *make_int(struct arena *arena, int32_t value)
-{
-  struct object_int *result = arena_allocate_type(arena, struct object_int);
-  result->base.type = TYPE_INT;
-  result->value = value;
-  return result;
-}
-
-struct object_string *make_bytes(struct arena *arena, uint32_t length,
-                                 const char *chars)
+union object *make_bytes(struct arena *arena, uint32_t length,
+                         const char *chars)
 {
   return make_string(arena, TYPE_STRING, length, chars);
 }
 
-struct object_string *make_ascii(struct arena *arena, const char *str)
+union object *make_ascii(struct arena *arena, const char *str)
 {
   uint32_t length = strlen(str);
   return make_string(arena, TYPE_ASCII, length, str);

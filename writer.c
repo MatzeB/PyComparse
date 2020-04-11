@@ -8,11 +8,17 @@
 
 #include "adt/dynmemory.h"
 #include "objects.h"
+#include "objects_types.h"
 #include "opcodes.h"
 
 struct writer_state {
   FILE *out;
 };
+
+static void write_char(struct writer_state *s, char value)
+{
+  fputc(value, s->out);
+}
 
 static void write_uint8(struct writer_state *s, uint8_t value)
 {
@@ -21,16 +27,16 @@ static void write_uint8(struct writer_state *s, uint8_t value)
 
 static void write_uint32(struct writer_state *s, uint32_t value)
 {
-  write_uint8(s, value >> 0);
-  write_uint8(s, value >> 8);
-  write_uint8(s, value >> 16);
-  write_uint8(s, value >> 24);
+  write_uint8(s, (uint8_t)(value >> 0));
+  write_uint8(s, (uint8_t)(value >> 8));
+  write_uint8(s, (uint8_t)(value >> 16));
+  write_uint8(s, (uint8_t)(value >> 24));
 }
 
 static void write_uint16(struct writer_state *s, uint16_t value)
 {
-  write_uint8(s, value >> 0);
-  write_uint8(s, value >> 8);
+  write_uint8(s, (uint8_t)(value >> 0));
+  write_uint8(s, (uint8_t)(value >> 8));
 }
 
 static void write_header(struct writer_state *s)
@@ -47,7 +53,7 @@ static void write_object(struct writer_state *s, const union object *object);
 
 static void write_list(struct writer_state *s, const struct object_list *list)
 {
-  write_uint8(s, TYPE_LIST);
+  write_char(s, TYPE_LIST);
   write_uint32(s, list->length);
   uint32_t length = list->length;
   assert(length < UINT32_MAX);
@@ -60,10 +66,10 @@ static void write_tuple_(struct writer_state *s,
                          uint32_t length, union object *const *items)
 {
   if (length < 256) {
-    write_uint8(s, TYPE_SMALL_TUPLE);
-    write_uint8(s, length);
+    write_char(s, TYPE_SMALL_TUPLE);
+    write_uint8(s, (uint8_t)length);
   } else {
-    write_uint8(s, TYPE_TUPLE);
+    write_char(s, TYPE_TUPLE);
     write_uint32(s, length);
   }
   for (uint32_t i = 0; i < length; ++i) {
@@ -90,27 +96,28 @@ static void write_string(struct writer_state *s,
   assert(type == TYPE_STRING || type == TYPE_ASCII);
   uint32_t length = string->length;
   if (length < 256 && type == TYPE_ASCII) {
-    write_uint8(s, TYPE_SHORT_ASCII);
-    write_uint8(s, length);
+    write_char(s, TYPE_SHORT_ASCII);
+    write_uint8(s, (uint8_t)length);
   } else {
-    write_uint8(s, type);
+    write_char(s, type);
     write_uint32(s, length);
   }
-  for (uint32_t i = 0; i < length; ++i)
-    write_uint8(s, string->chars[i]);
+  for (uint32_t i = 0; i < length; ++i) {
+    write_char(s, string->chars[i]);
+  }
 }
 
 static void write_int(struct writer_state *s,
                       const struct object_int *obj_int)
 {
-  write_uint8(s, TYPE_INT);
+  write_char(s, TYPE_INT);
   write_uint32(s, (uint32_t)obj_int->value);
 }
 
 static void write_code(struct writer_state *s,
                        const struct object_code *code)
 {
-  write_uint8(s, TYPE_CODE);
+  write_char(s, TYPE_CODE);
   write_uint32(s, code->argcount);
   write_uint32(s, code->kwonlyargcount);
   write_uint32(s, code->nlocals);
@@ -133,7 +140,7 @@ static void write_code(struct writer_state *s,
 static void write_object(struct writer_state *s, const union object *object)
 {
   if (object == NULL) {
-    write_uint8(s, TYPE_NULL);
+    write_char(s, TYPE_NULL);
     return;
   }
   switch (object->type) {
@@ -141,7 +148,7 @@ static void write_object(struct writer_state *s, const union object *object)
   case TYPE_TRUE:
   case TYPE_FALSE:
   case TYPE_ELLIPSIS:
-    write_uint8(s, object->type);
+    write_char(s, object->type);
     break;
   case TYPE_LIST:
     write_list(s, &object->list);

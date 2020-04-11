@@ -1,0 +1,151 @@
+#include "codegen_ast.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "ast.h"
+#include "ast_types.h"
+#include "codegen.h"
+#include "opcodes.h"
+#include "util.h"
+
+static void emit_binexpr(struct cg_state *cg, struct ast_binexpr *binexpr,
+                         uint8_t opcode)
+{
+  emit_expression(cg, binexpr->left, false);
+  emit_expression(cg, binexpr->right, false);
+  cg_pop_op(cg, opcode, 0);
+}
+
+static void emit_comparison(struct cg_state *cg, struct ast_binexpr *binexpr,
+                            enum compare_op_arg arg)
+{
+  emit_expression(cg, binexpr->left, false);
+  emit_expression(cg, binexpr->right, false);
+  cg_pop_op(cg, OPCODE_COMPARE_OP, arg);
+}
+
+static void emit_unexpr(struct cg_state *cg, struct ast_unexpr *unexpr,
+                        uint8_t opcode)
+{
+  emit_expression(cg, unexpr->op, false);
+  cg_op(cg, opcode, 0);
+}
+
+static void emit_assignment(struct cg_state *cg, struct ast_binexpr *binexpr,
+                            bool drop)
+{
+  union ast_node *left = binexpr->left;
+  if (left->type == AST_NAME) {
+    emit_expression(cg, binexpr->right, false);
+    if (!drop) {
+      cg_push_op(cg, OPCODE_DUP_TOP, 0);
+    }
+    cg_pop_op(cg, OPCODE_STORE_NAME, left->name.index);
+  } else {
+    fprintf(stderr, "Unsupported or invalid lvalue\n");
+    unimplemented();
+  }
+}
+
+static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
+{
+  emit_expression(cg, call->callee, false);
+  unsigned n_arguments = 0;
+  for (struct argument *argument = call->arguments; argument != NULL;
+       argument = argument->next) {
+    emit_expression(cg, argument->expression, false);
+    ++n_arguments;
+  }
+  cg_op(cg, OPCODE_CALL_FUNCTION, n_arguments);
+  cg_pop(cg, n_arguments);
+  if (drop) {
+    cg_pop_op(cg, OPCODE_POP_TOP, 0);
+  }
+}
+
+void emit_expression(struct cg_state *cg, union ast_node *expression,
+                     bool drop)
+{
+  switch (expression->type) {
+  case AST_CONST:
+    cg_push_op(cg, OPCODE_LOAD_CONST, expression->cnst.index);
+    break;
+  case AST_NAME:
+    cg_push_op(cg, OPCODE_LOAD_NAME, expression->name.index);
+    break;
+  case AST_BINEXPR_ADD:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_ADD);
+    break;
+  case AST_BINEXPR_ASSIGN:
+    emit_assignment(cg, &expression->binexpr, drop);
+    return;
+  case AST_BINEXPR_FLOORDIV:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_FLOOR_DIVIDE);
+    break;
+  case AST_BINEXPR_TRUEDIV:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_TRUE_DIVIDE);
+    break;
+  case AST_BINEXPR_MATMUL:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_MATRIX_MULTIPLY);
+    break;
+  case AST_BINEXPR_SUB:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_SUBTRACT);
+    break;
+  case AST_BINEXPR_MUL:
+    emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_MULTIPLY);
+    break;
+  case AST_BINEXPR_LESS:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_LT);
+    break;
+  case AST_BINEXPR_LESS_EQUAL:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_LE);
+    break;
+  case AST_BINEXPR_EQUAL:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_EQ);
+    break;
+  case AST_BINEXPR_UNEQUAL:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_NE);
+    break;
+  case AST_BINEXPR_GREATER:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_GT);
+    break;
+  case AST_BINEXPR_GREATER_EQUAL:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_GE);
+    break;
+  case AST_BINEXPR_IN:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_IN);
+    break;
+  case AST_BINEXPR_NOT_IN:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_NOT_IN);
+    break;
+  case AST_BINEXPR_IS:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_IS);
+    break;
+  case AST_BINEXPR_IS_NOT:
+    emit_comparison(cg, &expression->binexpr, COMPARE_OP_IS_NOT);
+    break;
+  case AST_UNEXPR_PLUS:
+    emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_POSITIVE);
+    break;
+  case AST_UNEXPR_NEGATIVE:
+    emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_NEGATIVE);
+    break;
+  case AST_UNEXPR_NOT:
+    emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_NOT);
+    break;
+  case AST_UNEXPR_INVERT:
+    emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_INVERT);
+    break;
+  case AST_CALL: {
+    emit_call(cg, &expression->call, drop);
+    return;
+  }
+  default:
+    fprintf(stderr, "unexpected expression");
+    abort();
+  }
+  if (drop) {
+    cg_pop_op(cg, OPCODE_POP_TOP, 0);
+  }
+}

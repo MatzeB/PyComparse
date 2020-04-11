@@ -4,7 +4,6 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,7 +37,7 @@ void arena_allocate_block_(struct arena *arena, unsigned size)
   const unsigned default_block_size = 16 * 1024;
   unsigned block_size = size < default_block_size
     ? default_block_size : ceil_po2(size + sizeof(struct block_header));
-  char *memory = malloc(block_size);
+  void *memory = malloc(block_size);
   struct block_header *header = (struct block_header*)memory;
   header->prev       = arena->block;
   header->block_size = block_size;
@@ -100,7 +99,7 @@ static inline void arena_free(struct arena *arena, const void *free_up_to)
   }
   assert(block != NULL && "address must be part of arena");
   arena->block     = block;
-  arena->allocated = (char*)free_up_to - (char*)block;
+  arena->allocated = (const char*)free_up_to - (const char*)block;
   arena->limit     = block->block_size;
 }
 

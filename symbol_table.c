@@ -1,5 +1,7 @@
 #include "symbol_table.h"
+#include "symbol_table_types.h"
 
+#include "symbol_types.h"
 #include "token_kinds.h"
 
 struct symbol_table_bucket {

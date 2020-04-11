@@ -1,22 +1,7 @@
 #pragma once
 
-#include "adt/arena.h"
-#include "adt/hashset.h"
-
-struct symbol_table_bucket;
-struct arena;
-
-struct symbol {
-  const char *string;
-  uint16_t    token_kind;
-  uint16_t    name_index;
-};
-
-struct symbol_table {
-  struct hash_set             set;
-  struct symbol_table_bucket *buckets;
-  struct arena                arena;
-};
+struct symbol;
+struct symbol_table;
 
 struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
                                           const char *string);

@@ -1,5 +1,7 @@
 #include "scanner.h"
+#include "scanner_types.h"
 #include "symbol_table.h"
+#include "symbol_table_types.h"
 #include "token_kinds.h"
 
 int main(int argc, char **argv)

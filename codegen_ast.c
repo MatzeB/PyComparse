@@ -15,23 +15,23 @@
 static void emit_binexpr(struct cg_state *cg, struct ast_binexpr *binexpr,
                          uint8_t opcode)
 {
-  emit_expression(cg, binexpr->left, false);
-  emit_expression(cg, binexpr->right, false);
+  emit_expression(cg, binexpr->left);
+  emit_expression(cg, binexpr->right);
   cg_pop_op(cg, opcode, 0);
 }
 
 static void emit_comparison(struct cg_state *cg, struct ast_binexpr *binexpr,
                             enum compare_op_arg arg)
 {
-  emit_expression(cg, binexpr->left, false);
-  emit_expression(cg, binexpr->right, false);
+  emit_expression(cg, binexpr->left);
+  emit_expression(cg, binexpr->right);
   cg_pop_op(cg, OPCODE_COMPARE_OP, arg);
 }
 
 static void emit_unexpr(struct cg_state *cg, struct ast_unexpr *unexpr,
                         uint8_t opcode)
 {
-  emit_expression(cg, unexpr->op, false);
+  emit_expression(cg, unexpr->op);
   cg_op(cg, opcode, 0);
 }
 
@@ -92,16 +92,10 @@ static void emit_load(struct cg_state *cg, struct symbol *symbol)
   abort();
 }
 
-static void emit_assignment(struct cg_state *cg, struct ast_binexpr *binexpr,
-                            bool drop)
+void emit_assignment(struct cg_state *cg, union ast_node *target)
 {
-  union ast_node *left = binexpr->left;
-  if (left->type == AST_IDENTIFIER) {
-    emit_expression(cg, binexpr->right, false);
-    if (!drop) {
-      cg_push_op(cg, OPCODE_DUP_TOP, 0);
-    }
-    emit_store(cg, left->identifier.symbol);
+  if (target->type == AST_IDENTIFIER) {
+    emit_store(cg, target->identifier.symbol);
   } else {
     fprintf(stderr, "Unsupported or invalid lvalue\n");
     unimplemented();
@@ -110,11 +104,11 @@ static void emit_assignment(struct cg_state *cg, struct ast_binexpr *binexpr,
 
 static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
 {
-  emit_expression(cg, call->callee, false);
+  emit_expression(cg, call->callee);
   unsigned n_arguments = 0;
   for (struct argument *argument = call->arguments; argument != NULL;
        argument = argument->next) {
-    emit_expression(cg, argument->expression, false);
+    emit_expression(cg, argument->expression);
     ++n_arguments;
   }
   cg_op(cg, OPCODE_CALL_FUNCTION, n_arguments);
@@ -124,8 +118,8 @@ static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
   }
 }
 
-void emit_expression(struct cg_state *cg, union ast_node *expression,
-                     bool drop)
+static void emit_expression_impl(struct cg_state *cg,
+                                 union ast_node *expression, bool drop)
 {
   switch (expression->type) {
   case AST_CONST:
@@ -139,7 +133,11 @@ void emit_expression(struct cg_state *cg, union ast_node *expression,
     emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_ADD);
     break;
   case AST_BINEXPR_ASSIGN:
-    emit_assignment(cg, &expression->binexpr, drop);
+    emit_expression(cg, expression->binexpr.right);
+    if (!drop) {
+      cg_push_op(cg, OPCODE_DUP_TOP, 0);
+    }
+    emit_assignment(cg, expression->binexpr.left);
     return;
   case AST_BINEXPR_FLOORDIV:
     emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_FLOOR_DIVIDE);
@@ -209,4 +207,14 @@ void emit_expression(struct cg_state *cg, union ast_node *expression,
   if (drop) {
     cg_pop_op(cg, OPCODE_POP_TOP, 0);
   }
+}
+
+void emit_expression(struct cg_state *s, union ast_node *expression)
+{
+  emit_expression_impl(s, expression, false);
+}
+
+void emit_expression_drop_result(struct cg_state *s, union ast_node *expression)
+{
+  emit_expression_impl(s, expression, true);
 }

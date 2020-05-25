@@ -671,6 +671,22 @@ static void parse_if(struct parser_state *s)
   emit_end_if(&s->cg, &state);
 }
 
+static void parse_for(struct parser_state *s)
+{
+  eat(s, T_for);
+  union ast_node *target = parse_subexpression(s, PREC_XOR);
+  expect(s, T_in);
+  union ast_node *expression = parse_subexpression(s, PREC_TEST);
+  expect(s, ':');
+
+  struct for_state state;
+  emit_begin_for(&s->cg, &state, target, expression);
+
+  parse_suite(s);
+
+  emit_end_for(&s->cg, &state);
+}
+
 static void parse_while(struct parser_state *s)
 {
   eat(s, T_while);
@@ -734,6 +750,9 @@ static void parse_def(struct parser_state *s)
 static void parse_statement(struct parser_state *s)
 {
   switch (s->scanner.token.kind) {
+  case T_for:
+    parse_for(s);
+    return;
   case T_if:
     parse_if(s);
     return;

@@ -55,6 +55,9 @@ static void object_list_grow(struct object_list *list, unsigned size)
 {
     list->items = (union object**)dynmemory_grow(list->items, &list->capacity,
                                                  size, sizeof(list->items[0]));
+    if (list->items == NULL) {
+      abort();
+    }
 }
 
 void object_list_append(union object *list, union object *object)

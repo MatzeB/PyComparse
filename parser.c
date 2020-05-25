@@ -186,30 +186,6 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
     eat(s, expected_token_kind);
 }
 
-static uint16_t name_index_from_symbol(struct parser_state *s,
-                                       struct symbol *symbol)
-{
-  if (s->cg.code.module_level) {
-    uint16_t index = symbol->name_index;
-    if (index > 0)
-      return index - 1;
-
-    unsigned new_index = cg_append_name(&s->cg, symbol->string);
-    if ((uint16_t)(new_index + 1) != (new_index + 1)) {
-      abort();
-    }
-    index = (uint16_t)new_index;
-    symbol->name_index = index + 1;
-    return index;
-  } else {
-    unsigned new_index = cg_register_name(&s->cg, symbol->string);
-    if ((uint16_t)new_index != new_index) {
-      abort();
-    }
-    return (uint16_t)new_index;
-  }
-}
-
 static union ast_node *ast_allocate_zero_(struct parser_state *s,
                                           size_t size, uint8_t type) {
   union ast_node *node =
@@ -311,8 +287,9 @@ static union ast_node *parse_identifier(struct parser_state *s)
   struct symbol *symbol = s->scanner.token.u.symbol;
   eat(s, T_IDENTIFIER);
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_name, AST_NAME);
-  node->name.index = name_index_from_symbol(s, symbol);
+  union ast_node *node = ast_allocate_zero(s, struct ast_identifier,
+                                           AST_IDENTIFIER);
+  node->identifier.symbol = symbol;
   return node;
 }
 
@@ -741,8 +718,30 @@ static void parse_while(struct parser_state *s)
 static void parse_parameters(struct parser_state *s)
 {
   expect(s, '(');
-  /* TODO */
+
+  unsigned num_parameters = 0;
+  while (peek(s, T_IDENTIFIER)) {
+    struct symbol *symbol = s->scanner.token.u.symbol;
+    next_token(s);
+
+    struct symbol_info *info = cg_symbol_info(&s->cg, symbol);
+    if (info != NULL) {
+      fprintf(stderr, "error: duplicate parameter '%s'\n", symbol->string);
+      s->error = true;
+    } else {
+      info = cg_new_symbol_info(&s->cg, symbol);
+      info->type = SYMBOL_LOCAL;
+      info->index = cg_append_varname(&s->cg, symbol->string);
+      assert(s->error || info->index == num_parameters);
+    }
+    num_parameters++;
+    if (!accept(s, ',')) {
+      break;
+    }
+  }
+
   expect(s, ')');
+  s->cg.code.argcount = num_parameters;
 }
 
 static void parse_def(struct parser_state *s)
@@ -752,6 +751,8 @@ static void parse_def(struct parser_state *s)
   struct symbol *symbol = s->scanner.token.u.symbol;
   next_token(s);
 
+  cg_push_code(&s->cg);
+
   parse_parameters(s);
   if (accept(s, T_MINUS_GREATER_THAN)) {
     parse_subexpression(s, PREC_TEST);
@@ -759,11 +760,9 @@ static void parse_def(struct parser_state *s)
   }
   expect(s, ':');
 
-  struct code_state *saved = cg_push_code(&s->cg);
-
   parse_suite(s);
 
-  union object *code = cg_pop_code(&s->cg, saved, symbol->string);
+  union object *code = cg_pop_code(&s->cg, symbol->string);
   unsigned code_index = cg_register_code(&s->cg, code);
   cg_push_op(&s->cg, OPCODE_LOAD_CONST, code_index);
 
@@ -774,8 +773,7 @@ static void parse_def(struct parser_state *s)
 
   cg_op(&s->cg, OPCODE_MAKE_FUNCTION, 0);
   cg_pop(&s->cg, 1);
-  uint16_t name_index = name_index_from_symbol(s, symbol);
-  cg_pop_op(&s->cg, OPCODE_STORE_NAME, name_index);
+  emit_store(&s->cg, symbol);
 }
 
 static void parse_statement(struct parser_state *s) {

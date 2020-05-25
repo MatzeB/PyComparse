@@ -1,24 +1,21 @@
 #pragma once
 
 union object;
+struct argument;
+struct parameter;
 
 struct ast_node_base {
   uint8_t type;
 };
 
-struct ast_name {
+struct ast_identifier {
   struct ast_node_base base;
-  uint16_t             index;
+  struct symbol       *symbol;
 };
 
 struct ast_const {
   struct ast_node_base base;
   uint16_t             index;
-};
-
-struct argument {
-  union ast_node  *expression;
-  struct argument *next;
 };
 
 struct ast_call {
@@ -42,9 +39,15 @@ union ast_node {
   uint8_t              type;
   struct ast_node_base base;
 
-  struct ast_binexpr binexpr;
-  struct ast_call    call;
-  struct ast_const   cnst;
-  struct ast_name    name;
-  struct ast_unexpr  unexpr;
+  struct ast_binexpr    binexpr;
+  struct ast_call       call;
+  struct ast_const      cnst;
+  struct ast_identifier identifier;
+  struct ast_unexpr     unexpr;
+};
+
+
+struct argument {
+  union ast_node  *expression;
+  struct argument *next;
 };

@@ -6,9 +6,16 @@
 #include <string.h>
 
 #include "adt/arena.h"
+#include "adt/dynmemory.h"
 #include "objects.h"
 #include "objects_types.h"
 #include "opcodes.h"
+#include "symbol_types.h"
+
+struct saved_symbol_info {
+  struct symbol     *symbol;
+  struct symbol_info info;
+};
 
 static inline void arena_grow_u8(struct arena *arena, uint8_t value)
 {
@@ -43,16 +50,36 @@ struct basic_block *cg_end_block(struct cg_state *s)
   return block;
 }
 
-static void cg_init_code(struct cg_state *s, struct code_state *code)
+static void cg_begin_code(struct cg_state *s)
 {
+  struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
   arena_init(&code->opcodes);
   code->consts = object_new_list(&s->objects);
   code->names = object_new_list(&s->objects);
+  code->varnames = object_new_list(&s->objects);
+  if (s->next_scope_id == UINT16_MAX) {
+    abort();
+  }
+  code->scope_id = s->next_scope_id++;
+  code->cg_stack_begin = stack_size(&s->stack);
 
   struct basic_block *first = cg_allocate_block(s);
   code->first_block = first;
   cg_begin_block(s, first);
+}
+
+static void pop_symbol_infos(struct cg_state *s)
+{
+  unsigned cg_stack_begin = s->code.cg_stack_begin;
+  assert(stack_size(&s->stack) >= cg_stack_begin);
+  while (stack_size(&s->stack) > cg_stack_begin) {
+    struct saved_symbol_info *saved =
+      (struct saved_symbol_info*)stack_last(&s->stack, sizeof(*saved));
+    struct symbol *symbol = saved->symbol;
+    memcpy(&symbol->info, &saved->info, sizeof(symbol->info));
+    stack_pop(&s->stack, sizeof(*saved));
+  }
 }
 
 static union object *cg_end_code(struct cg_state *s, const char *name)
@@ -65,21 +92,13 @@ static union object *cg_end_code(struct cg_state *s, const char *name)
   }
   cg_end_block(s);
 
+  pop_symbol_infos(s);
+
   unsigned offset = 0;
   for (struct basic_block *b = s->code.first_block; b != NULL;
        b = b->next) {
     b->offset = offset;
     offset += b->code_length;
-
-#if 0
-    fprintf(stderr, "%u: block %p --\n", b->offset, (void*)b);
-    assert(b->code_length % 2 == 0);
-    for (unsigned i = 0; i < b->code_length; i += 2) {
-      fprintf(stderr, "  %02x %u\n", b->code_bytes[i], b->code_bytes[i+1]);
-    }
-    fprintf(stderr, "Jump %u -> %p\n", b->jump_opcode, (void*)b->jump_target);
-    fprintf(stderr, "Default -> %p\n", (void*)b->default_target);
-#endif
 
     unsigned jump_length = 0;
     if (b->jump_opcode != 0) {
@@ -151,9 +170,11 @@ static union object *cg_end_code(struct cg_state *s, const char *name)
 
   union object *object = object_new_code(&s->objects);
   object->code.code = make_bytes(&s->objects, code_length, code_bytes);
+  object->code.argcount = s->code.argcount;
+  object->code.nlocals = s->code.varnames->list.length;
   object->code.consts = s->code.consts;
   object->code.names = s->code.names;
-  object->code.varnames = object_new_tuple(&s->objects, 0);
+  object->code.varnames = s->code.varnames;
   object->code.freevars = object_new_tuple(&s->objects, 0);
   object->code.cellvars = object_new_tuple(&s->objects, 0);
   object->code.filename = make_ascii(&s->objects, "simple.py");
@@ -164,21 +185,19 @@ static union object *cg_end_code(struct cg_state *s, const char *name)
   return object;
 }
 
-struct code_state *cg_push_code(struct cg_state *s)
+void cg_push_code(struct cg_state *s)
 {
-  struct code_state *saved = arena_allocate_type(&s->codestack,
-                                                 struct code_state);
-  memcpy(saved, &s->code, sizeof(*saved));
-  cg_init_code(s, &s->code);
-  return saved;
+  void* slot = stack_push(&s->stack, sizeof(s->code));
+  memcpy(slot, &s->code, sizeof(s->code));
+  cg_begin_code(s);
+  s->code.use_locals = true;
 }
 
-union object *cg_pop_code(struct cg_state *s, struct code_state *saved,
-                          const char *name)
+union object *cg_pop_code(struct cg_state *s, const char *name)
 {
   union object *object = cg_end_code(s, name);
-  memcpy(&s->code, saved, sizeof(s->code));
-  arena_free(&s->codestack, saved);
+  memcpy(&s->code, stack_last(&s->stack, sizeof(s->code)), sizeof(s->code));
+  stack_pop(&s->stack, sizeof(s->code));
   return object;
 }
 
@@ -186,9 +205,9 @@ void cg_begin(struct cg_state *s)
 {
   memset(s, 0, sizeof(*s));
   arena_init(&s->objects);
-  arena_init(&s->codestack);
+  s->next_scope_id = 1;
 
-  cg_init_code(s, &s->code);
+  cg_begin_code(s);
   s->code.module_level = true;
 }
 
@@ -201,7 +220,12 @@ void cg_free(struct cg_state *s)
 {
   arena_free_all(&s->code.opcodes);
   arena_free_all(&s->objects);
-  arena_free_all(&s->codestack);
+  stack_free(&s->stack);
+}
+
+bool cg_use_locals(struct cg_state *s)
+{
+  return s->code.use_locals;
 }
 
 void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
@@ -292,21 +316,6 @@ unsigned cg_register_int(struct cg_state *s, int32_t value)
   return consts->list.length - 1;
 }
 
-unsigned cg_register_name(struct cg_state *s, const char *name)
-{
-  union object *names = s->code.names;
-  unsigned name_length = strlen(name);
-  for (unsigned i = 0, length = names->list.length; i < length; ++i) {
-    const union object *object = names->list.items[i];
-    assert(object->type == TYPE_ASCII);
-    if (object->string.length == name_length &&
-        memcmp(object->string.chars, name, name_length) == 0) {
-      return i;
-    }
-  }
-  return cg_append_name(s, name);
-}
-
 unsigned cg_append_name(struct cg_state *s, const char *name)
 {
   union object *names = s->code.names;
@@ -315,10 +324,43 @@ unsigned cg_append_name(struct cg_state *s, const char *name)
   return names->list.length - 1;
 }
 
+unsigned cg_append_varname(struct cg_state *s, const char *name)
+{
+  union object *varnames = s->code.varnames;
+  union object *string = make_ascii(&s->objects, name);
+  object_list_append(varnames, string);
+  return varnames->list.length - 1;
+}
+
 unsigned cg_register_code(struct cg_state *s, union object *code)
 {
   assert(code->type == TYPE_CODE);
   union object *consts = s->code.consts;
   object_list_append(consts, code);
   return consts->list.length - 1;
+}
+
+struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol)
+{
+  if (symbol->info.scope_id != s->code.scope_id) {
+    return NULL;
+  }
+  return &symbol->info;
+}
+
+struct symbol_info *cg_new_symbol_info(struct cg_state *s,
+                                       struct symbol* symbol)
+{
+  assert(symbol->info.scope_id != s->code.scope_id);
+
+  if (symbol->info.scope_id != 0) {
+    struct saved_symbol_info *saved =
+        (struct saved_symbol_info*)stack_push(&s->stack, sizeof(*saved));
+    saved->symbol = symbol;
+    memcpy(&saved->info, &symbol->info, sizeof(saved->info));
+  }
+
+  memset(&symbol->info, 0, sizeof(symbol->info));
+  symbol->info.scope_id = s->code.scope_id;
+  return &symbol->info;
 }

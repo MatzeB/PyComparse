@@ -1,5 +1,6 @@
 #include "codegen_ast.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -7,6 +8,8 @@
 #include "ast_types.h"
 #include "codegen.h"
 #include "opcodes.h"
+#include "symbol_types.h"
+#include "symbol_info_types.h"
 #include "util.h"
 
 static void emit_binexpr(struct cg_state *cg, struct ast_binexpr *binexpr,
@@ -32,16 +35,73 @@ static void emit_unexpr(struct cg_state *cg, struct ast_unexpr *unexpr,
   cg_op(cg, opcode, 0);
 }
 
+void emit_store(struct cg_state *cg, struct symbol *symbol)
+{
+  struct symbol_info *info = cg_symbol_info(cg, symbol);
+  if (info == NULL) {
+    info = cg_new_symbol_info(cg, symbol);
+    if (cg_use_locals(cg)) {
+      info->type = SYMBOL_LOCAL;
+      info->index = cg_append_varname(cg, symbol->string);
+    } else {
+      info->type = SYMBOL_NAME;
+      info->index = cg_append_name(cg, symbol->string);
+    }
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_NAME:
+    cg_pop_op(cg, OPCODE_STORE_NAME, info->index);
+    return;
+  case SYMBOL_GLOBAL:
+    cg_pop_op(cg, OPCODE_STORE_GLOBAL, info->index);
+    return;
+  case SYMBOL_LOCAL:
+    cg_pop_op(cg, OPCODE_STORE_FAST, info->index);
+    return;
+  }
+  fprintf(stderr, "invalid symbol_info type\n");
+  abort();
+}
+
+static void emit_load(struct cg_state *cg, struct symbol *symbol)
+{
+  struct symbol_info *info = cg_symbol_info(cg, symbol);
+  if (info == NULL) {
+    info = cg_new_symbol_info(cg, symbol);
+    if (cg_use_locals(cg)) {
+      info->type = SYMBOL_GLOBAL;
+    } else {
+      info->type = SYMBOL_NAME;
+    }
+    info->index = cg_append_name(cg, symbol->string);
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_NAME:
+    cg_push_op(cg, OPCODE_LOAD_NAME, info->index);
+    return;
+  case SYMBOL_GLOBAL:
+    cg_push_op(cg, OPCODE_LOAD_GLOBAL, info->index);
+    return;
+  case SYMBOL_LOCAL:
+    cg_push_op(cg, OPCODE_LOAD_FAST, info->index);
+    return;
+  }
+  fprintf(stderr, "invalid symbol_info type\n");
+  abort();
+}
+
 static void emit_assignment(struct cg_state *cg, struct ast_binexpr *binexpr,
                             bool drop)
 {
   union ast_node *left = binexpr->left;
-  if (left->type == AST_NAME) {
+  if (left->type == AST_IDENTIFIER) {
     emit_expression(cg, binexpr->right, false);
     if (!drop) {
       cg_push_op(cg, OPCODE_DUP_TOP, 0);
     }
-    cg_pop_op(cg, OPCODE_STORE_NAME, left->name.index);
+    emit_store(cg, left->identifier.symbol);
   } else {
     fprintf(stderr, "Unsupported or invalid lvalue\n");
     unimplemented();
@@ -71,8 +131,9 @@ void emit_expression(struct cg_state *cg, union ast_node *expression,
   case AST_CONST:
     cg_push_op(cg, OPCODE_LOAD_CONST, expression->cnst.index);
     break;
-  case AST_NAME:
-    cg_push_op(cg, OPCODE_LOAD_NAME, expression->name.index);
+  case AST_IDENTIFIER:
+    assert(!drop);
+    emit_load(cg, expression->identifier.symbol);
     break;
   case AST_BINEXPR_ADD:
     emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_ADD);

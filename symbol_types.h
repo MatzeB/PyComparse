@@ -2,8 +2,10 @@
 
 #include <stdint.h>
 
+#include "symbol_info_types.h"
+
 struct symbol {
-  const char *string;
-  uint16_t    token_kind;
-  uint16_t    name_index;
+  const char        *string;
+  uint16_t           token_kind;
+  struct symbol_info info;
 };

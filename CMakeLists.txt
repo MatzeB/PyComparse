@@ -24,6 +24,9 @@ add_executable(scanner_test
 )
 target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}")
 add_executable(parser_test
+  adt/arena.h
+  adt/dynmemory.h
+  adt/stack.h
   codegen.c
   codegen.h
   codegen_ast.c
@@ -39,6 +42,7 @@ add_executable(parser_test
   scanner.c
   scanner.h
   scanner_types.h
+  symbol_info_types.h
   symbol_table.c
   symbol_table.h
   symbol_table_types.h

@@ -84,9 +84,10 @@ static void write_tuple(struct writer_state *s,
 }
 
 static void write_list_as_tuple(struct writer_state *s,
-                                const struct object_list *list)
+                                const union object *list)
 {
-  write_tuple_(s, list->length, list->items);
+  assert(list->type == TYPE_LIST);
+  write_tuple_(s, list->list.length, list->list.items);
 }
 
 static void write_string(struct writer_state *s,
@@ -124,11 +125,9 @@ static void write_code(struct writer_state *s,
   write_uint32(s, code->stacksize);
   write_uint32(s, code->flags);
   write_object(s, code->code);
-  assert(code->consts->type == TYPE_LIST);
-  write_list_as_tuple(s, &code->consts->list);
-  assert(code->names->type == TYPE_LIST);
-  write_list_as_tuple(s, &code->names->list);
-  write_object(s, code->varnames);
+  write_list_as_tuple(s, code->consts);
+  write_list_as_tuple(s, code->names);
+  write_list_as_tuple(s, code->varnames);
   write_object(s, code->freevars);
   write_object(s, code->cellvars);
   write_object(s, code->filename);

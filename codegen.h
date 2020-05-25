@@ -15,6 +15,8 @@ unsigned cg_register_int(struct cg_state *s, int32_t value);
 unsigned cg_register_singleton(struct cg_state *s, char type);
 unsigned cg_register_code(struct cg_state *s, union object *code);
 
+unsigned cg_register_name(struct cg_state *s, const char *name);
+
 unsigned cg_append_name(struct cg_state *s, const char *name);
 unsigned cg_append_varname(struct cg_state *s, const char *name);
 

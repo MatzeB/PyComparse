@@ -4,6 +4,7 @@
 
 struct basic_block;
 struct cg_state;
+struct dotted_name;
 struct symbol;
 union ast_node;
 
@@ -26,6 +27,8 @@ struct while_state {
 };
 
 void emit_expression_statement(struct cg_state *s, union ast_node *expression);
+void emit_import_statement(struct cg_state *s, struct dotted_name *name,
+                           struct symbol *as);
 void emit_return_statement(struct cg_state *s, union ast_node *expression);
 
 void emit_begin_if(struct cg_state *s, struct if_state *state,

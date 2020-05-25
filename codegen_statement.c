@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "ast_types.h"
 #include "codegen.h"
 #include "codegen_ast.h"
 #include "codegen_types.h"
@@ -16,6 +17,42 @@ void emit_expression_statement(struct cg_state *s, union ast_node *expression)
 {
   if (!cg_in_block(s)) return;
   emit_expression_drop_result(s, expression);
+}
+
+static unsigned emit_dotted_name(struct cg_state *s, struct dotted_name *name)
+{
+  unsigned num_symbols = name->num_symbols;
+  unsigned length = num_symbols;
+  for (unsigned i = 0; i < num_symbols; i++) {
+    length += strlen(name->symbols[i]->string);
+  }
+  char *chars = (char*)arena_allocate(&s->objects, length, 1);
+  char *c = chars;
+  for (unsigned i = 0; i < num_symbols; i++) {
+    if (i > 0) *c++ = '.';
+    const char *symbol_string = name->symbols[i]->string;
+    size_t symbol_length = strlen(symbol_string);
+    memcpy(c, symbol_string, symbol_length);
+    c += symbol_length;
+  }
+  *c++ = '\0';
+  assert(c - chars == length);
+  return cg_register_name(s, chars);
+}
+
+void emit_import_statement(struct cg_state *s, struct dotted_name *name,
+                           struct symbol *as)
+{
+  if (!cg_in_block(s)) return;
+  unsigned name_index = emit_dotted_name(s, name);
+  int i_level = cg_register_int(s, 0);
+  cg_push_op(s, OPCODE_LOAD_CONST, i_level);
+  int i_fromlist = cg_register_singleton(s, TYPE_NONE);
+  cg_push_op(s, OPCODE_LOAD_CONST, i_fromlist);
+  cg_pop_op(s, OPCODE_IMPORT_NAME, name_index);
+
+  assert(as == NULL && "TODO");
+  emit_store(s, name->symbols[0]);
 }
 
 void emit_return_statement(struct cg_state *s, union ast_node *expression)

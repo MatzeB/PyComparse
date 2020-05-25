@@ -290,8 +290,8 @@ unsigned cg_register_singleton(struct cg_state *s, char type)
   return consts->list.length - 1;
 }
 
-unsigned cg_register_string(struct cg_state *s,
-                                const char *chars, uint32_t length)
+unsigned cg_register_string(struct cg_state *s, const char *chars,
+                            uint32_t length)
 {
   union object *consts = s->code.consts;
   for (unsigned i = 0; i < consts->list.length; ++i) {
@@ -322,6 +322,22 @@ unsigned cg_register_int(struct cg_state *s, int32_t value)
   union object *int_obj = make_int(&s->objects, value);
   object_list_append(consts, int_obj);
   return consts->list.length - 1;
+}
+
+unsigned cg_register_name(struct cg_state *s, const char *name)
+{
+  union object *names = s->code.names;
+  unsigned length = strlen(name);
+  for (unsigned i = 0; i < names->list.length; ++i) {
+    const union object *object = names->list.items[i];
+    if (object->type != TYPE_ASCII)
+      continue;
+    const struct object_string *string = &object->string;
+    if (string->length == length && memcmp(string->chars, name, length) == 0) {
+      return i;
+    }
+  }
+  return cg_append_name(s, name);
 }
 
 unsigned cg_append_name(struct cg_state *s, const char *name)

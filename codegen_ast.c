@@ -3,10 +3,13 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "adt/arena.h"
 #include "ast.h"
 #include "ast_types.h"
 #include "codegen.h"
+#include "codegen_types.h"
 #include "opcodes.h"
 #include "symbol_types.h"
 #include "symbol_info_types.h"

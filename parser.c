@@ -588,6 +588,43 @@ static void parse_expression_statement(struct parser_state *s)
   emit_expression_statement(&s->cg, expression);
 }
 
+static struct dotted_name *parse_dotted_name(struct parser_state *s)
+{
+  arena_grow_begin(&s->ast, alignof(struct dotted_name));
+  arena_grow(&s->ast, sizeof(struct dotted_name));
+  unsigned num_symbols = 0;
+  do {
+    if (!skip_till(s, T_IDENTIFIER)) {
+      void *begin = arena_grow_finish(&s->ast);
+      arena_free(&s->ast, begin);
+      return NULL;
+    }
+    struct symbol *symbol = s->scanner.token.u.symbol;
+    eat(s, T_IDENTIFIER);
+
+    struct symbol **ptr = (struct symbol**)arena_grow(&s->ast, sizeof(*ptr));
+    *ptr = symbol;
+    ++num_symbols;
+  } while(accept(s, T_DOT));
+
+  struct dotted_name *result = arena_grow_finish(&s->ast);
+  result->num_symbols = num_symbols;
+  return result;
+}
+
+static void parse_import_statement(struct parser_state *s)
+{
+  eat(s, T_import);
+
+  do {
+    struct dotted_name *dotted_name = parse_dotted_name(s);
+    if (accept(s, T_as)) {
+      unimplemented();
+    }
+    emit_import_statement(&s->cg, dotted_name, NULL);
+  } while(accept(s, ','));
+}
+
 static void parse_return_statement(struct parser_state *s)
 {
   eat(s, T_return);
@@ -609,6 +646,9 @@ static void parse_small_statement(struct parser_state *s)
   switch (s->scanner.token.kind) {
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
+    break;
+  case T_import:
+    parse_import_statement(s);
     break;
   case T_pass:
     eat(s, T_pass);
@@ -729,7 +769,7 @@ static void parse_parameters(struct parser_state *s)
 static void parse_def(struct parser_state *s)
 {
   eat(s, T_def);
-  skip_till(s, T_IDENTIFIER);
+  if (!skip_till(s, T_IDENTIFIER)) return;
   struct symbol *symbol = s->scanner.token.u.symbol;
   next_token(s);
 

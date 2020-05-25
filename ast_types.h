@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 union object;
 struct argument;
 struct parameter;
@@ -50,4 +52,9 @@ union ast_node {
 struct argument {
   union ast_node  *expression;
   struct argument *next;
+};
+
+struct dotted_name {
+  unsigned num_symbols;
+  struct symbol *symbols[];
 };

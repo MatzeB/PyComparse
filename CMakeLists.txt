@@ -31,6 +31,8 @@ add_executable(parser_test
   codegen.h
   codegen_ast.c
   codegen_ast.h
+  codegen_statement.c
+  codegen_statement.h
   codegen_types.h
   objects.c
   objects.h

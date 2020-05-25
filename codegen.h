@@ -34,6 +34,7 @@ struct basic_block *cg_allocate_block(struct cg_state *s);
 
 void cg_begin_block(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_end_block(struct cg_state *s);
+bool cg_in_block(struct cg_state *s);
 
 void cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);

@@ -24,6 +24,7 @@ struct code_state {
   union object *varnames;
   struct basic_block *current_block;
   struct basic_block *first_block;
+  struct basic_block *last_block;
   unsigned cg_stack_begin;
   uint16_t outer_scope_id;
   uint16_t scope_id;
@@ -31,8 +32,6 @@ struct code_state {
   unsigned nlocals;
   unsigned stacksize;
   unsigned max_stacksize;
-  bool had_return;
-  bool module_level;
   bool use_locals;
 };
 

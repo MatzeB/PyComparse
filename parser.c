@@ -10,14 +10,13 @@
 #include "ast.h"
 #include "ast_types.h"
 #include "adt/arena.h"
-#include "opcodes.h"
 #include "scanner.h"
-#include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
 #include "util.h"
 #include "codegen.h"
 #include "codegen_ast.h"
+#include "codegen_statement.h"
 
 #include "objects.h"
 
@@ -187,7 +186,8 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
 }
 
 static union ast_node *ast_allocate_zero_(struct parser_state *s,
-                                          size_t size, uint8_t type) {
+                                          size_t size, uint8_t type)
+{
   union ast_node *node =
     (union ast_node*)arena_allocate(&s->ast, size, alignof(union ast_node));
   memset(node, 0, size);
@@ -584,12 +584,24 @@ union ast_node *parse_subexpression(struct parser_state *s,
 
 static void parse_expression_statement(struct parser_state *s)
 {
-#ifndef NDEBUG
-  unsigned prev_stacksize = s->cg.code.stacksize;
-#endif
   union ast_node *expression = parse_subexpression(s, PREC_ASSIGN);
-  emit_expression(&s->cg, expression, true);
-  assert(s->cg.code.stacksize == prev_stacksize);
+  emit_expression_statement(&s->cg, expression);
+}
+
+static void parse_return_statement(struct parser_state *s)
+{
+  eat(s, T_return);
+
+  union ast_node *expression;
+  switch (s->scanner.token.kind) {
+  case EXPRESSION_START_CASES:
+    expression = parse_subexpression(s, PREC_LIST);
+    break;
+  default:
+    expression = NULL;
+    break;
+  }
+  emit_return_statement(&s->cg, expression);
 }
 
 static void parse_small_statement(struct parser_state *s)
@@ -600,6 +612,9 @@ static void parse_small_statement(struct parser_state *s)
     break;
   case T_pass:
     eat(s, T_pass);
+    break;
+  case T_return:
+    parse_return_statement(s);
     break;
   /* TODO: del, break, continue, return, raise, yield,
    * import, global, nonlocal, assert */
@@ -636,53 +651,24 @@ static void parse_suite(struct parser_state *s)
   }
 }
 
-static void emit_condjump(struct parser_state *s, union ast_node *expression,
-                          struct basic_block *true_block,
-                          struct basic_block *false_block)
-{
-  emit_expression(&s->cg, expression, false);
-  struct basic_block *block = cg_end_block(&s->cg);
-  cg_pop(&s->cg, 1);
-  block->jump_opcode = OPCODE_POP_JUMP_IF_FALSE;
-  block->jump_target = false_block;
-  block->default_target = true_block;
-}
-
-static void emit_jump(struct parser_state *s, struct basic_block *target)
-{
-  struct basic_block *block = cg_end_block(&s->cg);
-  assert(block->jump_opcode == 0 && block->jump_target == NULL);
-  block->default_target = target;
-}
-
 static void parse_if(struct parser_state *s)
 {
   eat(s, T_if);
   union ast_node *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
-  struct basic_block *true_block = cg_allocate_block(&s->cg);
-  struct basic_block *false_block = cg_allocate_block(&s->cg);
-  emit_condjump(s, expression, true_block, false_block);
+  struct if_state state;
+  emit_begin_if(&s->cg, &state, expression);
 
-  cg_begin_block(&s->cg, true_block);
   parse_suite(s);
 
-  struct basic_block *footer;
   if (accept(s, T_else)) {
     expect(s, ':');
 
-    footer = cg_allocate_block(&s->cg);
-    emit_jump(s, footer);
-
-    cg_begin_block(&s->cg, false_block);
+    emit_begin_else(&s->cg, &state);
     parse_suite(s);
-  } else {
-    footer = false_block;
   }
-  emit_jump(s, footer);
-
-  cg_begin_block(&s->cg, footer);
+  emit_end_if(&s->cg, &state);
 }
 
 static void parse_while(struct parser_state *s)
@@ -691,28 +677,12 @@ static void parse_while(struct parser_state *s)
   union ast_node *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
-  struct basic_block *cond = cg_allocate_block(&s->cg);
-  struct basic_block *body   = cg_allocate_block(&s->cg);
-  struct basic_block *footer = cg_allocate_block(&s->cg);
-  struct basic_block *after = cg_allocate_block(&s->cg);
+  struct while_state state;
+  emit_begin_while(&s->cg, &state, expression);
 
-  struct basic_block *header = cg_end_block(&s->cg);
-  header->jump_opcode = OPCODE_SETUP_LOOP;
-  header->jump_target = after;
-  header->default_target = cond;
-
-  cg_begin_block(&s->cg, cond);
-  emit_condjump(s, expression, body, footer);
-
-  cg_begin_block(&s->cg, body);
   parse_suite(s);
-  emit_jump(s, cond);
 
-  cg_begin_block(&s->cg, footer);
-  cg_op(&s->cg, OPCODE_POP_BLOCK, 0);
-  cg_end_block(&s->cg);
-
-  cg_begin_block(&s->cg, after);
+  emit_end_while(&s->cg, &state);
 }
 
 static void parse_parameters(struct parser_state *s)
@@ -724,17 +694,13 @@ static void parse_parameters(struct parser_state *s)
     struct symbol *symbol = s->scanner.token.u.symbol;
     next_token(s);
 
-    struct symbol_info *info = cg_symbol_info(&s->cg, symbol);
-    if (info != NULL) {
+    if (!emit_parameter(&s->cg, symbol)) {
       fprintf(stderr, "error: duplicate parameter '%s'\n", symbol->string);
       s->error = true;
     } else {
-      info = cg_new_symbol_info(&s->cg, symbol);
-      info->type = SYMBOL_LOCAL;
-      info->index = cg_append_varname(&s->cg, symbol->string);
-      assert(s->error || info->index == num_parameters);
+      num_parameters++;
     }
-    num_parameters++;
+
     if (!accept(s, ',')) {
       break;
     }
@@ -751,7 +717,7 @@ static void parse_def(struct parser_state *s)
   struct symbol *symbol = s->scanner.token.u.symbol;
   next_token(s);
 
-  cg_push_code(&s->cg);
+  emit_begin_def(&s->cg);
 
   parse_parameters(s);
   if (accept(s, T_MINUS_GREATER_THAN)) {
@@ -762,21 +728,11 @@ static void parse_def(struct parser_state *s)
 
   parse_suite(s);
 
-  union object *code = cg_pop_code(&s->cg, symbol->string);
-  unsigned code_index = cg_register_code(&s->cg, code);
-  cg_push_op(&s->cg, OPCODE_LOAD_CONST, code_index);
-
-  const char *chars = symbol->string;
-  uint32_t length = strlen(chars);
-  unsigned name_const_index = cg_register_string(&s->cg, chars, length);
-  cg_push_op(&s->cg, OPCODE_LOAD_CONST, name_const_index);
-
-  cg_op(&s->cg, OPCODE_MAKE_FUNCTION, 0);
-  cg_pop(&s->cg, 1);
-  emit_store(&s->cg, symbol);
+  emit_end_def(&s->cg, symbol);
 }
 
-static void parse_statement(struct parser_state *s) {
+static void parse_statement(struct parser_state *s)
+{
   switch (s->scanner.token.kind) {
   case T_if:
     parse_if(s);

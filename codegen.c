@@ -32,12 +32,14 @@ struct basic_block *cg_allocate_block(struct cg_state *s)
 
 void cg_begin_block(struct cg_state *s, struct basic_block *block)
 {
-  if (s->code.current_block != NULL) {
-    assert(s->code.current_block->next == NULL);
-    s->code.current_block->next = block;
+  struct basic_block *last_block = s->code.last_block;
+  if (last_block != NULL) {
+    assert(last_block->next == NULL);
+    last_block->next = block;
   }
 
   assert(block->code_length == 0 && block->code_bytes == NULL);
+  assert(s->code.current_block == NULL);
   s->code.current_block = block;
   arena_grow_begin(&s->code.opcodes, 1);
 }
@@ -45,12 +47,20 @@ void cg_begin_block(struct cg_state *s, struct basic_block *block)
 struct basic_block *cg_end_block(struct cg_state *s)
 {
   struct basic_block *block = s->code.current_block;
+  s->code.current_block = NULL;
+  s->code.last_block = block;
+
   block->code_length = arena_grow_current_size(&s->code.opcodes);
   block->code_bytes = arena_grow_finish(&s->code.opcodes);
   return block;
 }
 
-static void cg_begin_code(struct cg_state *s)
+bool cg_in_block(struct cg_state *s)
+{
+  return s->code.current_block != NULL;
+}
+
+static void cg_begin_code(struct cg_state *s, bool use_locals)
 {
   struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
@@ -63,6 +73,7 @@ static void cg_begin_code(struct cg_state *s)
   }
   code->scope_id = s->next_scope_id++;
   code->cg_stack_begin = stack_size(&s->stack);
+  code->use_locals = use_locals;
 
   struct basic_block *first = cg_allocate_block(s);
   code->first_block = first;
@@ -85,18 +96,18 @@ static void pop_symbol_infos(struct cg_state *s)
 static union object *cg_end_code(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
-  if (!s->code.had_return) {
+  if (cg_in_block(s)) {
     unsigned i_none = cg_register_singleton(s, TYPE_NONE);
     cg_push_op(s, OPCODE_LOAD_CONST, i_none);
     cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
+    cg_end_block(s);
   }
-  cg_end_block(s);
 
   pop_symbol_infos(s);
 
   unsigned offset = 0;
-  for (struct basic_block *b = s->code.first_block; b != NULL;
-       b = b->next) {
+  struct basic_block *first_block = s->code.first_block;
+  for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     b->offset = offset;
     offset += b->code_length;
 
@@ -114,7 +125,6 @@ static union object *cg_end_code(struct cg_state *s, const char *name)
   }
 
   arena_grow_begin(&s->objects, 1);
-  struct basic_block *first_block = s->code.first_block;
   for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     unsigned jump_length = 0;
     if (b->jump_opcode != 0)
@@ -189,8 +199,7 @@ void cg_push_code(struct cg_state *s)
 {
   void* slot = stack_push(&s->stack, sizeof(s->code));
   memcpy(slot, &s->code, sizeof(s->code));
-  cg_begin_code(s);
-  s->code.use_locals = true;
+  cg_begin_code(s, /*use_locals=*/true);
 }
 
 union object *cg_pop_code(struct cg_state *s, const char *name)
@@ -207,8 +216,7 @@ void cg_begin(struct cg_state *s)
   arena_init(&s->objects);
   s->next_scope_id = 1;
 
-  cg_begin_code(s);
-  s->code.module_level = true;
+  cg_begin_code(s, /*use_locals=*/false);
 }
 
 union object *cg_end(struct cg_state *s)

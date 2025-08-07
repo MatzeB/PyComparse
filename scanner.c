@@ -271,6 +271,7 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
     if (s->c == quote) {
       next_char(s);
       triplequote = true;
+      (void)triplequote;
       fprintf(stderr, "TODO\n");
       abort();
     } else {

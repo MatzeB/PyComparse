@@ -698,17 +698,17 @@ static void parse_if(struct parser_state *s)
   expect(s, ':');
 
   struct if_state state;
-  emit_begin_if(&s->cg, &state, expression);
+  emit_if_begin(&s->cg, &state, expression);
 
   parse_suite(s);
 
   if (accept(s, T_else)) {
     expect(s, ':');
 
-    emit_begin_else(&s->cg, &state);
+    emit_else_begin(&s->cg, &state);
     parse_suite(s);
   }
-  emit_end_if(&s->cg, &state);
+  emit_if_end(&s->cg, &state);
 }
 
 static void parse_for(struct parser_state *s)
@@ -720,11 +720,11 @@ static void parse_for(struct parser_state *s)
   expect(s, ':');
 
   struct for_state state;
-  emit_begin_for(&s->cg, &state, target, expression);
+  emit_for_begin(&s->cg, &state, target, expression);
 
   parse_suite(s);
 
-  emit_end_for(&s->cg, &state);
+  emit_for_end(&s->cg, &state);
 }
 
 static void parse_while(struct parser_state *s)
@@ -734,11 +734,11 @@ static void parse_while(struct parser_state *s)
   expect(s, ':');
 
   struct while_state state;
-  emit_begin_while(&s->cg, &state, expression);
+  emit_while_begin(&s->cg, &state, expression);
 
   parse_suite(s);
 
-  emit_end_while(&s->cg, &state);
+  emit_while_end(&s->cg, &state);
 }
 
 static void parse_parameters(struct parser_state *s)
@@ -773,7 +773,7 @@ static void parse_def(struct parser_state *s)
   struct symbol *symbol = s->scanner.token.u.symbol;
   next_token(s);
 
-  emit_begin_def(&s->cg);
+  emit_def_begin(&s->cg);
 
   parse_parameters(s);
   if (accept(s, T_MINUS_GREATER_THAN)) {
@@ -784,7 +784,7 @@ static void parse_def(struct parser_state *s)
 
   parse_suite(s);
 
-  emit_end_def(&s->cg, symbol);
+  emit_def_end(&s->cg, symbol);
 }
 
 static void parse_statement(struct parser_state *s)
@@ -814,7 +814,7 @@ union object *parse(struct parser_state *s)
 {
   next_token(s);
 
-  cg_begin(&s->cg);
+  emit_module_begin(&s->cg);
 
   add_anchor(s, T_EOF);
   while (s->scanner.token.kind != T_EOF) {
@@ -834,7 +834,7 @@ union object *parse(struct parser_state *s)
   }
 #endif
 
-  return cg_end(&s->cg);
+  return emit_module_end(&s->cg);
 }
 
 void parser_init(struct parser_state *s)

@@ -4,4 +4,4 @@
 
 union object;
 
-void write(FILE *out, const union object *object);
+void write_module(FILE *out, const union object *object);

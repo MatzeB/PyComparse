@@ -41,7 +41,7 @@ static void write_uint16(struct writer_state *s, uint16_t value)
 
 static void write_header(struct writer_state *s)
 {
-  write_uint16(s, 3394);
+  write_uint16(s, 3413);  // Python 3.8b4
   write_uint8(s, '\r');
   write_uint8(s, '\n');
   write_uint32(s, 0); // 0
@@ -120,6 +120,7 @@ static void write_code(struct writer_state *s,
 {
   write_char(s, TYPE_CODE);
   write_uint32(s, code->argcount);
+  write_uint32(s, code->posonlyargcount);
   write_uint32(s, code->kwonlyargcount);
   write_uint32(s, code->nlocals);
   write_uint32(s, code->stacksize);
@@ -171,7 +172,7 @@ static void write_object(struct writer_state *s, const union object *object)
   }
 }
 
-void write(FILE *out, const union object *object)
+void write_module(FILE *out, const union object *object)
 {
   struct writer_state s;
   s.out = out;

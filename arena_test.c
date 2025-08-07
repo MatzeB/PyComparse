@@ -9,14 +9,11 @@
 
 static void alloc_some(struct arena *arena)
 {
-  char *last_end;
   for (int i = 0, e = rand() % 5000; i < e; ++i) {
     size_t sz = rand() % 33;
     char *m = arena_allocate(arena, sz, 1);
 
     memset(m, rand(), sz);
-
-    last_end = m + sz;
 
     if (rand() % 10 == 0) {
       arena_grow_begin(arena, 1);

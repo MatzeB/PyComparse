@@ -10,7 +10,7 @@ struct arena;
 struct symbol_table;
 
 struct token {
-  uint16_t       kind;
+  uint16_t kind;
   union {
     struct symbol *symbol;
     const char *string;
@@ -18,8 +18,8 @@ struct token {
 };
 
 struct scanner_state {
-  int c;
-  char  *p;
+  int   c;
+  char *p;
 
   struct token token;
 

@@ -34,6 +34,7 @@ struct object_int {
 struct object_code {
   struct object_base base;
   uint32_t argcount;
+  uint32_t posonlyargcount;
   uint32_t kwonlyargcount;
   uint32_t nlocals;
   uint32_t stacksize;

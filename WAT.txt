@@ -1,7 +1,0 @@
->>> 4.to_bytes(1, 'little')
-  File "<stdin>", line 1
-    4.to_bytes(1, 'little')
-             ^
-SyntaxError: invalid syntax
->>> 0o4.to_bytes(1, 'little')
-b'\x04'

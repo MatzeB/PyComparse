@@ -34,13 +34,15 @@ void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg);
 
 struct basic_block *cg_allocate_block(struct cg_state *s);
 
-void cg_begin_block(struct cg_state *s, struct basic_block *block);
-struct basic_block *cg_end_block(struct cg_state *s);
+void cg_block_begin(struct cg_state *s, struct basic_block *block);
+struct basic_block *cg_block_end(struct cg_state *s);
 bool cg_in_block(struct cg_state *s);
+
+void cg_code_begin(struct cg_state *s, bool use_locals);
+union object *cg_code_end(struct cg_state *s, const char *name);
 
 void cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_begin(struct cg_state *s);
-union object *cg_end(struct cg_state *s);
 void cg_free(struct cg_state *s);

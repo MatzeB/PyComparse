@@ -5,7 +5,7 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGUREATION_TYPES)
   set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Weverything -Wno-c++98-compat -Wno-shorten-64-to-32 -Wno-padded")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-c++98-compat -Wno-shorten-64-to-32 -Wno-padded")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-missing-noreturn")
 
 add_executable(arena_test

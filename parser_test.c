@@ -29,7 +29,7 @@ int main(int argc, char **argv)
   scanner_init(&s.scanner, input, &symbol_table, &strings);
 
   union object *code = parse(&s);
-  write(stdout, code);
+  write_module(stdout, code);
 
   if (input != stdin) {
     fclose(input);

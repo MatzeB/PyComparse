@@ -21,23 +21,28 @@ struct ast_const {
 };
 
 struct ast_call {
-  struct ast_node_base base;
-  union ast_node      *callee;
-  struct argument     *arguments;
+  struct ast_node_base  base;
+  union ast_expression *callee;
+  struct argument      *arguments;
 };
 
 struct ast_binexpr {
-  struct ast_node_base base;
-  union ast_node      *left;
-  union ast_node      *right;
+  struct ast_node_base  base;
+  union ast_expression *left;
+  union ast_expression *right;
 };
 
 struct ast_unexpr {
-  struct ast_node_base base;
-  union ast_node      *op;
+  struct ast_node_base  base;
+  union ast_expression *op;
 };
 
-union ast_node {
+struct ast_tuple_form {
+  struct ast_node_base base;
+  struct argument     *arguments;
+};
+
+union ast_expression {
   uint8_t              type;
   struct ast_node_base base;
 
@@ -45,16 +50,17 @@ union ast_node {
   struct ast_call       call;
   struct ast_const      cnst;
   struct ast_identifier identifier;
+  struct ast_tuple_form tuple_form;
   struct ast_unexpr     unexpr;
 };
 
 
 struct argument {
-  union ast_node  *expression;
-  struct argument *next;
+  union ast_expression *expression;
+  struct argument      *next;
 };
 
 struct dotted_name {
-  unsigned num_symbols;
+  unsigned       num_symbols;
   struct symbol *symbols[];
 };

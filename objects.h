@@ -38,6 +38,7 @@ union object *make_bytes(struct arena *arena, uint32_t length,
 union object *make_ascii(struct arena *arena, const char *str);
 
 void object_list_append(union object *list, union object *object);
+union object *object_list_at(union object *list, uint32_t index);
 
 bool object_type_is_singleton(char type);
 

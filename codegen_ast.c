@@ -10,6 +10,8 @@
 #include "ast_types.h"
 #include "codegen.h"
 #include "codegen_types.h"
+#include "objects.h"
+#include "objects_types.h"
 #include "opcodes.h"
 #include "symbol_types.h"
 #include "symbol_info_types.h"
@@ -95,7 +97,7 @@ static void emit_load(struct cg_state *cg, struct symbol *symbol)
   abort();
 }
 
-void emit_assignment(struct cg_state *cg, union ast_node *target)
+void emit_assignment(struct cg_state *cg, union ast_expression *target)
 {
   if (target->type == AST_IDENTIFIER) {
     emit_store(cg, target->identifier.symbol);
@@ -103,6 +105,67 @@ void emit_assignment(struct cg_state *cg, union ast_node *target)
     fprintf(stderr, "Unsupported or invalid lvalue\n");
     unimplemented();
   }
+}
+
+static union object *constant_object(struct cg_state *cg,
+                                     union ast_expression *expression)
+{
+  switch (expression->type) {
+  case AST_CONST:
+    return object_list_at(cg->code.consts, expression->cnst.index);
+  case AST_TUPLE_FORM: {
+    struct ast_tuple_form *tuple_form = &expression->tuple_form;
+    unsigned num_arguments = 0;
+    union object *list = object_new_list(&cg->objects);
+    for (struct argument *argument = tuple_form->arguments;
+         argument != NULL; argument = argument->next) {
+      union object *const_arg = constant_object(cg, argument->expression);
+      if (const_arg == NULL) {
+        // can we free "list" safely from the arena? for now leak...
+        return NULL;
+      }
+      object_list_append(list, const_arg);
+    }
+    union object *tuple = object_new_tuple(&cg->objects, num_arguments);
+    for (unsigned i = 0, e = list->list.length; i < e; i++) {
+      tuple->tuple.items[i] = list->list.items[i];
+    }
+    return tuple;
+  }
+  case AST_IDENTIFIER:
+  case AST_CALL:
+  case AST_BINEXPR_ADD:
+  case AST_BINEXPR_ASSIGN:
+  case AST_BINEXPR_FLOORDIV:
+  case AST_BINEXPR_MATMUL:
+  case AST_BINEXPR_MUL:
+  case AST_BINEXPR_SUB:
+  case AST_BINEXPR_TRUEDIV:
+  case AST_BINEXPR_GREATER:
+  case AST_BINEXPR_LESS:
+  case AST_BINEXPR_EQUAL:
+  case AST_BINEXPR_GREATER_EQUAL:
+  case AST_BINEXPR_LESS_EQUAL:
+  case AST_BINEXPR_UNEQUAL:
+  case AST_BINEXPR_IN:
+  case AST_BINEXPR_NOT_IN:
+  case AST_BINEXPR_IS:
+  case AST_BINEXPR_IS_NOT:
+  case AST_UNEXPR_INVERT:
+  case AST_UNEXPR_NEGATIVE:
+  case AST_UNEXPR_NOT:
+  case AST_UNEXPR_PLUS:
+    return false;
+  }
+  abort();
+}
+
+static void emit_nonconst_tuple_form(struct cg_state *cg,
+                                     struct ast_tuple_form *tuple_form)
+{
+  (void)cg;
+  (void)tuple_form;
+  abort(); // TODO
 }
 
 static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
@@ -122,7 +185,7 @@ static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
 }
 
 static void emit_expression_impl(struct cg_state *cg,
-                                 union ast_node *expression, bool drop)
+                                 union ast_expression *expression, bool drop)
 {
   switch (expression->type) {
   case AST_CONST:
@@ -187,6 +250,16 @@ static void emit_expression_impl(struct cg_state *cg,
   case AST_BINEXPR_IS_NOT:
     emit_comparison(cg, &expression->binexpr, COMPARE_OP_IS_NOT);
     break;
+  case AST_TUPLE_FORM: {
+    union object *object = constant_object(cg, expression);
+    if (object != NULL) {
+      unsigned index = cg_register_object(cg, object);
+      cg_push_op(cg, OPCODE_LOAD_CONST, index);
+    } else {
+      emit_nonconst_tuple_form(cg, &expression->tuple_form);
+    }
+    break;
+  }
   case AST_UNEXPR_PLUS:
     emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_POSITIVE);
     break;
@@ -203,21 +276,19 @@ static void emit_expression_impl(struct cg_state *cg,
     emit_call(cg, &expression->call, drop);
     return;
   }
-  default:
-    fprintf(stderr, "unexpected expression");
-    abort();
   }
   if (drop) {
     cg_pop_op(cg, OPCODE_POP_TOP, 0);
   }
 }
 
-void emit_expression(struct cg_state *s, union ast_node *expression)
+void emit_expression(struct cg_state *s, union ast_expression *expression)
 {
   emit_expression_impl(s, expression, false);
 }
 
-void emit_expression_drop_result(struct cg_state *s, union ast_node *expression)
+void emit_expression_drop_result(struct cg_state *s,
+                                 union ast_expression *expression)
 {
   emit_expression_impl(s, expression, true);
 }

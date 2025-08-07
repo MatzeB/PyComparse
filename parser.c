@@ -24,7 +24,8 @@
 
 /* Keep this in sync with prefix_parsers */
 #define EXPRESSION_START_CASES \
-  '+': \
+  '(': \
+  case '+': \
   case '-': \
   case '~': \
   case T_not: \
@@ -185,21 +186,21 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
     eat(s, expected_token_kind);
 }
 
-static union ast_node *ast_allocate_zero_(struct parser_state *s,
-                                          size_t size, uint8_t type)
+static union ast_expression *ast_allocate_expression_(struct parser_state *s,
+                                                      size_t size, uint8_t type)
 {
-  union ast_node *node =
-    (union ast_node*)arena_allocate(&s->ast, size, alignof(union ast_node));
-  memset(node, 0, size);
-  node->type = type;
-  return node;
+  union ast_expression *expression =
+    (union ast_expression*)arena_allocate(&s->ast, size, alignof(union ast_expression));
+  memset(expression, 0, size);
+  expression->type = type;
+  return expression;
 }
 
-#define ast_allocate_zero(s, type, type_id) \
-    ast_allocate_zero_((s), sizeof(type), (type_id))
+#define ast_allocate_expression(s, type, type_id) \
+    ast_allocate_expression_((s), sizeof(type), (type_id))
 
-static union ast_node *parse_subexpression(struct parser_state *s,
-                                           enum precedence precedence);
+static union ast_expression *parse_subexpression(struct parser_state *s,
+                                                 enum precedence precedence);
 
 static struct argument *parse_argument(struct parser_state *s)
 {
@@ -212,7 +213,7 @@ static struct argument *parse_argument(struct parser_state *s)
     parse_subexpression(s, PREC_TEST);
     unimplemented();
   default: {
-    union ast_node *expression = parse_subexpression(s, PREC_TEST);
+    union ast_expression *expression = parse_subexpression(s, PREC_TEST);
     if (accept(s, '=')) {
       expression = parse_subexpression(s, PREC_TEST);
       unimplemented();
@@ -223,10 +224,12 @@ static struct argument *parse_argument(struct parser_state *s)
   }
 }
 
-static union ast_node *parse_call(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_call(struct parser_state *s,
+                                        union ast_expression *left)
 {
-  union ast_node *node = ast_allocate_zero(s, struct ast_call, AST_CALL);
-  node->call.callee = left;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_call, AST_CALL);
+  expression->call.callee = left;
 
   eat(s, '(');
   add_anchor(s, ')');
@@ -237,7 +240,7 @@ static union ast_node *parse_call(struct parser_state *s, union ast_node *left)
     do {
       struct argument *new_argument = parse_argument(s);
       if (argument == NULL) {
-        node->call.arguments = new_argument;
+        expression->call.arguments = new_argument;
       } else {
         argument->next = new_argument;
       }
@@ -247,53 +250,81 @@ static union ast_node *parse_call(struct parser_state *s, union ast_node *left)
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
-  return node;
+  return expression;
 }
 
-static inline union ast_node *parse_unexpr(struct parser_state *s,
-                                           enum precedence prec_op,
-                                           uint8_t ast_node_type)
+static inline union ast_expression *parse_unexpr(struct parser_state *s,
+                                                 enum precedence prec_op,
+                                                 uint8_t ast_node_type)
 {
   next_token(s);
-  union ast_node *op = parse_subexpression(s, prec_op);
+  union ast_expression *op = parse_subexpression(s, prec_op);
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_unexpr, ast_node_type);
-  node->unexpr.op = op;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_unexpr, ast_node_type);
+  expression->unexpr.op = op;
+  return expression;
 }
 
-static union ast_node *parse_plus(struct parser_state *s)
+static union ast_expression *parse_l_paren(struct parser_state *s)
+{
+  eat(s, '(');
+  if (accept(s, ')')) {
+    union ast_expression *node = ast_allocate_expression(s, struct ast_tuple_form,
+                                                   AST_TUPLE_FORM);
+    return node;
+  }
+
+  union ast_expression *result;
+  for (;;) {
+    if (s->scanner.token.kind == '*' ||
+        s->scanner.token.kind == T_ASTERISK_ASTERISK) {
+      // TODO: union ast_expression *result = parse_argument(s);
+      abort();
+    }
+    result = parse_subexpression(s, PREC_LIST);
+    if (accept(s, ',')) {
+      // TODO: turn into argument, ...
+      abort();
+    }
+    break;
+  }
+  expect(s, ')');
+  return result;
+}
+
+static union ast_expression *parse_plus(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_PLUS);
 }
 
-static union ast_node *parse_negative(struct parser_state *s)
+static union ast_expression *parse_negative(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_NEGATIVE);
 }
 
-static union ast_node *parse_invert(struct parser_state *s)
+static union ast_expression *parse_invert(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_INVERT);
 }
 
-static union ast_node *parse_not(struct parser_state *s)
+static union ast_expression *parse_not(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_LOGICAL_NOT, AST_UNEXPR_NOT);
 }
 
-static union ast_node *parse_identifier(struct parser_state *s)
+static union ast_expression *parse_identifier(struct parser_state *s)
 {
   struct symbol *symbol = s->scanner.token.u.symbol;
   eat(s, T_IDENTIFIER);
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_identifier,
-                                           AST_IDENTIFIER);
+  union ast_expression *node =
+    ast_allocate_expression(s, struct ast_identifier, AST_IDENTIFIER);
   node->identifier.symbol = symbol;
   return node;
 }
 
-static union ast_node *parse_string(struct parser_state *s)
+static union ast_expression *parse_string(struct parser_state *s)
 {
   const char *chars = s->scanner.token.u.string;
   uint32_t length = strlen(chars);
@@ -303,12 +334,13 @@ static union ast_node *parse_string(struct parser_state *s)
   }
   eat(s, T_STRING);
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_const, AST_CONST);
-  node->cnst.index = (uint16_t)index;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.index = (uint16_t)index;
+  return expression;
 }
 
-static union ast_node *parse_integer(struct parser_state *s)
+static union ast_expression *parse_integer(struct parser_state *s)
 {
   const char *string = s->scanner.token.u.string;
   char *endptr;
@@ -326,12 +358,13 @@ static union ast_node *parse_integer(struct parser_state *s)
   }
   eat(s, T_INTEGER);
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_const, AST_CONST);
-  node->cnst.index = (uint16_t)index;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.index = (uint16_t)index;
+  return expression;
 }
 
-static union ast_node *parse_singleton(struct parser_state *s, char type)
+static union ast_expression *parse_singleton(struct parser_state *s, char type)
 {
   next_token(s);
   unsigned index = cg_register_singleton(&s->cg, type);
@@ -339,38 +372,40 @@ static union ast_node *parse_singleton(struct parser_state *s, char type)
     abort();
   }
 
-  union ast_node *node = ast_allocate_zero(s, struct ast_const, AST_CONST);
-  node->cnst.index = (uint16_t)index;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.index = (uint16_t)index;
+  return expression;
 }
 
-static union ast_node *parse_true(struct parser_state *s)
+static union ast_expression *parse_true(struct parser_state *s)
 {
   return parse_singleton(s, TYPE_TRUE);
 }
 
-static union ast_node *parse_false(struct parser_state *s)
+static union ast_expression *parse_false(struct parser_state *s)
 {
   return parse_singleton(s, TYPE_FALSE);
 }
 
-static union ast_node *parse_none(struct parser_state *s)
+static union ast_expression *parse_none(struct parser_state *s)
 {
   return parse_singleton(s, TYPE_NONE);
 }
 
-static union ast_node *parse_ellipsis(struct parser_state *s)
+static union ast_expression *parse_ellipsis(struct parser_state *s)
 {
   return parse_singleton(s, TYPE_ELLIPSIS);
 }
 
-typedef union ast_node *(*prefix_parser_func)(struct parser_state *s);
+typedef union ast_expression *(*prefix_parser_func)(struct parser_state *s);
 struct prefix_expression_parser {
   prefix_parser_func func;
   enum precedence precedence;
 };
 
 static const struct prefix_expression_parser prefix_parsers[] = {
+  ['(']           = { .func = parse_l_paren,    .precedence = PREC_ATOM },
   ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
   ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
   ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
@@ -385,108 +420,114 @@ static const struct prefix_expression_parser prefix_parsers[] = {
 };
 
 
-static inline union ast_node *parse_binexpr(struct parser_state *s,
-                                            enum precedence prec_right,
-                                            uint8_t ast_node_type,
-                                            union ast_node *left)
+static inline union ast_expression *parse_binexpr(struct parser_state *s,
+                                                  enum precedence prec_right,
+                                                  uint8_t ast_node_type,
+                                                  union ast_expression *left)
 {
   next_token(s);
-  union ast_node *right = parse_subexpression(s, prec_right);
+  union ast_expression *right = parse_subexpression(s, prec_right);
 
-  union ast_node *node =
-      ast_allocate_zero(s, struct ast_binexpr, ast_node_type);
-  node->binexpr.left = left;
-  node->binexpr.right = right;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
 }
 
-static union ast_node *parse_matmul(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_matmul(struct parser_state *s,
+                                          union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MATMUL, left);
 }
 
-static union ast_node *parse_add(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_add(struct parser_state *s,
+                                       union ast_expression *left)
 {
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_ADD, left);
 }
 
-static union ast_node *parse_assignment(struct parser_state *s,
-                                        union ast_node *left)
+static union ast_expression *parse_assignment(struct parser_state *s,
+                                              union ast_expression *left)
 {
   return parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
 }
 
-static union ast_node *parse_mul(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_mul(struct parser_state *s,
+                                       union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MUL, left);
 }
 
-static union ast_node *parse_sub(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_sub(struct parser_state *s,
+                                       union ast_expression *left)
 {
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_SUB, left);
 }
 
-static union ast_node *parse_floor_div(struct parser_state *s,
-                                       union ast_node *left)
+static union ast_expression *parse_floor_div(struct parser_state *s,
+                                             union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_FLOORDIV, left);
 }
 
-static union ast_node *parse_true_div(struct parser_state *s,
-                                      union ast_node *left)
+static union ast_expression *parse_true_div(struct parser_state *s,
+                                            union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_TRUEDIV, left);
 }
 
-static union ast_node *parse_greater(struct parser_state *s,
-                                     union ast_node *left)
+static union ast_expression *parse_greater(struct parser_state *s,
+                                           union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER, left);
 }
 
-static union ast_node *parse_less(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_less(struct parser_state *s,
+                                        union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS, left);
 }
 
-static union ast_node *parse_equal(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_equal(struct parser_state *s,
+                                         union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_EQUAL, left);
 }
 
-static union ast_node *parse_greater_equal(struct parser_state *s,
-                                           union ast_node *left)
+static union ast_expression *parse_greater_equal(struct parser_state *s,
+                                                 union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER_EQUAL, left);
 }
 
-static union ast_node *parse_less_equal(struct parser_state *s,
-                                        union ast_node *left)
+static union ast_expression *parse_less_equal(struct parser_state *s,
+                                              union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
 }
 
-static union ast_node *parse_unequal(struct parser_state *s,
-                                     union ast_node *left)
+static union ast_expression *parse_unequal(struct parser_state *s,
+                                           union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_UNEQUAL, left);
 }
 
-static union ast_node *parse_in(struct parser_state *s,
-                                union ast_node *left)
+static union ast_expression *parse_in(struct parser_state *s,
+                                      union ast_expression *left)
 {
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
 }
 
-static union ast_node *make_invalid_expression(struct parser_state *s)
+static union ast_expression *make_invalid_expression(struct parser_state *s)
 {
   (void)s;
   // TODO
   unimplemented();
 }
 
-static union ast_node *parse_not_in(struct parser_state *s,
-                                    union ast_node *left)
+static union ast_expression *parse_not_in(struct parser_state *s,
+                                          union ast_expression *left)
 {
   eat(s, T_not);
   if (!accept(s, T_in)) {
@@ -494,32 +535,33 @@ static union ast_node *parse_not_in(struct parser_state *s,
     return make_invalid_expression(s);
   }
 
-  union ast_node *right = parse_subexpression(s, PREC_COMPARISON + 1);
+  union ast_expression *right = parse_subexpression(s, PREC_COMPARISON + 1);
 
-  union ast_node *node =
-      ast_allocate_zero(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
-  node->binexpr.left = left;
-  node->binexpr.right = right;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
 }
 
-static union ast_node *parse_is(struct parser_state *s, union ast_node *left)
+static union ast_expression *parse_is(struct parser_state *s,
+                                      union ast_expression *left)
 {
   eat(s, T_is);
   uint8_t ast_node_type = accept(s, T_not) ? AST_BINEXPR_IS_NOT
                                            : AST_BINEXPR_IS;
 
-  union ast_node *right = parse_subexpression(s, PREC_COMPARISON + 1);
+  union ast_expression *right = parse_subexpression(s, PREC_COMPARISON + 1);
 
-  union ast_node *node =
-      ast_allocate_zero(s, struct ast_binexpr, ast_node_type);
-  node->binexpr.left = left;
-  node->binexpr.right = right;
-  return node;
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
 }
 
-typedef union ast_node *(*postfix_parser_func)(struct parser_state *s,
-                                               union ast_node *prefix);
+typedef union ast_expression *(*postfix_parser_func)
+    (struct parser_state *s, union ast_expression * prefix);
 
 struct postfix_expression_parser {
   postfix_parser_func func;
@@ -551,8 +593,8 @@ static const struct postfix_expression_parser postfix_parsers[] = {
       = { .func = parse_unequal,       .precedence = PREC_COMPARISON },
 };
 
-union ast_node *parse_subexpression(struct parser_state *s,
-                                    enum precedence precedence)
+union ast_expression *parse_subexpression(struct parser_state *s,
+                                          enum precedence precedence)
 {
   uint16_t token_kind = s->scanner.token.kind;
   if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
@@ -565,11 +607,12 @@ union ast_node *parse_subexpression(struct parser_state *s,
     parse_error_expected(s, "expression");
     unimplemented();
   }
-  union ast_node *result = prefix_parser->func(s);
+  union ast_expression *result = prefix_parser->func(s);
 
   for (;;) {
     uint16_t postifx_token_kind = s->scanner.token.kind;
-    if (postifx_token_kind >= sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
+    if (postifx_token_kind >=
+        sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
       break;
     const struct postfix_expression_parser *postfix_parser =
       &postfix_parsers[postifx_token_kind];
@@ -584,7 +627,7 @@ union ast_node *parse_subexpression(struct parser_state *s,
 
 static void parse_expression_statement(struct parser_state *s)
 {
-  union ast_node *expression = parse_subexpression(s, PREC_ASSIGN);
+  union ast_expression *expression = parse_subexpression(s, PREC_ASSIGN);
   emit_expression_statement(&s->cg, expression);
 }
 
@@ -629,7 +672,7 @@ static void parse_return_statement(struct parser_state *s)
 {
   eat(s, T_return);
 
-  union ast_node *expression;
+  union ast_expression *expression;
   switch (s->scanner.token.kind) {
   case EXPRESSION_START_CASES:
     expression = parse_subexpression(s, PREC_LIST);
@@ -694,7 +737,7 @@ static void parse_suite(struct parser_state *s)
 static void parse_if(struct parser_state *s)
 {
   eat(s, T_if);
-  union ast_node *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
   struct if_state state;
@@ -714,9 +757,9 @@ static void parse_if(struct parser_state *s)
 static void parse_for(struct parser_state *s)
 {
   eat(s, T_for);
-  union ast_node *target = parse_subexpression(s, PREC_XOR);
+  union ast_expression *target = parse_subexpression(s, PREC_XOR);
   expect(s, T_in);
-  union ast_node *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
   struct for_state state;
@@ -730,7 +773,7 @@ static void parse_for(struct parser_state *s)
 static void parse_while(struct parser_state *s)
 {
   eat(s, T_while);
-  union ast_node *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');
 
   struct while_state state;

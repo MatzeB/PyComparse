@@ -7,7 +7,7 @@ enum symbol_info_type {
 };
 
 struct symbol_info {
-  char type;
+  char     type;
   uint16_t scope_id;
   unsigned index;
 };

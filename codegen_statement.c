@@ -39,7 +39,8 @@ union object *emit_module_end(struct cg_state *s)
   return cg_code_end(s, "<module>");
 }
 
-void emit_expression_statement(struct cg_state *s, union ast_node *expression)
+void emit_expression_statement(struct cg_state *s,
+                               union ast_expression *expression)
 {
   if (unreachable(s)) return;
   emit_expression_drop_result(s, expression);
@@ -81,7 +82,8 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *name,
   emit_store(s, name->symbols[0]);
 }
 
-void emit_return_statement(struct cg_state *s, union ast_node *expression)
+void emit_return_statement(struct cg_state *s,
+                           union ast_expression *expression)
 {
   if (unreachable(s)) return;
   if (expression != NULL) {
@@ -113,7 +115,7 @@ static void emit_jump(struct cg_state *s, struct basic_block *target)
 }
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
-                   union ast_node *expression)
+                   union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -155,7 +157,8 @@ void emit_if_end(struct cg_state *s, struct if_state *state)
 }
 
 void emit_for_begin(struct cg_state *s, struct for_state *state,
-                    union ast_node *target, union ast_node *expression)
+                    union ast_expression *target,
+                    union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -193,7 +196,7 @@ void emit_for_end(struct cg_state *s, struct for_state *state)
 }
 
 void emit_while_begin(struct cg_state *s, struct while_state *state,
-                      union ast_node *expression)
+                      union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -247,7 +250,7 @@ void emit_def_end(struct cg_state *s, struct symbol *symbol)
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, symbol->string);
-  unsigned code_index = cg_register_code(s, code);
+  unsigned code_index = cg_register_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
 
   const char *chars = symbol->string;

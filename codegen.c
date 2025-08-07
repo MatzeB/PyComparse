@@ -350,11 +350,11 @@ unsigned cg_append_varname(struct cg_state *s, const char *name)
   return varnames->list.length - 1;
 }
 
-unsigned cg_register_code(struct cg_state *s, union object *code)
+unsigned cg_register_object(struct cg_state *s, union object *object)
 {
-  assert(code->type == TYPE_CODE);
+  assert(object->type == TYPE_CODE || object->type == TYPE_TUPLE);
   union object *consts = s->code.consts;
-  object_list_append(consts, code);
+  object_list_append(consts, object);
   return consts->list.length - 1;
 }
 

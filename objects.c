@@ -60,14 +60,25 @@ static void object_list_grow(struct object_list *list, unsigned size)
     }
 }
 
-void object_list_append(union object *list, union object *object)
+void object_list_append(union object *olist, union object *object)
 {
-  assert(list->type == TYPE_LIST);
-  unsigned new_size = list->list.length + 1;
-  if (UNLIKELY(new_size >= list->list.capacity)) {
-    object_list_grow(&list->list, new_size);
+  assert(olist->type == TYPE_LIST);
+  struct object_list *list = &olist->list;
+  unsigned length = list->length;
+  unsigned new_length = length + 1;
+  if (UNLIKELY(new_length >= list->capacity)) {
+    object_list_grow(list, new_length);
   }
-  list->list.items[list->list.length++] = object;
+  list->items[length] = object;
+  list->length = new_length;
+}
+
+union object *object_list_at(union object *olist, uint32_t index)
+{
+  assert(olist->type == TYPE_LIST);
+  struct object_list *list = &olist->list;
+  assert(index < list->length);
+  return list->items[index];
 }
 
 union object *object_new_tuple(struct arena *arena, uint32_t length)

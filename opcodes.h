@@ -86,9 +86,9 @@ enum opcode {
   OPCODE_POP_JUMP_IF_FALSE            = 114,
   OPCODE_POP_JUMP_IF_TRUE             = 115,
   OPCODE_LOAD_GLOBAL                  = 116,
-  // OPCODE_CONTINUE_LOOP                = 119,  // removed in 3.8
-  // OPCODE_SETUP_LOOP                   = 120,  // removed in 3.8
-  // OPCODE_SETUP_EXCEPT                 = 121,  // removed in 3.8
+  /* OPCODE_CONTINUE_LOOP                = 119,  // removed in 3.8 */
+  /* OPCODE_SETUP_LOOP                   = 120,  // removed in 3.8 */
+  /* OPCODE_SETUP_EXCEPT                 = 121,  // removed in 3.8 */
   OPCODE_SETUP_FINALLY                = 122,
   OPCODE_LOAD_FAST                    = 124,
   OPCODE_STORE_FAST                   = 125,
@@ -121,8 +121,8 @@ enum opcode {
   OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL = 158,
   OPCODE_LOAD_METHOD                  = 160,
   OPCODE_CALL_METHOD                  = 161,
-  OPCODE_CALL_FINALLY                 = 162,  // added in 3.8
-  OPCODE_POP_FINALLY                  = 163,  // added in 3.8
+  OPCODE_CALL_FINALLY                 = 162,  /* added in 3.8 */
+  OPCODE_POP_FINALLY                  = 163,  /* added in 3.8 */
 };
 
 enum compare_op_arg {

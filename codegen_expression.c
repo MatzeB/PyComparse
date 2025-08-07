@@ -113,26 +113,23 @@ void emit_assignment(struct cg_state *cg, union ast_expression *target)
   }
 }
 
-static union object *constant_object(struct cg_state *cg,
-                                     union ast_expression *expression)
+static union object *constant_expression(struct cg_state *cg,
+                                         union ast_expression *expression)
 {
   switch (expression->type) {
   case AST_CONST:
     return object_list_at(cg->code.consts, expression->cnst.index);
   case AST_TUPLE_FORM: {
     struct ast_tuple_form *tuple_form = &expression->tuple_form;
-    unsigned num_arguments = 0;
+    /* TODO: list "leaks" and stays in arena... */
     union object *list = object_new_list(&cg->objects);
     for (struct argument *argument = tuple_form->arguments;
          argument != NULL; argument = argument->next) {
-      union object *const_arg = constant_object(cg, argument->expression);
-      if (const_arg == NULL) {
-        // can we free "list" safely from the arena? for now leak...
-        return NULL;
-      }
+      union object *const_arg = constant_expression(cg, argument->expression);
+      if (const_arg == NULL) return NULL;
       object_list_append(list, const_arg);
     }
-    union object *tuple = object_new_tuple(&cg->objects, num_arguments);
+    union object *tuple = object_new_tuple(&cg->objects, list->list.length);
     for (unsigned i = 0, e = list->list.length; i < e; i++) {
       tuple->tuple.items[i] = list->list.items[i];
     }
@@ -162,7 +159,7 @@ static union object *constant_object(struct cg_state *cg,
   case AST_UNEXPR_NEGATIVE:
   case AST_UNEXPR_NOT:
   case AST_UNEXPR_PLUS:
-    return false;
+    return NULL;
   }
   abort();
 }
@@ -170,9 +167,14 @@ static union object *constant_object(struct cg_state *cg,
 static void emit_nonconst_tuple_form(struct cg_state *cg,
                                      struct ast_tuple_form *tuple_form)
 {
-  (void)cg;
-  (void)tuple_form;
-  abort(); // TODO
+  unsigned num_elements = 0;
+  for (struct argument *argument = tuple_form->arguments;
+       argument != NULL; argument = argument->next) {
+    emit_expression(cg, argument->expression);
+    num_elements++;
+  }
+  cg_op(cg, OPCODE_BUILD_TUPLE, num_elements);
+  cg_pop(cg, num_elements-1);
 }
 
 static void emit_attr(struct cg_state *cg, struct ast_attr *attr)
@@ -272,7 +274,7 @@ static void emit_expression_impl(struct cg_state *cg,
     emit_load(cg, expression->identifier.symbol);
     break;
   case AST_TUPLE_FORM: {
-    union object *object = constant_object(cg, expression);
+    union object *object = constant_expression(cg, expression);
     if (object != NULL) {
       unsigned index = cg_register_object(cg, object);
       cg_push_op(cg, OPCODE_LOAD_CONST, index);

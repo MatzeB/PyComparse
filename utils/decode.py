@@ -1,50 +1,64 @@
 #!/usr/bin/env python3
 import dis, marshal, struct, sys, time, types
 
-def show_file(fname):
-    f = open(fname, "rb")
-    magic = f.read(4)
-    zero = f.read(4)
-    moddate = f.read(4)
+def show_pyc_file(fp):
+    magic = fp.read(4)
+    zero = fp.read(4)
+    moddate = fp.read(4)
     modtime = time.asctime(time.localtime(struct.unpack('I', moddate)[0]))
     print("magic %s" % (hex(int.from_bytes(magic, 'little'))))
     print("moddate %s (%s)" % (hex(int.from_bytes(moddate, 'little')), modtime))
-    source_size = int.from_bytes(f.read(4), 'little')
+    source_size = int.from_bytes(fp.read(4), 'little')
     print(f"source size {source_size}")
-    code = marshal.load(f)
+    code = marshal.load(fp)
     show_code(code)
      
 def show_code(code, indent=''):
-    print("%scode" % indent)
+    print(f"{indent}code")
     indent += '   '
-    print("%sargcount %d" % (indent, code.co_argcount))
-    print("%snlocals %d" % (indent, code.co_nlocals))
-    print("%sstacksize %d" % (indent, code.co_stacksize))
-    print("%sflags %04x" % (indent, code.co_flags))
+    print(f"{indent}argcount {code.co_argcount}")
+    print(f"{indent}nlocals {code.co_nlocals}")
+    print(f"{indent}stacksize {code.co_stacksize}")
+    print(f"{indent}flags {code.co_flags:04x}")
     show_hex("code", code.co_code, indent=indent)
     dis.disassemble(code)
-    print("%sconsts" % indent)
+    print(f"{indent}consts")
     for const in code.co_consts:
         if type(const) == types.CodeType:
             show_code(const, indent+'   ')
         else:
-            print("   %s%r" % (indent, const))
-    print("%snames %r" % (indent, code.co_names))
-    print("%svarnames %r" % (indent, code.co_varnames))
-    print("%sfreevars %r" % (indent, code.co_freevars))
-    print("%scellvars %r" % (indent, code.co_cellvars))
-    print("%sfilename %r" % (indent, code.co_filename))
-    print("%sname %r" % (indent, code.co_name))
-    print("%sfirstlineno %d" % (indent, code.co_firstlineno))
+            print(f"   {indent}{const}")
+    print(f"{indent}names {code.co_names}")
+    print(f"{indent}varnames {code.co_varnames}")
+    print(f"{indent}freevars {code.co_freevars}")
+    print(f"{indent}cellvars {code.co_cellvars}")
+    print(f"{indent}filename {code.co_filename}")
+    print(f"{indent}name {code.co_name}")
+    print(f"{indent}firstlineno {code.co_firstlineno}")
     show_hex("lnotab", code.co_lnotab, indent=indent)
      
 def show_hex(label, h, indent):
     h = hex(int.from_bytes(h, 'little'))
     if len(h) < 60:
-        print("%s%s %s" % (indent, label, h))
+        print(f"{indent}{label} {h}")
     else:
-        print("%s%s" % (indent, label))
+        print(f"{indent}{label}")
         for i in range(0, len(h), 60):
-            print("%s   %s" % (indent, h[i:i+60]))
+            print(f"{indent}   {h[i:i+60]}")
 
-show_file(sys.argv[1])
+def _main():
+    if len(sys.argv) == 1:
+        show_pyc_file(sys.stdin.buffer)
+    else:
+        filename = sys.argv[1]
+        if filename.endswith(".py"):
+            with open(filename, "rb") as fp:
+                data = fp.read()
+            code = compile(data, filename, "exec", dont_inherit=True, optimize=-1)
+            show_code(code)
+        else:
+            with open(filename, "rb") as fp:
+                show_pyc_file(fp)
+
+if __name__ == "__main__":
+    _main()

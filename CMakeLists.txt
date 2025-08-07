@@ -5,9 +5,10 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGUREATION_TYPES)
   set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-c++98-compat -Wno-shorten-64-to-32 -Wno-padded")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-missing-noreturn")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wno-#warnings")
+# glibc 2.40 keeps warning about _FORTIFY_SOURCE in -O0 but I somehow cannot
+# remove the define from clang either...
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-#warnings")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
 
 add_executable(arena_test
   arena_test.c

@@ -22,7 +22,7 @@
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
-/* Keep this in sync with prefix_parsers */
+/* Keep this in sync with prefix_parsers below */
 #define EXPRESSION_START_CASES \
   '(': \
   case '+': \
@@ -67,9 +67,9 @@ static void parse_error_expected(struct parser_state *s, const char *what)
   s->error = true;
 }
 
-static inline bool peek(const struct parser_state *s, uint16_t token_kind)
+static inline uint16_t peek(const struct parser_state *s)
 {
-  return s->scanner.token.kind == token_kind;
+  return s->scanner.token.kind;
 }
 
 static inline void next_token(struct parser_state *s)
@@ -79,14 +79,30 @@ static inline void next_token(struct parser_state *s)
 
 static inline void eat(struct parser_state *s, uint16_t token_kind)
 {
-  assert(s->scanner.token.kind == token_kind);
+  assert(peek(s) == token_kind);
   (void)token_kind;
   next_token(s);
 }
 
+static inline struct symbol *eat_identifier(struct parser_state *s)
+{
+  assert(peek(s) == T_IDENTIFIER);
+  struct symbol *symbol = s->scanner.token.u.symbol;
+  next_token(s);
+  return symbol;
+}
+
+static inline const char* peek_token_with_string(struct parser_state *s,
+                                                 uint16_t token_kind)
+{
+  assert(token_kind == T_STRING || token_kind == T_INTEGER);
+  assert(peek(s) == token_kind);
+  return s->scanner.token.u.string;
+}
+
 static inline bool accept(struct parser_state *s, uint16_t token_kind)
 {
-  if (peek(s, token_kind)) {
+  if (peek(s) == token_kind) {
     next_token(s);
     return true;
   }
@@ -120,11 +136,11 @@ static void eat_until_matching_token(struct parser_state *s,
   unsigned parenthesis_count = 0;
   unsigned brace_count       = 0;
   unsigned bracket_count     = 0;
-  while (!peek(s, end_token_kind)
+  while (peek(s) != end_token_kind
          || parenthesis_count != 0
          || brace_count       != 0
          || bracket_count     != 0) {
-    switch (s->scanner.token.kind) {
+    switch (peek(s)) {
     case T_EOF: return;
     case '(': ++parenthesis_count; break;
     case '{': ++brace_count;       break;
@@ -144,7 +160,7 @@ static void eat_until_matching_token(struct parser_state *s,
       if (bracket_count > 0)
         --bracket_count;
 check_stop:
-      if (peek(s, end_token_kind)
+      if (peek(s) == end_token_kind
           && parenthesis_count == 0
           && brace_count       == 0
           && bracket_count     == 0)
@@ -159,22 +175,22 @@ check_stop:
 
 static void eat_until_anchor(struct parser_state *s)
 {
-  while (s->anchor_set[s->scanner.token.kind] == 0) {
-    if (peek(s, '(') || peek(s, '{') || peek(s, '['))
-      eat_until_matching_token(s, s->scanner.token.kind);
+  while (s->anchor_set[peek(s)] == 0) {
+    if (peek(s) == '(' || peek(s) == '{' || peek(s) == '[')
+      eat_until_matching_token(s, peek(s));
     next_token(s);
   }
 }
 
 static bool skip_till(struct parser_state *s, uint16_t expected_token_kind)
 {
-  if (UNLIKELY(!peek(s, expected_token_kind))) {
+  if (UNLIKELY(peek(s) != expected_token_kind)) {
     parse_error_expected(s, token_kind_name(expected_token_kind));
 
     add_anchor(s, expected_token_kind);
     eat_until_anchor(s);
     remove_anchor(s, expected_token_kind);
-    if (!peek(s, expected_token_kind))
+    if (peek(s) != expected_token_kind)
       return false;
   }
   return true;
@@ -202,7 +218,7 @@ static union ast_expression *ast_allocate_expression_(struct parser_state *s,
 static union ast_expression *make_invalid_expression(struct parser_state *s)
 {
   (void)s;
-  // TODO
+  /* TODO */
   unimplemented();
 }
 
@@ -212,7 +228,7 @@ static union ast_expression *parse_subexpression(struct parser_state *s,
 static struct argument *parse_argument(struct parser_state *s)
 {
   struct argument *argument = arena_allocate_type(&s->ast, struct argument);
-  switch (s->scanner.token.kind) {
+  switch (peek(s)) {
   case '*':
     parse_subexpression(s, PREC_TEST);
     unimplemented();
@@ -236,8 +252,7 @@ static union ast_expression *parse_attr(struct parser_state *s,
 {
   eat(s, '.');
   if (!skip_till(s, T_IDENTIFIER)) return make_invalid_expression(s);
-  struct symbol *symbol = s->scanner.token.u.symbol;
-  eat(s, T_IDENTIFIER);
+  struct symbol *symbol = eat_identifier(s);
 
   union ast_expression *expression =
       ast_allocate_expression(s, struct ast_attr, AST_ATTR);
@@ -258,7 +273,7 @@ static union ast_expression *parse_call(struct parser_state *s,
   add_anchor(s, ',');
 
   struct argument *argument = NULL;
-  if (!peek(s, ')')) {
+  if (peek(s) != ')') {
     do {
       struct argument *new_argument = parse_argument(s);
       if (argument == NULL) {
@@ -267,7 +282,7 @@ static union ast_expression *parse_call(struct parser_state *s,
         argument->next = new_argument;
       }
       argument = new_argument;
-    } while(accept(s, ',') && !peek(s, ')'));
+    } while(accept(s, ',') && peek(s) != ')');
   }
   remove_anchor(s, ',');
   remove_anchor(s, ')');
@@ -292,27 +307,41 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
 {
   eat(s, '(');
   if (accept(s, ')')) {
-    union ast_expression *node = ast_allocate_expression(s, struct ast_tuple_form,
-                                                   AST_TUPLE_FORM);
-    return node;
+    union ast_expression *tuple =
+        ast_allocate_expression(s, struct ast_tuple_form, AST_TUPLE_FORM);
+    tuple->tuple_form.arguments = NULL;
+    return tuple;
   }
 
-  union ast_expression *result;
-  for (;;) {
-    if (s->scanner.token.kind == '*' ||
-        s->scanner.token.kind == T_ASTERISK_ASTERISK) {
-      // TODO: union ast_expression *result = parse_argument(s);
-      abort();
+  add_anchor(s, ')');
+  add_anchor(s, ',');
+  union ast_expression *expression = parse_subexpression(s, PREC_LIST);
+  if (accept(s, ',')) {
+    struct argument *argument = arena_allocate_type(&s->ast, struct argument);
+    argument->expression = expression;
+    struct argument *last = argument;
+    struct argument *first = last;
+
+    for (;;) {
+      if (peek(s) == ')')
+        break;
+      argument = parse_argument(s);
+      last->next = argument;
+      last = argument;
+      if (accept(s, ','))
+        continue;
+      break;
     }
-    result = parse_subexpression(s, PREC_LIST);
-    if (accept(s, ',')) {
-      // TODO: turn into argument, ...
-      abort();
-    }
-    break;
+
+    union ast_expression *tuple =
+      ast_allocate_expression(s, struct ast_tuple_form, AST_TUPLE_FORM);
+    tuple->tuple_form.arguments = first;
+    expression = tuple;
   }
+  remove_anchor(s, ',');
+  remove_anchor(s, ')');
   expect(s, ')');
-  return result;
+  return expression;
 }
 
 static union ast_expression *parse_plus(struct parser_state *s)
@@ -337,8 +366,7 @@ static union ast_expression *parse_not(struct parser_state *s)
 
 static union ast_expression *parse_identifier(struct parser_state *s)
 {
-  struct symbol *symbol = s->scanner.token.u.symbol;
-  eat(s, T_IDENTIFIER);
+  struct symbol *symbol = eat_identifier(s);
 
   union ast_expression *node =
     ast_allocate_expression(s, struct ast_identifier, AST_IDENTIFIER);
@@ -348,7 +376,7 @@ static union ast_expression *parse_identifier(struct parser_state *s)
 
 static union ast_expression *parse_string(struct parser_state *s)
 {
-  const char *chars = s->scanner.token.u.string;
+  const char *chars = peek_token_with_string(s, T_STRING);
   uint32_t length = strlen(chars);
   unsigned index = cg_register_string(&s->cg, chars, length);
   if ((uint16_t)index != index) {
@@ -364,7 +392,7 @@ static union ast_expression *parse_string(struct parser_state *s)
 
 static union ast_expression *parse_integer(struct parser_state *s)
 {
-  const char *string = s->scanner.token.u.string;
+  const char *string = peek_token_with_string(s, T_INTEGER);
   char *endptr;
   errno = 0;
   unsigned long value = strtoul(string, &endptr, 0);
@@ -612,7 +640,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
 union ast_expression *parse_subexpression(struct parser_state *s,
                                           enum precedence precedence)
 {
-  uint16_t token_kind = s->scanner.token.kind;
+  uint16_t token_kind = peek(s);
   if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
     parse_error_expected(s, "expression");
     unimplemented();
@@ -626,7 +654,7 @@ union ast_expression *parse_subexpression(struct parser_state *s,
   union ast_expression *result = prefix_parser->func(s);
 
   for (;;) {
-    uint16_t postifx_token_kind = s->scanner.token.kind;
+    uint16_t postifx_token_kind = peek(s);
     if (postifx_token_kind >=
         sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
       break;
@@ -658,8 +686,7 @@ static struct dotted_name *parse_dotted_name(struct parser_state *s)
       arena_free(&s->ast, begin);
       return NULL;
     }
-    struct symbol *symbol = s->scanner.token.u.symbol;
-    eat(s, T_IDENTIFIER);
+    struct symbol *symbol = eat_identifier(s);
 
     struct symbol **ptr = (struct symbol**)arena_grow(&s->ast, sizeof(*ptr));
     *ptr = symbol;
@@ -689,7 +716,7 @@ static void parse_return_statement(struct parser_state *s)
   eat(s, T_return);
 
   union ast_expression *expression;
-  switch (s->scanner.token.kind) {
+  switch (peek(s)) {
   case EXPRESSION_START_CASES:
     expression = parse_subexpression(s, PREC_LIST);
     break;
@@ -702,7 +729,7 @@ static void parse_return_statement(struct parser_state *s)
 
 static void parse_small_statement(struct parser_state *s)
 {
-  switch (s->scanner.token.kind) {
+  switch (peek(s)) {
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
     break;
@@ -727,7 +754,7 @@ static void parse_simple_statement(struct parser_state *s)
 {
   do {
     parse_small_statement(s);
-  } while (accept(s, ';') && !peek(s, T_NEWLINE));
+  } while (accept(s, ';') && peek(s) != T_NEWLINE);
   expect(s, T_NEWLINE);
 }
 
@@ -805,9 +832,8 @@ static void parse_parameters(struct parser_state *s)
   expect(s, '(');
 
   unsigned num_parameters = 0;
-  while (peek(s, T_IDENTIFIER)) {
-    struct symbol *symbol = s->scanner.token.u.symbol;
-    next_token(s);
+  while (peek(s) == T_IDENTIFIER) {
+    struct symbol *symbol = eat_identifier(s);
 
     if (!emit_parameter(&s->cg, symbol)) {
       fprintf(stderr, "error: duplicate parameter '%s'\n", symbol->string);
@@ -829,8 +855,7 @@ static void parse_def(struct parser_state *s)
 {
   eat(s, T_def);
   if (!skip_till(s, T_IDENTIFIER)) return;
-  struct symbol *symbol = s->scanner.token.u.symbol;
-  next_token(s);
+  struct symbol *symbol = eat_identifier(s);
 
   emit_def_begin(&s->cg);
 
@@ -848,7 +873,7 @@ static void parse_def(struct parser_state *s)
 
 static void parse_statement(struct parser_state *s)
 {
-  switch (s->scanner.token.kind) {
+  switch (peek(s)) {
   case T_for:
     parse_for(s);
     return;
@@ -876,7 +901,7 @@ union object *parse(struct parser_state *s)
   emit_module_begin(&s->cg);
 
   add_anchor(s, T_EOF);
-  while (s->scanner.token.kind != T_EOF) {
+  while (peek(s) != T_EOF) {
     if (accept(s, T_NEWLINE))
       continue;
     parse_statement(s);

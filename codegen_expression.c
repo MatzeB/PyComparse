@@ -1,4 +1,4 @@
-#include "codegen_ast.h"
+#include "codegen_expression.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -101,6 +101,12 @@ void emit_assignment(struct cg_state *cg, union ast_expression *target)
 {
   if (target->type == AST_IDENTIFIER) {
     emit_store(cg, target->identifier.symbol);
+  } else if (target->type == AST_ATTR) {
+    struct ast_attr *attr = &target->attr;
+    emit_expression(cg, attr->expression);
+    unsigned index = cg_append_name(cg, attr->attr->string);
+    cg_op(cg, OPCODE_STORE_ATTR, index);
+    cg_pop(cg, 2);
   } else {
     fprintf(stderr, "Unsupported or invalid lvalue\n");
     unimplemented();
@@ -132,8 +138,7 @@ static union object *constant_object(struct cg_state *cg,
     }
     return tuple;
   }
-  case AST_IDENTIFIER:
-  case AST_CALL:
+  case AST_ATTR:
   case AST_BINEXPR_ADD:
   case AST_BINEXPR_ASSIGN:
   case AST_BINEXPR_FLOORDIV:
@@ -151,6 +156,8 @@ static union object *constant_object(struct cg_state *cg,
   case AST_BINEXPR_NOT_IN:
   case AST_BINEXPR_IS:
   case AST_BINEXPR_IS_NOT:
+  case AST_CALL:
+  case AST_IDENTIFIER:
   case AST_UNEXPR_INVERT:
   case AST_UNEXPR_NEGATIVE:
   case AST_UNEXPR_NOT:
@@ -166,6 +173,13 @@ static void emit_nonconst_tuple_form(struct cg_state *cg,
   (void)cg;
   (void)tuple_form;
   abort(); // TODO
+}
+
+static void emit_attr(struct cg_state *cg, struct ast_attr *attr)
+{
+  emit_expression(cg, attr->expression);
+  unsigned index = cg_append_name(cg, attr->attr->string);
+  cg_op(cg, OPCODE_LOAD_ATTR, index);
 }
 
 static void emit_call(struct cg_state *cg, struct ast_call *call, bool drop)
@@ -188,12 +202,8 @@ static void emit_expression_impl(struct cg_state *cg,
                                  union ast_expression *expression, bool drop)
 {
   switch (expression->type) {
-  case AST_CONST:
-    cg_push_op(cg, OPCODE_LOAD_CONST, expression->cnst.index);
-    break;
-  case AST_IDENTIFIER:
-    assert(!drop);
-    emit_load(cg, expression->identifier.symbol);
+  case AST_ATTR:
+    emit_attr(cg, &expression->attr);
     break;
   case AST_BINEXPR_ADD:
     emit_binexpr(cg, &expression->binexpr, OPCODE_BINARY_ADD);
@@ -250,6 +260,17 @@ static void emit_expression_impl(struct cg_state *cg,
   case AST_BINEXPR_IS_NOT:
     emit_comparison(cg, &expression->binexpr, COMPARE_OP_IS_NOT);
     break;
+  case AST_CALL: {
+    emit_call(cg, &expression->call, drop);
+    return;
+  }
+  case AST_CONST:
+    cg_push_op(cg, OPCODE_LOAD_CONST, expression->cnst.index);
+    break;
+  case AST_IDENTIFIER:
+    assert(!drop);
+    emit_load(cg, expression->identifier.symbol);
+    break;
   case AST_TUPLE_FORM: {
     union object *object = constant_object(cg, expression);
     if (object != NULL) {
@@ -272,10 +293,6 @@ static void emit_expression_impl(struct cg_state *cg,
   case AST_UNEXPR_INVERT:
     emit_unexpr(cg, &expression->unexpr, OPCODE_UNARY_INVERT);
     break;
-  case AST_CALL: {
-    emit_call(cg, &expression->call, drop);
-    return;
-  }
   }
   if (drop) {
     cg_pop_op(cg, OPCODE_POP_TOP, 0);

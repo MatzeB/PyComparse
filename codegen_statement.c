@@ -6,7 +6,7 @@
 
 #include "ast_types.h"
 #include "codegen.h"
-#include "codegen_ast.h"
+#include "codegen_expression.h"
 #include "codegen_types.h"
 #include "objects.h"
 #include "opcodes.h"

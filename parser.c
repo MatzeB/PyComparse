@@ -15,7 +15,7 @@
 #include "token_kinds.h"
 #include "util.h"
 #include "codegen.h"
-#include "codegen_ast.h"
+#include "codegen_expression.h"
 #include "codegen_statement.h"
 
 #include "objects.h"
@@ -199,6 +199,13 @@ static union ast_expression *ast_allocate_expression_(struct parser_state *s,
 #define ast_allocate_expression(s, type, type_id) \
     ast_allocate_expression_((s), sizeof(type), (type_id))
 
+static union ast_expression *make_invalid_expression(struct parser_state *s)
+{
+  (void)s;
+  // TODO
+  unimplemented();
+}
+
 static union ast_expression *parse_subexpression(struct parser_state *s,
                                                  enum precedence precedence);
 
@@ -222,6 +229,21 @@ static struct argument *parse_argument(struct parser_state *s)
     return argument;
   }
   }
+}
+
+static union ast_expression *parse_attr(struct parser_state *s,
+                                        union ast_expression *left)
+{
+  eat(s, '.');
+  if (!skip_till(s, T_IDENTIFIER)) return make_invalid_expression(s);
+  struct symbol *symbol = s->scanner.token.u.symbol;
+  eat(s, T_IDENTIFIER);
+
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_attr, AST_ATTR);
+  expression->attr.expression = left;
+  expression->attr.attr = symbol;
+  return expression;
 }
 
 static union ast_expression *parse_call(struct parser_state *s,
@@ -519,13 +541,6 @@ static union ast_expression *parse_in(struct parser_state *s,
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
 }
 
-static union ast_expression *make_invalid_expression(struct parser_state *s)
-{
-  (void)s;
-  // TODO
-  unimplemented();
-}
-
 static union ast_expression *parse_not_in(struct parser_state *s,
                                           union ast_expression *left)
 {
@@ -574,6 +589,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
   ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
   ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
+  ['.']    = { .func = parse_attr,       .precedence = PREC_POSTFIX    },
   ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
   [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },

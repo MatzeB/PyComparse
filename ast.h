@@ -1,7 +1,7 @@
 #pragma once
 
 enum ast_node_type {
-  AST_CALL,
+  AST_ATTR,
   AST_BINEXPR_ADD,
   AST_BINEXPR_ASSIGN,
   AST_BINEXPR_FLOORDIV,
@@ -19,6 +19,7 @@ enum ast_node_type {
   AST_BINEXPR_NOT_IN,
   AST_BINEXPR_IS,
   AST_BINEXPR_IS_NOT,
+  AST_CALL,
   AST_CONST,
   AST_IDENTIFIER,
   AST_TUPLE_FORM,

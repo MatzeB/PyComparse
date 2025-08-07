@@ -7,6 +7,7 @@ endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-c++98-compat -Wno-shorten-64-to-32 -Wno-padded")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-missing-noreturn")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wno-#warnings")
 
 add_executable(arena_test
   arena_test.c
@@ -29,8 +30,8 @@ add_executable(parser_test
   adt/stack.h
   codegen.c
   codegen.h
-  codegen_ast.c
-  codegen_ast.h
+  codegen_expression.c
+  codegen_expression.h
   codegen_statement.c
   codegen_statement.h
   codegen_types.h

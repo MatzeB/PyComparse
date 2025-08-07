@@ -10,6 +10,12 @@ struct ast_node_base {
   uint8_t type;
 };
 
+struct ast_attr {
+  struct ast_node_base  base;
+  union ast_expression *expression;
+  struct symbol        *attr;
+};
+
 struct ast_identifier {
   struct ast_node_base base;
   struct symbol       *symbol;
@@ -46,6 +52,7 @@ union ast_expression {
   uint8_t              type;
   struct ast_node_base base;
 
+  struct ast_attr       attr;
   struct ast_binexpr    binexpr;
   struct ast_call       call;
   struct ast_const      cnst;

@@ -24,8 +24,8 @@ static inline void arena_grow_u8(struct arena *arena, uint8_t value)
 
 struct basic_block *cg_allocate_block(struct cg_state *s)
 {
-  struct basic_block *block = arena_allocate_type(&s->objects,
-                                                  struct basic_block);
+  struct arena *arena = object_intern_arena(&s->objects);
+  struct basic_block *block = arena_allocate_type(arena, struct basic_block);
   memset(block, 0, sizeof(*block));
   return block;
 }
@@ -65,15 +65,19 @@ void cg_code_begin(struct cg_state *s, bool use_locals)
   struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
   arena_init(&code->opcodes);
-  code->consts = object_new_list(&s->objects);
-  code->names = object_new_list(&s->objects);
-  code->varnames = object_new_list(&s->objects);
+  struct arena *arena = object_intern_arena(&s->objects);
+  code->consts = object_new_list(arena);
+  code->names = object_new_list(arena);
+  code->varnames = object_new_list(arena);
   if (s->next_scope_id == UINT16_MAX) {
     abort();
   }
   code->scope_id = s->next_scope_id++;
   code->cg_stack_begin = stack_size(&s->stack);
   code->use_locals = use_locals;
+
+  if (use_locals)
+    code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
 
   struct basic_block *first = cg_allocate_block(s);
   code->first_block = first;
@@ -100,6 +104,9 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   pop_symbol_infos(s);
 
+  // TODO: compute NOFREE...
+  s->code.flags |= CO_NOFREE;
+
   // Finalize block layout: First assign minimum offsets necessary,
   // then expand as necessary.
   unsigned offset = 0;
@@ -124,7 +131,8 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // TODO: expand blocks/offsets as necessary.
 
   // Finalize bytecode layout.
-  arena_grow_begin(&s->objects, 1);
+  struct arena *arena = object_intern_arena(&s->objects);
+  arena_grow_begin(arena, 1);
   for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     unsigned jump_length = 0;
     if (b->jump_opcode != 0)
@@ -134,7 +142,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     unsigned block_length = b->code_length + jump_length;
     assert(b->next == NULL || b->next->offset == b->offset + block_length);
 
-    void* dst = arena_grow(&s->objects, block_length);
+    void* dst = arena_grow(arena, block_length);
     memcpy(dst, b->code_bytes, b->code_length);
     uint8_t* j = (uint8_t*)dst + b->code_length;
     if (b->jump_opcode != 0) {
@@ -175,23 +183,27 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     }
   }
 
-  unsigned code_length = arena_grow_current_size(&s->objects);
-  char* code_bytes = arena_grow_finish(&s->objects);
+  unsigned code_length = arena_grow_current_size(arena);
+  char* code_bytes = arena_grow_finish(arena);
 
-  union object *object = object_new_code(&s->objects);
-  object->code.code = make_bytes(&s->objects, code_length, code_bytes);
+  union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
   object->code.posonlyargcount = 0;
   object->code.kwonlyargcount = 0;
   object->code.nlocals = s->code.varnames->list.length;
+  object->code.stacksize = s->code.max_stacksize;
+  object->code.flags = s->code.flags;
+  object->code.code = object_new_string(arena, OBJECT_BYTES,
+                                        code_length, code_bytes);
   object->code.consts = s->code.consts;
   object->code.names = s->code.names;
   object->code.varnames = s->code.varnames;
-  object->code.freevars = object_new_tuple(&s->objects, 0);
-  object->code.cellvars = object_new_tuple(&s->objects, 0);
-  object->code.filename = make_ascii(&s->objects, "simple.py");
-  object->code.name = make_ascii(&s->objects, name);
-  object->code.lnotab = make_bytes(&s->objects, 0, NULL);
+  object->code.freevars = object_new_tuple(arena, 0);
+  object->code.cellvars = object_new_tuple(arena, 0);
+  object->code.filename = object_intern_cstring(&s->objects, "simple.py");
+  object->code.name = object_intern_cstring(&s->objects, name);
+  object->code.lnotab = object_intern_string(&s->objects, OBJECT_BYTES,
+                                             0, NULL);
 
   arena_free_all(&s->code.opcodes);
   return object;
@@ -214,7 +226,7 @@ union object *cg_pop_code(struct cg_state *s, const char *name)
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table)
 {
   memset(s, 0, sizeof(*s));
-  arena_init(&s->objects);
+  object_intern_init(&s->objects);
   s->symbol_table = symbol_table;
   s->next_scope_id = 1;
 }
@@ -222,7 +234,7 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table)
 void cg_free(struct cg_state *s)
 {
   arena_free_all(&s->code.opcodes);
-  arena_free_all(&s->objects);
+  object_intern_free(&s->objects);
   stack_free(&s->stack);
 }
 
@@ -244,7 +256,7 @@ void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
   arena_grow_u8(&s->code.opcodes, (uint8_t)arg);
 }
 
-static void push(struct cg_state *s)
+static void cg_push(struct cg_state *s)
 {
   s->code.stacksize++;
   if (s->code.stacksize > s->code.max_stacksize)
@@ -260,7 +272,7 @@ void cg_pop(struct cg_state *s, unsigned n)
 void cg_push_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
 {
   cg_op(s, opcode, arg);
-  push(s);
+  cg_push(s);
 }
 
 void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
@@ -269,57 +281,26 @@ void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
   cg_pop(s, 1);
 }
 
-unsigned cg_register_singleton(struct cg_state *s, char type)
-{
-  assert(object_type_is_singleton(type));
-  union object *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->list.length; ++i) {
-    const union object *object = consts->list.items[i];
-    if (object->type == type)
-      return i;
-  }
-  union object *singleton = object_new_singleton(&s->objects, type);
-  object_list_append(consts, singleton);
-  return consts->list.length - 1;
-}
-
-unsigned cg_register_string(struct cg_state *s, const char *chars,
-                            uint32_t length)
+unsigned cg_register_unique_object(struct cg_state *s, union object *object)
 {
   union object *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->list.length; ++i) {
-    const union object *object = consts->list.items[i];
-    if (object->type != TYPE_ASCII)
-      continue;
-    const struct object_string *string = &object->string;
-    if (string->length == length && memcmp(string->chars, chars, length) == 0) {
-      return i;
-    }
-  }
-  union object *string = make_string(&s->objects, TYPE_ASCII, length, chars);
-  object_list_append(consts, string);
-  return consts->list.length - 1;
+  object_list_append(consts, object);
+  return object_list_length(consts) - 1;
 }
 
-unsigned cg_register_cstring(struct cg_state *s, const char *string)
-{
-  return cg_register_string(s, string, strlen(string));
-}
-
-unsigned cg_register_int(struct cg_state *s, int32_t value)
+unsigned cg_register_object(struct cg_state *s, union object *object)
 {
   union object *consts = s->code.consts;
-  for (unsigned i = 0; i < consts->list.length; ++i) {
-    const union object *object = consts->list.items[i];
-    if (object->type != TYPE_INT)
-      continue;
-    const struct object_int *int_obj = &object->int_obj;
-    if (int_obj->value == value)
-      return i;
+  for (uint32_t i = 0, l = object_list_length(consts); i < l; i++) {
+    if (object_list_at(consts, i) == object) return i;
   }
-  union object *int_obj = make_int(&s->objects, value);
-  object_list_append(consts, int_obj);
-  return consts->list.length - 1;
+  return cg_register_unique_object(s, object);
+}
+
+void cg_load_const(struct cg_state *s, union object *object)
+{
+  unsigned index = cg_register_object(s, object);
+  cg_push_op(s, OPCODE_LOAD_CONST, index);
 }
 
 unsigned cg_register_name(struct cg_state *s, const char *name)
@@ -328,7 +309,7 @@ unsigned cg_register_name(struct cg_state *s, const char *name)
   unsigned length = strlen(name);
   for (unsigned i = 0; i < names->list.length; ++i) {
     const union object *object = names->list.items[i];
-    if (object->type != TYPE_ASCII)
+    if (object->type != OBJECT_ASCII)
       continue;
     const struct object_string *string = &object->string;
     if (string->length == length && memcmp(string->chars, name, length) == 0) {
@@ -341,7 +322,7 @@ unsigned cg_register_name(struct cg_state *s, const char *name)
 unsigned cg_append_name(struct cg_state *s, const char *name)
 {
   union object *names = s->code.names;
-  union object *string = make_ascii(&s->objects, name);
+  union object *string = object_intern_cstring(&s->objects, name);
   object_list_append(names, string);
   return names->list.length - 1;
 }
@@ -349,17 +330,9 @@ unsigned cg_append_name(struct cg_state *s, const char *name)
 unsigned cg_append_varname(struct cg_state *s, const char *name)
 {
   union object *varnames = s->code.varnames;
-  union object *string = make_ascii(&s->objects, name);
+  union object *string = object_intern_cstring(&s->objects, name);
   object_list_append(varnames, string);
   return varnames->list.length - 1;
-}
-
-unsigned cg_register_object(struct cg_state *s, union object *object)
-{
-  assert(object->type == TYPE_CODE || object->type == TYPE_TUPLE);
-  union object *consts = s->code.consts;
-  object_list_append(consts, object);
-  return consts->list.length - 1;
 }
 
 struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol)

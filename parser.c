@@ -405,20 +405,23 @@ static union ast_expression *parse_identifier(struct parser_state *s)
   return node;
 }
 
+static union ast_expression *make_ast_const(struct parser_state *s,
+                                            union object *object)
+{
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.object = object;
+  return expression;
+}
+
 static union ast_expression *parse_string(struct parser_state *s)
 {
   const char *chars = peek_token_with_string(s, T_STRING);
   uint32_t length = strlen(chars);
-  unsigned index = cg_register_string(&s->cg, chars, length);
-  if ((uint16_t)index != index) {
-    abort();
-  }
+  union object *object = object_intern_string(&s->cg.objects, OBJECT_ASCII,
+                                              length, chars);
   eat(s, T_STRING);
-
-  union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_const, AST_CONST);
-  expression->cnst.index = (uint16_t)index;
-  return expression;
+  return make_ast_const(s, object);
 }
 
 static union ast_expression *parse_integer(struct parser_state *s)
@@ -426,57 +429,44 @@ static union ast_expression *parse_integer(struct parser_state *s)
   const char *string = peek_token_with_string(s, T_INTEGER);
   char *endptr;
   errno = 0;
-  unsigned long value = strtoul(string, &endptr, 0);
+  long value = strtol(string, &endptr, 0);
   assert(endptr != NULL);
   assert(*endptr == '\0');
   if (value == 0) {
     assert(errno == 0);
   }
-  assert(value <= INT32_MAX);
-  unsigned index = cg_register_int(&s->cg, (int32_t)value);
-  if ((uint16_t)index != index) {
-    abort();
-  }
+  assert(INT64_MIN <= value && value <= INT64_MAX);
+  union object *object = object_intern_int(&s->cg.objects, (int64_t)value);
   eat(s, T_INTEGER);
-
-  union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_const, AST_CONST);
-  expression->cnst.index = (uint16_t)index;
-  return expression;
+  return make_ast_const(s, object);
 }
 
-static union ast_expression *parse_singleton(struct parser_state *s, char type)
+static union ast_expression *parse_singleton(struct parser_state *s,
+                                             enum object_type type)
 {
   next_token(s);
-  unsigned index = cg_register_singleton(&s->cg, type);
-  if ((uint16_t)index != index) {
-    abort();
-  }
-
-  union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_const, AST_CONST);
-  expression->cnst.index = (uint16_t)index;
-  return expression;
+  union object *object = object_intern_singleton(&s->cg.objects, type);
+  return make_ast_const(s, object);
 }
 
 static union ast_expression *parse_true(struct parser_state *s)
 {
-  return parse_singleton(s, TYPE_TRUE);
+  return parse_singleton(s, OBJECT_TRUE);
 }
 
 static union ast_expression *parse_false(struct parser_state *s)
 {
-  return parse_singleton(s, TYPE_FALSE);
+  return parse_singleton(s, OBJECT_FALSE);
 }
 
 static union ast_expression *parse_none(struct parser_state *s)
 {
-  return parse_singleton(s, TYPE_NONE);
+  return parse_singleton(s, OBJECT_NONE);
 }
 
 static union ast_expression *parse_ellipsis(struct parser_state *s)
 {
-  return parse_singleton(s, TYPE_ELLIPSIS);
+  return parse_singleton(s, OBJECT_ELLIPSIS);
 }
 
 typedef union ast_expression *(*prefix_parser_func)(struct parser_state *s);
@@ -624,6 +614,44 @@ static union ast_expression *parse_xor(struct parser_state *s,
   return parse_binexpr(s, PREC_XOR + 1, AST_BINEXPR_XOR, left);
 }
 
+static union ast_expression *parse_gen_expr(struct parser_state *s,
+                                            union ast_expression *left)
+{
+  union ast_expression *generator_expression
+      = ast_allocate_expression(s, struct ast_generator_expression,
+                                AST_GENERATOR_EXPRESSION);
+  generator_expression->generator_expression.expression = left;
+
+  struct generator_expression_part *last = NULL;
+
+  for (;;) {
+    struct generator_expression_part *part;
+    if (peek(s) == T_for) {
+      eat(s, T_for);
+      part = arena_allocate_type(&s->ast, struct generator_expression_part);
+      part->type = GENERATOR_EXPRESSION_PART_FOR;
+      part->target = parse_subexpression(s, PREC_OR);
+      expect(s, T_in);
+      part->expression = parse_subexpression(s, PREC_OR);
+    } else if (peek(s) == T_if) {
+      eat(s, T_if);
+      part = arena_allocate_type(&s->ast, struct generator_expression_part);
+      part->type = GENERATOR_EXPRESSION_PART_IF;
+      part->target = NULL;
+      part->expression = parse_subexpression(s, PREC_COMPARISON);
+    } else {
+      break;
+    }
+    if (last == NULL) {
+      generator_expression->generator_expression.parts = part;
+    } else {
+      last->next = part;
+    }
+    last = part;
+  }
+  return generator_expression;
+}
+
 static union ast_expression *parse_not_in(struct parser_state *s,
                                           union ast_expression *left)
 {
@@ -681,6 +709,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
   ['^']    = { .func = parse_xor,        .precedence = PREC_XOR        },
   ['|']    = { .func = parse_or,         .precedence = PREC_OR         },
+  [T_for]  = { .func = parse_gen_expr,   .precedence = PREC_TEST       },
   [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
   [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
@@ -859,7 +888,7 @@ static void parse_if(struct parser_state *s)
 static void parse_for(struct parser_state *s)
 {
   eat(s, T_for);
-  union ast_expression *target = parse_subexpression(s, PREC_XOR);
+  union ast_expression *target = parse_subexpression(s, PREC_OR);
   expect(s, T_in);
   union ast_expression *expression = parse_subexpression(s, PREC_TEST);
   expect(s, ':');

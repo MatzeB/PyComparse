@@ -23,7 +23,7 @@ struct ast_identifier {
 
 struct ast_const {
   struct ast_node_base base;
-  uint16_t             index;
+  union object        *object;
 };
 
 struct ast_call {

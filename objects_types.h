@@ -28,7 +28,7 @@ struct object_tuple {
 
 struct object_int {
   struct object_base base;
-  int32_t value;
+  int64_t value;
 };
 
 struct object_code {

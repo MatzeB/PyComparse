@@ -4,6 +4,7 @@
 
 #include "adt/arena.h"
 #include "adt/stack.h"
+#include "object_intern_types.h"
 
 union object;
 
@@ -32,11 +33,12 @@ struct code_state {
   unsigned nlocals;
   unsigned stacksize;
   unsigned max_stacksize;
+  uint32_t flags;
   bool use_locals;
 };
 
 struct cg_state {
-  struct arena         objects;
+  struct object_intern objects;
   struct code_state    code;
   struct stack         stack;
   struct symbol_table *symbol_table;

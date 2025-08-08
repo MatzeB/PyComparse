@@ -10,9 +10,11 @@
 #include "ast_types.h"
 #include "codegen.h"
 #include "codegen_types.h"
+#include "codegen_statement.h"
 #include "objects.h"
 #include "objects_types.h"
 #include "opcodes.h"
+#include "symbol_table.h"
 #include "symbol_types.h"
 #include "symbol_info_types.h"
 #include "util.h"
@@ -118,18 +120,19 @@ static union object *constant_expression(struct cg_state *s,
 {
   switch (expression->type) {
   case AST_CONST:
-    return object_list_at(s->code.consts, expression->cnst.index);
+    return expression->cnst.object;
   case AST_TUPLE_FORM: {
     struct ast_tuple_list_form *tuple_form = &expression->tuple_list_form;
     /* TODO: list "leaks" and stays in arena... */
-    union object *list = object_new_list(&s->objects);
+    struct arena *arena = object_intern_arena(&s->objects);
+    union object *list = object_new_list(arena);
     for (struct argument *argument = tuple_form->arguments;
          argument != NULL; argument = argument->next) {
       union object *const_arg = constant_expression(s, argument->expression);
       if (const_arg == NULL) return NULL;
       object_list_append(list, const_arg);
     }
-    union object *tuple = object_new_tuple(&s->objects, list->list.length);
+    union object *tuple = object_new_tuple(arena, list->list.length);
     for (unsigned i = 0, e = list->list.length; i < e; i++) {
       tuple->tuple.items[i] = list->list.items[i];
     }
@@ -203,7 +206,7 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
-static void emit_call(struct cg_state *s, struct ast_call *call, bool drop)
+static void emit_call(struct cg_state *s, struct ast_call *call)
 {
   emit_expression(s, call->callee);
   unsigned n_arguments = 0;
@@ -214,9 +217,27 @@ static void emit_call(struct cg_state *s, struct ast_call *call, bool drop)
   }
   cg_op(s, OPCODE_CALL_FUNCTION, n_arguments);
   cg_pop(s, n_arguments);
-  if (drop) {
-    cg_pop_op(s, OPCODE_POP_TOP, 0);
-  }
+}
+
+static void emit_generator_expression(struct cg_state *s,
+    struct ast_generator_expression *generator_expression)
+{
+  cg_push_code(s);
+  cg_code_begin(s, /*use_locals=*/true);
+  emit_generator_expression_code(s, generator_expression);
+  emit_code_end(s);
+
+  union object *code = cg_pop_code(s, "<genexpr>");
+  unsigned code_index = cg_register_object(s, code);
+  cg_push_op(s, OPCODE_LOAD_CONST, code_index);
+  cg_load_const(s, object_intern_cstring(&s->objects, "<genexpr>"));
+  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+
+  struct generator_expression_part *part = generator_expression->parts;
+  emit_expression(s, part->expression);
+  cg_op(s, OPCODE_GET_ITER, 0);
+  cg_pop(s, 2);
+  cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
 }
 
 static void emit_expression_impl(struct cg_state *s,
@@ -298,11 +319,14 @@ static void emit_expression_impl(struct cg_state *s,
     emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_XOR);
     break;
   case AST_CALL: {
-    emit_call(s, &expression->call, drop);
-    return;
+    emit_call(s, &expression->call);
+    break;
   }
   case AST_CONST:
-    cg_push_op(s, OPCODE_LOAD_CONST, expression->cnst.index);
+    cg_load_const(s, expression->cnst.object);
+    break;
+  case AST_GENERATOR_EXPRESSION:
+    emit_generator_expression(s, &expression->generator_expression);
     break;
   case AST_IDENTIFIER:
     assert(!drop);

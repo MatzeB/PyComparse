@@ -53,7 +53,7 @@ static void write_object(struct writer_state *s, const union object *object);
 
 static void write_list(struct writer_state *s, const struct object_list *list)
 {
-  write_char(s, TYPE_LIST);
+  write_char(s, OBJECT_LIST);
   write_uint32(s, list->length);
   uint32_t length = list->length;
   assert(length < UINT32_MAX);
@@ -66,10 +66,10 @@ static void write_tuple_(struct writer_state *s,
                          uint32_t length, union object *const *items)
 {
   if (length < 256) {
-    write_char(s, TYPE_SMALL_TUPLE);
+    write_char(s, OBJECT_SMALL_TUPLE);
     write_uint8(s, (uint8_t)length);
   } else {
-    write_char(s, TYPE_TUPLE);
+    write_char(s, OBJECT_TUPLE);
     write_uint32(s, length);
   }
   for (uint32_t i = 0; i < length; ++i) {
@@ -86,7 +86,7 @@ static void write_tuple(struct writer_state *s,
 static void write_list_as_tuple(struct writer_state *s,
                                 const union object *list)
 {
-  assert(list->type == TYPE_LIST);
+  assert(list->type == OBJECT_LIST);
   write_tuple_(s, list->list.length, list->list.items);
 }
 
@@ -94,10 +94,10 @@ static void write_string(struct writer_state *s,
                          const struct object_string *string)
 {
   char type = string->base.type;
-  assert(type == TYPE_STRING || type == TYPE_ASCII);
+  assert(type == OBJECT_STRING || type == OBJECT_ASCII);
   uint32_t length = string->length;
-  if (length < 256 && type == TYPE_ASCII) {
-    write_char(s, TYPE_SHORT_ASCII);
+  if (length < 256 && type == OBJECT_ASCII) {
+    write_char(s, OBJECT_SHORT_ASCII);
     write_uint8(s, (uint8_t)length);
   } else {
     write_char(s, type);
@@ -111,14 +111,14 @@ static void write_string(struct writer_state *s,
 static void write_int(struct writer_state *s,
                       const struct object_int *obj_int)
 {
-  write_char(s, TYPE_INT);
+  write_char(s, OBJECT_INT);
   write_uint32(s, (uint32_t)obj_int->value);
 }
 
 static void write_code(struct writer_state *s,
                        const struct object_code *code)
 {
-  write_char(s, TYPE_CODE);
+  write_char(s, OBJECT_CODE);
   write_uint32(s, code->argcount);
   write_uint32(s, code->posonlyargcount);
   write_uint32(s, code->kwonlyargcount);
@@ -140,33 +140,33 @@ static void write_code(struct writer_state *s,
 static void write_object(struct writer_state *s, const union object *object)
 {
   if (object == NULL) {
-    write_char(s, TYPE_NULL);
+    write_char(s, OBJECT_NULL);
     return;
   }
   switch (object->type) {
-  case TYPE_NONE:
-  case TYPE_TRUE:
-  case TYPE_FALSE:
-  case TYPE_ELLIPSIS:
+  case OBJECT_NONE:
+  case OBJECT_TRUE:
+  case OBJECT_FALSE:
+  case OBJECT_ELLIPSIS:
     write_char(s, object->type);
     break;
-  case TYPE_LIST:
+  case OBJECT_LIST:
     write_list(s, &object->list);
     break;
-  case TYPE_TUPLE:
+  case OBJECT_TUPLE:
     write_tuple(s, &object->tuple);
     break;
-  case TYPE_CODE:
+  case OBJECT_CODE:
     write_code(s, &object->code);
     break;
-  case TYPE_ASCII:
-  case TYPE_STRING:
+  case OBJECT_ASCII:
+  case OBJECT_STRING:
     write_string(s, &object->string);
     break;
-  case TYPE_INT:
+  case OBJECT_INT:
     write_int(s, &object->int_obj);
     break;
-  case TYPE_NULL:
+  case OBJECT_NULL:
   default:
     abort();
   }

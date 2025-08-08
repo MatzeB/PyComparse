@@ -19,11 +19,10 @@ static bool unreachable(struct cg_state *s)
   return !cg_in_block(s);
 }
 
-static void emit_code_end(struct cg_state *s)
+void emit_code_end(struct cg_state *s)
 {
   if (unreachable(s)) return;
-  unsigned i_none = cg_register_singleton(s, TYPE_NONE);
-  cg_push_op(s, OPCODE_LOAD_CONST, i_none);
+  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
   cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
 }
@@ -53,7 +52,8 @@ static unsigned emit_dotted_name(struct cg_state *s, struct dotted_name *name)
   for (unsigned i = 0; i < num_symbols; i++) {
     length += strlen(name->symbols[i]->string);
   }
-  char *chars = (char*)arena_allocate(&s->objects, length, 1);
+  struct arena *arena = object_intern_arena(&s->objects);
+  char *chars = (char*)arena_allocate(arena, length, 1);
   char *c = chars;
   for (unsigned i = 0; i < num_symbols; i++) {
     if (i > 0) *c++ = '.';
@@ -72,10 +72,9 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *name,
 {
   if (unreachable(s)) return;
   unsigned name_index = emit_dotted_name(s, name);
-  int i_level = cg_register_int(s, 0);
-  cg_push_op(s, OPCODE_LOAD_CONST, i_level);
-  int i_fromlist = cg_register_singleton(s, TYPE_NONE);
-  cg_push_op(s, OPCODE_LOAD_CONST, i_fromlist);
+  union object *object = object_intern_int(&s->objects, 0);
+  cg_load_const(s, object);
+  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
   cg_pop_op(s, OPCODE_IMPORT_NAME, name_index);
 
   assert(as == NULL && "TODO");
@@ -89,8 +88,7 @@ void emit_return_statement(struct cg_state *s,
   if (expression != NULL) {
     emit_expression(s, expression);
   } else {
-    unsigned i_none = cg_register_singleton(s, TYPE_NONE);
-    cg_push_op(s, OPCODE_LOAD_CONST, i_none);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
   }
   cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
@@ -156,6 +154,23 @@ void emit_if_end(struct cg_state *s, struct if_state *state)
   cg_block_begin(s, footer);
 }
 
+static void emit_for_begin_impl(struct cg_state *s,
+                                struct for_state *state,
+                                union ast_expression *target)
+{
+  state->header = cg_allocate_block(s);
+  state->body = cg_allocate_block(s);
+  state->after = cg_allocate_block(s);
+
+  emit_jump(s, state->header);
+
+  cg_block_begin(s, state->header);
+  emit_condjump(s, OPCODE_FOR_ITER, state->after, state->body);
+
+  cg_block_begin(s, state->body);
+  emit_assignment(s, target);
+}
+
 void emit_for_begin(struct cg_state *s, struct for_state *state,
                     union ast_expression *target,
                     union ast_expression *expression)
@@ -164,23 +179,9 @@ void emit_for_begin(struct cg_state *s, struct for_state *state,
     memset(state, 0, sizeof(*state));
     return;
   }
-
-  struct basic_block *setup = cg_allocate_block(s);
-  state->header = cg_allocate_block(s);
-  state->body = cg_allocate_block(s);
-  state->after = cg_allocate_block(s);
-
-  emit_jump(s, setup);
-  cg_block_begin(s, setup);
   emit_expression(s, expression);
   cg_op(s, OPCODE_GET_ITER, 0);
-  emit_jump(s, state->header);
-
-  cg_block_begin(s, state->header);
-  emit_condjump(s, OPCODE_FOR_ITER, state->after, state->body);
-
-  cg_block_begin(s, state->body);
-  emit_assignment(s, target);
+  emit_for_begin_impl(s, state, target);
 }
 
 void emit_for_end(struct cg_state *s, struct for_state *state)
@@ -193,6 +194,12 @@ void emit_for_end(struct cg_state *s, struct for_state *state)
   }
 
   cg_block_begin(s, after);
+}
+
+void emit_continue(struct cg_state *s, struct for_state *state)
+{
+  if (unreachable(s)) return;
+  emit_jump(s, state->header);
 }
 
 void emit_while_begin(struct cg_state *s, struct while_state *state,
@@ -236,7 +243,7 @@ void emit_class_begin(struct cg_state *s, struct symbol *symbol)
 
   emit_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
   emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
-  cg_push_op(s, OPCODE_LOAD_CONST, cg_register_cstring(s, symbol->string));
+  cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
   emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 }
 
@@ -244,13 +251,13 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
-  unsigned code_index = cg_register_object(s, code);
+  unsigned code_index = cg_register_unique_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
 
-  unsigned index = cg_register_cstring(s, symbol->string);
-  cg_push_op(s, OPCODE_LOAD_CONST, index);
+  union object *string = object_intern_cstring(&s->objects, symbol->string);
+  cg_load_const(s, string);
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
-  cg_push_op(s, OPCODE_LOAD_CONST, index);
+  cg_load_const(s, string);
   cg_op(s, OPCODE_CALL_FUNCTION, 2);
   cg_pop(s, 2);
   emit_store(s, symbol);
@@ -278,9 +285,59 @@ void emit_def_end(struct cg_state *s, struct symbol *symbol)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
-  unsigned code_index = cg_register_object(s, code);
+  unsigned code_index = cg_register_unique_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
-  cg_push_op(s, OPCODE_LOAD_CONST, cg_register_cstring(s, symbol->string));
+  cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
   emit_store(s, symbol);
+}
+
+static void emit_generator_expression_part(struct cg_state *s,
+    struct generator_expression_part *part,
+    struct for_state *outer_for,
+    union ast_expression *inner_expression)
+{
+  if (part == NULL) {
+    emit_expression(s, inner_expression);
+    s->code.flags |= CO_GENERATOR;
+    cg_op(s, OPCODE_YIELD_VALUE, 0);
+    cg_pop_op(s, OPCODE_POP_TOP, 0);
+  } else if (part->type == GENERATOR_EXPRESSION_PART_FOR) {
+    struct for_state state;
+    emit_for_begin(s, &state, part->target,
+                   part->expression);
+
+    emit_generator_expression_part(s, /*part=*/part->next,
+        /*outer_for=*/&state, inner_expression);
+
+    emit_for_end(s, &state);
+  } else if (part->type == GENERATOR_EXPRESSION_PART_IF) {
+    struct basic_block *false_block = cg_allocate_block(s);
+
+    emit_expression(s, part->expression);
+    struct basic_block *loop_header = outer_for->header;
+    emit_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
+    cg_pop(s, 1);
+    cg_block_begin(s, false_block);
+
+    emit_generator_expression_part(s, /*part=*/part->next,
+        /*outer_for=*/outer_for, inner_expression);
+  }
+}
+
+void emit_generator_expression_code(struct cg_state *s,
+    struct ast_generator_expression *generator_expression)
+{
+  emit_parameter(s, symbol_table_get_or_insert(s->symbol_table, ".0"));
+  s->code.argcount = 1;
+
+  struct generator_expression_part *part = generator_expression->parts;
+  cg_push_op(s, OPCODE_LOAD_FAST, 0);
+  struct for_state state;
+  emit_for_begin_impl(s, &state, part->target);
+
+  emit_generator_expression_part(s, /*part=*/part->next, /*outer_for=*/&state,
+      /*inner_expression=*/generator_expression->expression);
+
+  emit_for_end(s, &state);
 }

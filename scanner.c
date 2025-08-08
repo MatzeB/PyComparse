@@ -74,6 +74,21 @@
   case '8': \
   case '9'
 
+#define HEX_DIGIT_CASES \
+  DIGIT_CASES: \
+  case 'a': \
+  case 'b': \
+  case 'c': \
+  case 'd': \
+  case 'e': \
+  case 'f': \
+  case 'A': \
+  case 'B': \
+  case 'C': \
+  case 'D': \
+  case 'E': \
+  case 'F'
+
 #define IDENTIFIER_CASES \
   DIGIT_CASES: \
   case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: \
@@ -176,9 +191,18 @@ static void scan_identifier(struct scanner_state *s, char first_char)
 }
 
 static void scan_hexinteger(struct scanner_state *s, struct arena* arena) {
-  (void)s;
-  (void)arena;
-  abort();
+  arena_grow_char(arena, 'x');
+  for (;;) {
+    next_char(s);
+    switch (s->c) {
+    case HEX_DIGIT_CASES:
+    case '_':
+      break;
+    default:
+      return;
+    }
+    arena_grow_char(arena, (char)s->c);
+  }
 }
 
 static void scan_octinteger(struct scanner_state *s, struct arena* arena) {
@@ -687,7 +711,7 @@ void scanner_next_token(struct scanner_state *s)
         next_char(s);
         s->token.kind = T_PERCENT_EQUALS;
       } else {
-        s->token.kind = T_PERCENT_EQUALS;
+        s->token.kind = T_PERCENT;
       }
       return;
 

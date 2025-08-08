@@ -1,6 +1,7 @@
 print(20 / 3)
 print(99 - 4 - 4)
 print(not 4 - 4)
+print(99 % 7)
 print(...)
 print(False)
 print("Look: " + "Na" * 16 + "  Batman!")

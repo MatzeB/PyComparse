@@ -1,0 +1,7 @@
+print([])
+print(([]))
+print([1])
+print([2,])
+print([3,4])
+print([4,5,])
+print(["jo", abs(-7), None])

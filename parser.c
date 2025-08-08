@@ -46,6 +46,7 @@ enum precedence {
   PREC_LOGICAL_NOT, /* prefix NOT */
   PREC_COMPARISON,  /* <, >, ==, >=, <=, <>, !=, in, not in, is, is not */
 
+  PREC_OR,          /* | */
   PREC_XOR,         /* ^ */
   PREC_AND,         /* & */
   PREC_SHIFT,       /* <<, >> */
@@ -303,13 +304,43 @@ static inline union ast_expression *parse_unexpr(struct parser_state *s,
   return expression;
 }
 
+static union ast_expression *parse_l_bracket(struct parser_state *s)
+{
+  eat(s, '[');
+  union ast_expression *list =
+      ast_allocate_expression(s, struct ast_tuple_list_form, AST_LIST_FORM);
+  struct argument *last = NULL;
+
+  add_anchor(s, ']');
+  add_anchor(s, ',');
+
+  for (;;) {
+    if (peek(s) == ']')
+      break;
+    struct argument *argument = parse_argument(s);
+    if (last == NULL) {
+      list->tuple_list_form.arguments = argument;
+    } else {
+      last->next = argument;
+    }
+    last = argument;
+    if (!accept(s, ','))
+      break;
+  }
+
+  remove_anchor(s, ',');
+  remove_anchor(s, ']');
+  expect(s, ']');
+  return list;
+}
+
 static union ast_expression *parse_l_paren(struct parser_state *s)
 {
   eat(s, '(');
   if (accept(s, ')')) {
     union ast_expression *tuple =
-        ast_allocate_expression(s, struct ast_tuple_form, AST_TUPLE_FORM);
-    tuple->tuple_form.arguments = NULL;
+        ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
+    tuple->tuple_list_form.arguments = NULL;
     return tuple;
   }
 
@@ -334,8 +365,8 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     }
 
     union ast_expression *tuple =
-      ast_allocate_expression(s, struct ast_tuple_form, AST_TUPLE_FORM);
-    tuple->tuple_form.arguments = first;
+      ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
+    tuple->tuple_list_form.arguments = first;
     expression = tuple;
   }
   remove_anchor(s, ',');
@@ -458,6 +489,7 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   ['(']           = { .func = parse_l_paren,    .precedence = PREC_ATOM },
   ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
   ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
+  ['[']           = { .func = parse_l_bracket,  .precedence = PREC_ATOM },
   ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
   [T_not]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
   [T_IDENTIFIER]  = { .func = parse_identifier, .precedence = PREC_ATOM },
@@ -468,7 +500,6 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   [T_None]        = { .func = parse_none,       .precedence = PREC_ATOM },
   [T_DOT_DOT_DOT] = { .func = parse_ellipsis,   .precedence = PREC_ATOM },
 };
-
 
 static inline union ast_expression *parse_binexpr(struct parser_state *s,
                                                   enum precedence prec_right,
@@ -497,10 +528,22 @@ static union ast_expression *parse_add(struct parser_state *s,
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_ADD, left);
 }
 
+static union ast_expression *parse_and(struct parser_state *s,
+                                       union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_AND + 1, AST_BINEXPR_AND, left);
+}
+
 static union ast_expression *parse_assignment(struct parser_state *s,
                                               union ast_expression *left)
 {
   return parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
+}
+
+static union ast_expression *parse_mod(struct parser_state *s,
+                                       union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MOD, left);
 }
 
 static union ast_expression *parse_mul(struct parser_state *s,
@@ -569,6 +612,18 @@ static union ast_expression *parse_in(struct parser_state *s,
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
 }
 
+static union ast_expression *parse_or(struct parser_state *s,
+                                      union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_OR + 1, AST_BINEXPR_OR, left);
+}
+
+static union ast_expression *parse_xor(struct parser_state *s,
+                                       union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_XOR + 1, AST_BINEXPR_XOR, left);
+}
+
 static union ast_expression *parse_not_in(struct parser_state *s,
                                           union ast_expression *left)
 {
@@ -608,21 +663,25 @@ typedef union ast_expression *(*postfix_parser_func)
 
 struct postfix_expression_parser {
   postfix_parser_func func;
-  enum precedence precedence;
+  enum precedence     precedence;
 };
 
 static const struct postfix_expression_parser postfix_parsers[] = {
+  ['%']    = { .func = parse_mod,        .precedence = PREC_TERM       },
+  ['&']    = { .func = parse_and,        .precedence = PREC_AND        },
   ['(']    = { .func = parse_call,       .precedence = PREC_POSTFIX    },
-  ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
   ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
-  ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
+  ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
   ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
   ['.']    = { .func = parse_attr,       .precedence = PREC_POSTFIX    },
   ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
-  [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
-  ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
   ['<']    = { .func = parse_less,       .precedence = PREC_COMPARISON },
+  ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
   ['>']    = { .func = parse_greater,    .precedence = PREC_COMPARISON },
+  ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
+  ['^']    = { .func = parse_xor,        .precedence = PREC_XOR        },
+  ['|']    = { .func = parse_or,         .precedence = PREC_OR         },
+  [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
   [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
   [T_SLASH_SLASH]

@@ -43,24 +43,42 @@ struct ast_unexpr {
   union ast_expression *op;
 };
 
-struct ast_tuple_form {
+struct ast_tuple_list_form {
   struct ast_node_base base;
   struct argument     *arguments;
+};
+
+enum generator_expression_part_type {
+  GENERATOR_EXPRESSION_PART_FOR,
+  GENERATOR_EXPRESSION_PART_IF,
+};
+
+struct generator_expression_part {
+  enum generator_expression_part_type type;
+  union ast_expression               *target;
+  union ast_expression               *expression;
+  struct generator_expression_part   *next;
+};
+
+struct ast_generator_expression {
+  struct ast_node_base             base;
+  union ast_expression             *expression;
+  struct generator_expression_part *parts;
 };
 
 union ast_expression {
   uint8_t              type;
   struct ast_node_base base;
 
-  struct ast_attr       attr;
-  struct ast_binexpr    binexpr;
-  struct ast_call       call;
-  struct ast_const      cnst;
-  struct ast_identifier identifier;
-  struct ast_tuple_form tuple_form;
-  struct ast_unexpr     unexpr;
+  struct ast_attr                 attr;
+  struct ast_binexpr              binexpr;
+  struct ast_call                 call;
+  struct ast_const                cnst;
+  struct ast_generator_expression generator_expression;
+  struct ast_identifier           identifier;
+  struct ast_tuple_list_form      tuple_list_form;
+  struct ast_unexpr               unexpr;
 };
-
 
 struct argument {
   union ast_expression *expression;

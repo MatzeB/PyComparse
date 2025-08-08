@@ -38,5 +38,5 @@ int main(int argc, char **argv)
   scanner_free(&s.scanner);
   arena_free_all(&strings);
   exit_symbol_table(&symbol_table);
-  return 0;
+  return s.error ? 1 : 0;
 }

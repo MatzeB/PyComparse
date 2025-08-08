@@ -13,7 +13,7 @@ struct token {
   uint16_t kind;
   union {
     struct symbol *symbol;
-    const char *string;
+    const char    *string;
   } u;
 };
 

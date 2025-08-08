@@ -257,15 +257,13 @@ void cg_pop(struct cg_state *s, unsigned n)
   s->code.stacksize -= n;
 }
 
-void cg_push_op(struct cg_state *s, uint8_t opcode,
-                   uint32_t arg)
+void cg_push_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
 {
   cg_op(s, opcode, arg);
   push(s);
 }
 
-void cg_pop_op(struct cg_state *s, uint8_t opcode,
-                  uint32_t arg)
+void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
 {
   cg_op(s, opcode, arg);
   cg_pop(s, 1);

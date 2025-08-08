@@ -69,7 +69,7 @@ void emit_store(struct cg_state *cg, struct symbol *symbol)
   abort();
 }
 
-static void emit_load(struct cg_state *cg, struct symbol *symbol)
+void emit_load(struct cg_state *cg, struct symbol *symbol)
 {
   struct symbol_info *info = cg_symbol_info(cg, symbol);
   if (info == NULL) {

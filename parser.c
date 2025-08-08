@@ -851,11 +851,26 @@ static void parse_parameters(struct parser_state *s)
   s->cg.code.argcount = num_parameters;
 }
 
+static void parse_class(struct parser_state *s)
+{
+  eat(s, T_class);
+  if (!skip_till(s, T_IDENTIFIER)) return;
+  struct symbol *name = eat_identifier(s);
+
+  emit_class_begin(&s->cg, name);
+
+  /* TODO: parse parameters to class */
+  expect(s, ':');
+  parse_suite(s);
+
+  emit_class_end(&s->cg, name);
+}
+
 static void parse_def(struct parser_state *s)
 {
   eat(s, T_def);
   if (!skip_till(s, T_IDENTIFIER)) return;
-  struct symbol *symbol = eat_identifier(s);
+  struct symbol *name = eat_identifier(s);
 
   emit_def_begin(&s->cg);
 
@@ -868,12 +883,18 @@ static void parse_def(struct parser_state *s)
 
   parse_suite(s);
 
-  emit_def_end(&s->cg, symbol);
+  emit_def_end(&s->cg, name);
 }
 
 static void parse_statement(struct parser_state *s)
 {
   switch (peek(s)) {
+  case T_class:
+    parse_class(s);
+    return;
+  case T_def:
+    parse_def(s);
+    return;
   case T_for:
     parse_for(s);
     return;
@@ -882,9 +903,6 @@ static void parse_statement(struct parser_state *s)
     return;
   case T_while:
     parse_while(s);
-    return;
-  case T_def:
-    parse_def(s);
     return;
   case T_EOF:
     return;
@@ -898,6 +916,7 @@ union object *parse(struct parser_state *s)
 {
   next_token(s);
 
+  cg_init(&s->cg, s->scanner.symbol_table);
   emit_module_begin(&s->cg);
 
   add_anchor(s, T_EOF);

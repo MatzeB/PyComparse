@@ -12,6 +12,7 @@
 #include "opcodes.h"
 #include "symbol_types.h"
 #include "symbol_info_types.h"
+#include "symbol_table.h"
 
 static bool unreachable(struct cg_state *s)
 {
@@ -29,7 +30,6 @@ static void emit_code_end(struct cg_state *s)
 
 void emit_module_begin(struct cg_state *s)
 {
-  cg_begin(s);
   cg_code_begin(s, /*use_locals=*/false);
 }
 
@@ -227,6 +227,35 @@ void emit_while_end(struct cg_state *s, struct while_state *state)
   cg_block_begin(s, after);
 }
 
+void emit_class_begin(struct cg_state *s, struct symbol *symbol)
+{
+  cg_push_op(s, OPCODE_LOAD_BUILD_CLASS, 0);
+
+  cg_push_code(s);
+  cg_code_begin(s, /*use_locals=*/false);
+
+  emit_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
+  emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
+  cg_push_op(s, OPCODE_LOAD_CONST, cg_register_cstring(s, symbol->string));
+  emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
+}
+
+void emit_class_end(struct cg_state *s, struct symbol *symbol)
+{
+  emit_code_end(s);
+  union object *code = cg_pop_code(s, symbol->string);
+  unsigned code_index = cg_register_object(s, code);
+  cg_push_op(s, OPCODE_LOAD_CONST, code_index);
+
+  unsigned index = cg_register_cstring(s, symbol->string);
+  cg_push_op(s, OPCODE_LOAD_CONST, index);
+  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+  cg_push_op(s, OPCODE_LOAD_CONST, index);
+  cg_op(s, OPCODE_CALL_FUNCTION, 2);
+  cg_pop(s, 2);
+  emit_store(s, symbol);
+}
+
 void emit_def_begin(struct cg_state *s)
 {
   cg_push_code(s);
@@ -248,17 +277,10 @@ bool emit_parameter(struct cg_state *s, struct symbol *symbol)
 void emit_def_end(struct cg_state *s, struct symbol *symbol)
 {
   emit_code_end(s);
-
   union object *code = cg_pop_code(s, symbol->string);
   unsigned code_index = cg_register_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
-
-  const char *chars = symbol->string;
-  uint32_t length = strlen(chars);
-  unsigned name_const_index = cg_register_string(s, chars, length);
-  cg_push_op(s, OPCODE_LOAD_CONST, name_const_index);
-
-  cg_op(s, OPCODE_MAKE_FUNCTION, 0);
-  cg_pop(s, 1);
+  cg_push_op(s, OPCODE_LOAD_CONST, cg_register_cstring(s, symbol->string));
+  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
   emit_store(s, symbol);
 }

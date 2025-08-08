@@ -36,9 +36,10 @@ struct code_state {
 };
 
 struct cg_state {
-  struct arena objects;
-  struct code_state code;
-  struct stack stack;
+  struct arena         objects;
+  struct code_state    code;
+  struct stack         stack;
+  struct symbol_table *symbol_table;
 
   uint16_t next_scope_id;
 };

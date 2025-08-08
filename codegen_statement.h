@@ -34,6 +34,9 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *name,
 void emit_return_statement(struct cg_state *s,
                            union ast_expression *expression);
 
+void emit_class_begin(struct cg_state *s, struct symbol *name);
+void emit_class_end(struct cg_state *s, struct symbol *name);
+
 void emit_if_begin(struct cg_state *s, struct if_state *state,
                    union ast_expression *expression);
 void emit_else_begin(struct cg_state *s, struct if_state *state);

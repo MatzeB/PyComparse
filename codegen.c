@@ -211,10 +211,11 @@ union object *cg_pop_code(struct cg_state *s, const char *name)
   return object;
 }
 
-void cg_begin(struct cg_state *s)
+void cg_init(struct cg_state *s, struct symbol_table *symbol_table)
 {
   memset(s, 0, sizeof(*s));
   arena_init(&s->objects);
+  s->symbol_table = symbol_table;
   s->next_scope_id = 1;
 }
 
@@ -300,6 +301,11 @@ unsigned cg_register_string(struct cg_state *s, const char *chars,
   union object *string = make_string(&s->objects, TYPE_ASCII, length, chars);
   object_list_append(consts, string);
   return consts->list.length - 1;
+}
+
+unsigned cg_register_cstring(struct cg_state *s, const char *string)
+{
+  return cg_register_string(s, string, strlen(string));
 }
 
 unsigned cg_register_int(struct cg_state *s, int32_t value)

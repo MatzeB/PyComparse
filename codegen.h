@@ -8,9 +8,11 @@ struct cg_state;
 struct basic_block;
 struct name_info;
 struct symbol;
+struct symbol_table;
 
 unsigned cg_register_string(struct cg_state *s, const char *chars,
                             uint32_t length);
+unsigned cg_register_cstring(struct cg_state *s, const char *string);
 unsigned cg_register_int(struct cg_state *s, int32_t value);
 unsigned cg_register_singleton(struct cg_state *s, char type);
 unsigned cg_register_code(struct cg_state *s, union object *code);
@@ -45,5 +47,5 @@ union object *cg_code_end(struct cg_state *s, const char *name);
 void cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);
 
-void cg_begin(struct cg_state *s);
+void cg_init(struct cg_state *s, struct symbol_table *symbol_table);
 void cg_free(struct cg_state *s);

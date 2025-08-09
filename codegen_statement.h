@@ -36,7 +36,8 @@ void emit_return_statement(struct cg_state *s,
                            union ast_expression *expression);
 
 void emit_class_begin(struct cg_state *s, struct symbol *name);
-void emit_class_end(struct cg_state *s, struct symbol *name);
+void emit_class_end(struct cg_state *s, struct symbol *name,
+                    unsigned num_decorators);
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
                    union ast_expression *expression);
@@ -58,6 +59,7 @@ void emit_while_end(struct cg_state *s, struct while_state *state);
 
 void emit_def_begin(struct cg_state *s);
 bool emit_parameter(struct cg_state *s, struct symbol *symbol);
-void emit_def_end(struct cg_state *s, struct symbol *symbol);
+void emit_def_end(struct cg_state *s, struct symbol *symbol,
+                  unsigned num_decorators);
 
 void emit_code_end(struct cg_state *s);

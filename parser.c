@@ -939,7 +939,7 @@ static void parse_parameters(struct parser_state *s)
   s->cg.code.argcount = num_parameters;
 }
 
-static void parse_class(struct parser_state *s)
+static void parse_class(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_class);
   if (!skip_till(s, T_IDENTIFIER)) return;
@@ -951,10 +951,10 @@ static void parse_class(struct parser_state *s)
   expect(s, ':');
   parse_suite(s);
 
-  emit_class_end(&s->cg, name);
+  emit_class_end(&s->cg, name, num_decorators);
 }
 
-static void parse_def(struct parser_state *s)
+static void parse_def(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_def);
   if (!skip_till(s, T_IDENTIFIER)) return;
@@ -971,17 +971,44 @@ static void parse_def(struct parser_state *s)
 
   parse_suite(s);
 
-  emit_def_end(&s->cg, name);
+  emit_def_end(&s->cg, name, num_decorators);
+}
+
+static void parse_decorator(struct parser_state *s,
+                            unsigned num_decorators)
+{
+  eat(s, '@');
+  union ast_expression *expression = parse_subexpression(s, PREC_ASSIGN);
+  expect(s, T_NEWLINE);
+  emit_expression(&s->cg, expression);
+
+  switch (peek(s)) {
+  case '@':
+    parse_decorator(s, num_decorators + 1);
+    return;
+  case T_class:
+    parse_class(s, num_decorators + 1);
+    return;
+  case T_def:
+    parse_def(s, num_decorators + 1);
+    return;
+  default:
+    parse_error_expected(s, "@, class or def after decorator");
+    return;
+  }
 }
 
 static void parse_statement(struct parser_state *s)
 {
   switch (peek(s)) {
+  case '@':
+    parse_decorator(s, /*num_decorators=*/0);
+    return;
   case T_class:
-    parse_class(s);
+    parse_class(s, /*num_decorators=*/0);
     return;
   case T_def:
-    parse_def(s);
+    parse_def(s, /*num_decorators=*/0);
     return;
   case T_for:
     parse_for(s);

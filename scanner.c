@@ -352,8 +352,9 @@ finish_string:
 static void scan_eof(struct scanner_state *s)
 {
   if (s->last_line_indent > 0) {
+    assert(s->indentation_stack_top > 0);
     s->last_line_indent = 0;
-    s->pending_dedents  = s->indentation_stack_top;
+    s->pending_dedents  = s->indentation_stack_top - 1;
     s->at_begin_of_line = true;
     s->token.kind = T_DEDENT;
     return;
@@ -370,6 +371,7 @@ static void scan_eof(struct scanner_state *s)
 static bool scan_indentation(struct scanner_state *s)
 {
   if (s->pending_dedents > 0) {
+    assert(s->indentation_stack_top > 0);
     --s->indentation_stack_top;
     --s->pending_dedents;
     if (s->pending_dedents == 0) {
@@ -423,9 +425,7 @@ static bool scan_indentation(struct scanner_state *s)
       s->token.kind = T_ETOODEEP;
       s->c = C_EOF;
     } else {
-      if (last_line_indent > 0) {
-        s->indentation_stack[s->indentation_stack_top++] = last_line_indent;
-      }
+      s->indentation_stack[s->indentation_stack_top++] = last_line_indent;
       s->last_line_indent = column;
       s->token.kind = T_INDENT;
       s->at_begin_of_line = false;
@@ -433,22 +433,24 @@ static bool scan_indentation(struct scanner_state *s)
     return true;
   }
   if (column < last_line_indent) {
-    unsigned pending_dedents = 0;
+    unsigned dedents = 1;
     for (unsigned t = s->indentation_stack_top; t-- > 0;) {
-      if (column <= s->indentation_stack[t]) {
-        ++pending_dedents;
-      }
+      if (column >= s->indentation_stack[t])
+        break;
+      ++dedents;
     }
-    unsigned target_cols = pending_dedents == s->indentation_stack_top
-      ? 0
-      : s->indentation_stack[s->indentation_stack_top - pending_dedents + 1];
+    unsigned target_cols =
+        s->indentation_stack[s->indentation_stack_top - dedents];
+    /* we report 1 dedent right now, the rest is pending */
+    unsigned pending_dedents = dedents - 1;
     s->pending_dedents  = pending_dedents;
     s->last_line_indent = column;
     s->at_begin_of_line = pending_dedents > 0;
     if (column != target_cols) {
-      fprintf(stderr, "invalid indentation\n");
+      fprintf(stderr, "%d: invalid indentation\n", s->line);
       s->token.kind = T_EDEDENT;
     } else {
+      s->indentation_stack_top--;
       s->token.kind = T_DEDENT;
     }
     return true;

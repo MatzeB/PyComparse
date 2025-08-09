@@ -247,7 +247,16 @@ void emit_class_begin(struct cg_state *s, struct symbol *symbol)
   emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 }
 
-void emit_class_end(struct cg_state *s, struct symbol *symbol)
+static void emit_decorator_calls(struct cg_state *s,
+                                 unsigned num_decorators)
+{
+  for (unsigned i = 0; i < num_decorators; i++) {
+    cg_pop_op(s, OPCODE_CALL_FUNCTION, 1);
+  }
+}
+
+void emit_class_end(struct cg_state *s, struct symbol *symbol,
+                    unsigned num_decorators)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
@@ -260,6 +269,7 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol)
   cg_load_const(s, string);
   cg_op(s, OPCODE_CALL_FUNCTION, 2);
   cg_pop(s, 2);
+  emit_decorator_calls(s, num_decorators);
   emit_store(s, symbol);
 }
 
@@ -281,7 +291,8 @@ bool emit_parameter(struct cg_state *s, struct symbol *symbol)
   return true;
 }
 
-void emit_def_end(struct cg_state *s, struct symbol *symbol)
+void emit_def_end(struct cg_state *s, struct symbol *symbol,
+                  unsigned num_decorators)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
@@ -289,6 +300,7 @@ void emit_def_end(struct cg_state *s, struct symbol *symbol)
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
   cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+  emit_decorator_calls(s, num_decorators);
   emit_store(s, symbol);
 }
 

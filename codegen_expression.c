@@ -101,18 +101,31 @@ void emit_load(struct cg_state *s, struct symbol *symbol)
 
 void emit_assignment(struct cg_state *s, union ast_expression *target)
 {
-  if (target->type == AST_IDENTIFIER) {
+  switch (target->type) {
+  case AST_IDENTIFIER:
     emit_store(s, target->identifier.symbol);
-  } else if (target->type == AST_ATTR) {
+    return;
+  case AST_ATTR: {
     struct ast_attr *attr = &target->attr;
     emit_expression(s, attr->expression);
     unsigned index = cg_append_name(s, attr->attr->string);
     cg_op(s, OPCODE_STORE_ATTR, index);
     cg_pop(s, 2);
-  } else {
-    fprintf(stderr, "Unsupported or invalid lvalue\n");
-    unimplemented();
+    return;
   }
+  case AST_BINEXPR_SUBSCRIPT: {
+    struct ast_binexpr *binexpr = &target->binexpr;
+    emit_expression(s, binexpr->left);
+    emit_expression(s, binexpr->right);
+    cg_op(s, OPCODE_STORE_SUBSCR, 0);
+    cg_pop(s, 3);
+    return;
+  }
+  default:
+    break;
+  }
+  fprintf(stderr, "Unsupported or invalid lvalue\n");
+  unimplemented();
 }
 
 static union object *constant_expression(struct cg_state *s,
@@ -308,6 +321,9 @@ static void emit_expression_impl(struct cg_state *s,
     break;
   case AST_BINEXPR_SUB:
     emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_SUBTRACT);
+    break;
+  case AST_BINEXPR_SUBSCRIPT:
+    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_SUBSCR);
     break;
   case AST_BINEXPR_TRUEDIV:
     emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_TRUE_DIVIDE);

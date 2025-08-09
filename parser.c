@@ -56,7 +56,7 @@ enum precedence {
   PREC_FACTOR,      /* prefix +, -, ~ */
   PREC_POWER,       /* prefix ** */
 
-  PREC_POSTFIX,     /* postfix ( */
+  PREC_PRIMARY,     /* .attr  [subscript]   (call) */
   PREC_ATOM,        /* name, number, string, ..., None, True, False */
 };
 
@@ -548,6 +548,24 @@ static union ast_expression *parse_sub(struct parser_state *s,
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_SUB, left);
 }
 
+static union ast_expression *parse_subscript(struct parser_state *s,
+                                             union ast_expression *left)
+{
+  eat(s, '[');
+  add_anchor(s, ']');
+  add_anchor(s, ',');
+  union ast_expression *right = parse_subexpression(s, PREC_LIST);
+  remove_anchor(s, ',');
+  remove_anchor(s, ']');
+  expect(s, ']');
+
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_SUBSCRIPT);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
+}
+
 static union ast_expression *parse_floor_div(struct parser_state *s,
                                              union ast_expression *left)
 {
@@ -697,16 +715,17 @@ struct postfix_expression_parser {
 static const struct postfix_expression_parser postfix_parsers[] = {
   ['%']    = { .func = parse_mod,        .precedence = PREC_TERM       },
   ['&']    = { .func = parse_and,        .precedence = PREC_AND        },
-  ['(']    = { .func = parse_call,       .precedence = PREC_POSTFIX    },
+  ['(']    = { .func = parse_call,       .precedence = PREC_PRIMARY    },
   ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
   ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
   ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
-  ['.']    = { .func = parse_attr,       .precedence = PREC_POSTFIX    },
+  ['.']    = { .func = parse_attr,       .precedence = PREC_PRIMARY    },
   ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
   ['<']    = { .func = parse_less,       .precedence = PREC_COMPARISON },
   ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
   ['>']    = { .func = parse_greater,    .precedence = PREC_COMPARISON },
   ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
+  ['[']    = { .func = parse_subscript,  .precedence = PREC_PRIMARY    },
   ['^']    = { .func = parse_xor,        .precedence = PREC_XOR        },
   ['|']    = { .func = parse_or,         .precedence = PREC_OR         },
   [T_for]  = { .func = parse_gen_expr,   .precedence = PREC_TEST       },

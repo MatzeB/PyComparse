@@ -1,5 +1,5 @@
-#include "objects.h"
-#include "objects_types.h"
+#include "object.h"
+#include "object_types.h"
 
 #include <stdlib.h>
 #include <string.h>

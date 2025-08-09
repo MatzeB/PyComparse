@@ -24,17 +24,18 @@ int main(int argc, char **argv)
   struct arena strings;
   arena_init(&strings);
 
-  struct parser_state s;
-  parser_init(&s);
-  scanner_init(&s.scanner, input, &symbol_table, &strings);
+  struct parser_state parser;
+  parser_init(&parser);
+  scanner_init(&parser.scanner, input, &symbol_table, &parser.cg.objects,
+               &strings);
 
-  union object *code = parse(&s, filename);
+  union object *code = parse(&parser, filename);
   write_module(stdout, code);
 
   fclose(input);
 
-  scanner_free(&s.scanner);
+  scanner_free(&parser.scanner);
   arena_free_all(&strings);
   exit_symbol_table(&symbol_table);
-  return s.error ? 1 : 0;
+  return parser.error ? 1 : 0;
 }

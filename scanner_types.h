@@ -8,12 +8,18 @@
 
 struct arena;
 struct symbol_table;
+union object;
+
+struct token_string {
+  size_t      length;
+  const char *chars;
+};
 
 struct token {
   uint16_t kind;
   union {
     struct symbol *symbol;
-    const char    *string;
+    union object  *object;
   } u;
 };
 
@@ -26,8 +32,9 @@ struct scanner_state {
   unsigned line;
   unsigned paren_level;
 
-  struct symbol_table *symbol_table;
-  struct arena        *strings;
+  struct symbol_table  *symbol_table;
+  struct object_intern *objects;
+  struct arena         *strings;
 
   bool     at_begin_of_line;
   unsigned pending_dedents;

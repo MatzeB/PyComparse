@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "objects.h"
+#include "object.h"
 
 struct arena;
 struct object_intern;

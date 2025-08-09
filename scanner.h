@@ -4,12 +4,15 @@
 #include <stdint.h>
 
 struct arena;
-struct token;
+struct object_intern;
 struct scanner_state;
 struct symbol_table;
+struct token;
 
 void scanner_init(struct scanner_state *s, FILE* input,
-                  struct symbol_table *symbol_table, struct arena *strings);
+                  struct symbol_table *symbol_table,
+                  struct object_intern *objects,
+                  struct arena *strings);
 
 void scanner_free(struct scanner_state *s);
 

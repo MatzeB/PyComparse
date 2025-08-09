@@ -2,23 +2,21 @@
 #include "parser_types.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <stdalign.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "adt/arena.h"
 #include "ast.h"
 #include "ast_types.h"
-#include "adt/arena.h"
+#include "codegen_expression.h"
+#include "codegen.h"
+#include "codegen_statement.h"
+#include "object.h"
 #include "scanner.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
 #include "util.h"
-#include "codegen.h"
-#include "codegen_expression.h"
-#include "codegen_statement.h"
-
-#include "objects.h"
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
@@ -93,12 +91,12 @@ static inline struct symbol *eat_identifier(struct parser_state *s)
   return symbol;
 }
 
-static inline const char* peek_token_with_string(struct parser_state *s,
-                                                 uint16_t token_kind)
+static inline union object *peek_get_object(struct parser_state *s,
+                                            uint16_t token_kind)
 {
   assert(token_kind == T_STRING || token_kind == T_INTEGER);
   assert(peek(s) == token_kind);
-  return s->scanner.token.u.string;
+  return s->scanner.token.u.object;
 }
 
 static inline bool accept(struct parser_state *s, uint16_t token_kind)
@@ -419,27 +417,14 @@ static union ast_expression *make_ast_const(struct parser_state *s,
 
 static union ast_expression *parse_string(struct parser_state *s)
 {
-  const char *chars = peek_token_with_string(s, T_STRING);
-  uint32_t length = strlen(chars);
-  union object *object = object_intern_string(&s->cg.objects, OBJECT_ASCII,
-                                              length, chars);
+  union object *object = peek_get_object(s, T_STRING);
   eat(s, T_STRING);
   return make_ast_const(s, object);
 }
 
 static union ast_expression *parse_integer(struct parser_state *s)
 {
-  const char *string = peek_token_with_string(s, T_INTEGER);
-  char *endptr;
-  errno = 0;
-  long value = strtol(string, &endptr, 0);
-  assert(endptr != NULL);
-  assert(*endptr == '\0');
-  if (value == 0) {
-    assert(errno == 0);
-  }
-  assert(INT64_MIN <= value && value <= INT64_MAX);
-  union object *object = object_intern_int(&s->cg.objects, (int64_t)value);
+  union object *object = peek_get_object(s, T_INTEGER);
   eat(s, T_INTEGER);
   return make_ast_const(s, object);
 }
@@ -793,7 +778,7 @@ static struct dotted_name *parse_dotted_name(struct parser_state *s)
   do {
     if (!skip_till(s, T_IDENTIFIER)) {
       void *begin = arena_grow_finish(&s->ast);
-      arena_free(&s->ast, begin);
+      arena_free_to(&s->ast, begin);
       return NULL;
     }
     struct symbol *symbol = eat_identifier(s);

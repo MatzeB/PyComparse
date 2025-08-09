@@ -2,6 +2,9 @@
 #include "scanner_types.h"
 
 #include <assert.h>
+#include <ctype.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,6 +16,8 @@
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "object_intern.h"
+#include "object_types.h"
 
 #define UNLIKELY(x)    __builtin_expect((x), 0)
 
@@ -183,7 +188,7 @@ static void scan_identifier(struct scanner_state *s, char first_char)
   char *string = arena_grow_finish(arena);
   struct symbol *symbol = symbol_table_get_or_insert(s->symbol_table, string);
   if (symbol->string != string) {
-    arena_free(arena, string);
+    arena_free_to(arena, string);
   }
 
   s->token.kind     = symbol->token_kind;
@@ -247,77 +252,196 @@ static void scan_decinteger(struct scanner_state *s, struct arena *arena) {
 
 static void scan_number(struct scanner_state *s)
 {
-  struct arena *arena = s->strings;
-  arena_grow_begin(arena, alignof(char));
-  arena_grow_char(arena, (char)s->c);
+  struct arena *strings = s->strings;
+  arena_grow_begin(strings, alignof(char));
+  arena_grow_char(strings, (char)s->c);
   if (s->c == '0') {
     next_char(s);
     switch (s->c) {
     case 'x':
     case 'X':
-      scan_hexinteger(s, arena);
+      scan_hexinteger(s, strings);
       break;
     case 'b':
-      scan_bininteger(s, arena);
+      scan_bininteger(s, strings);
       break;
     case 'o':
-      scan_octinteger(s, arena);
+      scan_octinteger(s, strings);
       break;
     default:
-      scan_decinteger_zero(s, arena);
+      scan_decinteger_zero(s, strings);
       break;
     }
   } else {
-    scan_decinteger(s, arena);
+    scan_decinteger(s, strings);
   }
 
   if (s->c == '.' || s->c == 'e') {
     abort();
   }
+  arena_grow_char(strings, '\0');
+  char *chars = (char*)arena_grow_finish(strings);
 
-  arena_grow_char(arena, '\0');
-  s->token.u.string = (char*)arena_grow_finish(arena);
+  char *endptr;
+  errno = 0;
+  long value = strtol(chars, &endptr, 0);
+  if (endptr == chars || *endptr != '\0') {
+    /* TODO: report error */
+    abort();
+  }
+  if ((value == LONG_MIN || value == LONG_MAX) &&
+      errno != 0) {
+    /* TODO: report error */
+    abort();
+  }
+  arena_free_to(strings, chars);
+
+  assert(INT64_MIN <= value && value <= INT64_MAX);
+  s->token.u.object = object_intern_int(s->objects, (int64_t)value);
   s->token.kind = T_INTEGER;
 }
 
-static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
+static void scan_escape_sequence(struct scanner_state *s, struct arena *strings,
+                                 bool is_unicode)
+{
+  assert(s->c == '\\');
+  next_char(s);
+
+  char decoded_single;
+  switch (s->c) {
+  case '\\':
+  case '\'':
+  case '\"':
+    decoded_single = s->c;
+    break;
+  case 'a':
+    decoded_single = 0x07;
+    break;
+  case 'b':
+    decoded_single = 0x08;
+    break;
+  case 'f':
+    decoded_single = 0x0c;
+    break;
+  case 'n':
+    decoded_single = 0x0a;
+    break;
+  case 'r':
+    decoded_single = 0x0d;
+    break;
+  case 't':
+    decoded_single = 0x09;
+    break;
+  case 'v':
+    decoded_single = 0x0b;
+    break;
+  case '0':
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7': {
+    int num = s->c - '0';
+    int num_digits = 1;
+    for (;;) {
+      next_char(s);
+      if (s->c < '0' || s->c > '7' || ++num_digits > 3)
+        break;
+      num = (num * 8) + (s->c - '0');
+    }
+    if (num > 0377) {
+      /* TODO report warning */
+      abort();
+    }
+    if (num > 127 && is_unicode) {
+      /* TODO: encode utf-8 in string */
+      abort();
+    }
+    arena_grow_char(strings, (char)num);
+    return;
+  }
+  case 'x':
+    /* TODO */
+    abort();
+  case 'N':
+    /* TODO */
+    abort();
+  case 'u':
+    /* TODO */
+    abort();
+  case 'U':
+    /* TODO */
+    abort();
+  case '\r':
+    next_char(s);
+    if (s->c == '\n') {
+      /* fallthrough */
+  case '\n':
+      next_char(s);
+    }
+    ++s->line;
+    return;
+  case C_EOF:
+    /* TODO: report error */
+    abort();
+  default:
+    /* TODO: report error */
+    arena_grow_char(strings, '\\');
+    arena_grow_char(strings, s->c);
+    next_char(s);
+    return;
+  }
+  next_char(s);
+  arena_grow_char(strings, decoded_single);
+}
+
+static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
+                                bool is_unicode)
 {
   assert(s->c == '"' || s->c == '\'');
   int quote = s->c;
   next_char(s);
 
+  struct arena *strings = s->strings;
   s->token.kind = token_kind;
-  struct arena *arena = s->strings;
-  arena_grow_begin(arena, alignof(char));
+  arena_grow_begin(strings, alignof(char));
   bool triplequote = false;
   if (s->c == quote) {
     next_char(s);
     if (s->c == quote) {
       next_char(s);
       triplequote = true;
-      (void)triplequote;
-      fprintf(stderr, "TODO\n");
-      abort();
     } else {
       goto finish_string;
     }
   }
   for (;;) {
+    /* vectorize this search? */
     switch (s->c) {
     case '"':
     case '\'': {
-      bool end = s->c == quote;
-      // TODO: check if it matches the begin
-      next_char(s);
-      if (end)
+      if (s->c != quote)
         break;
-      continue;
+      next_char(s);
+      if (!triplequote) goto finish_string;
+      if (s->c != quote) {
+        arena_grow_char(strings, quote);
+        continue;
+      }
+      next_char(s);
+      if (s->c != quote) {
+        arena_grow_char(strings, quote);
+        arena_grow_char(strings, quote);
+        continue;
+      }
+      next_char(s);
+      goto finish_string;
     }
     case '\\':
-      next_char(s);
-      next_char(s);
-      fprintf(stderr, "TODO\n");
-      abort();
+      scan_escape_sequence(s, strings, is_unicode);
+      continue;
     case '\r':
       next_char(s);
       if (s->c == '\n') {
@@ -326,27 +450,33 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind)
         next_char(s);
       }
       ++s->line;
-      fprintf(stderr, "TODO: complain about newline\n");
-      abort();
+      if (!triplequote) {
+        fprintf(stderr, "TODO: error unterminated string literal\n");
+        abort();
+      }
+      arena_grow_char(strings, '\n');
+      continue;
     case C_EOF:
       // TODO: complain
       fprintf(stderr, "TODO\n");
       abort();
     default:
-      if (s->c & 0x80) {
-        fprintf(stderr, "TODO: non-ascii\n");
-        abort();
-      }
-      arena_grow_char(arena, (char)s->c);
-      next_char(s);
-      continue;
+      break;
     }
-    break;
+    arena_grow_char(strings, (char)s->c);
+    next_char(s);
   }
 
-finish_string:
-  arena_grow_char(arena, '\0');
-  s->token.u.string = (char*)arena_grow_finish(arena);
+finish_string:;
+  size_t length = arena_grow_current_size(strings);
+  char  *chars  = (char*)arena_grow_finish(strings);
+  union object *object = object_intern_string(s->objects, OBJECT_ASCII,
+                                              length, chars);
+  if (object->string.chars != chars) {
+    arena_free_to(strings, chars);
+  }
+  s->token.u.object = object;
+  s->token.kind = T_STRING;
 }
 
 static void scan_eof(struct scanner_state *s)
@@ -509,8 +639,8 @@ void scanner_next_token(struct scanner_state *s)
     case 'B': {
       char first_char = (char)s->c;
       next_char(s);
-      if (s->c == '"') {
-        scan_string_literal(s, T_BYTE_STRING);
+      if (s->c == '"' || s->c == '\'') {
+        scan_string_literal(s, T_BYTE_STRING, /*is_unicode=*/false);
         return;
       } else {
         scan_identifier(s, first_char);
@@ -522,8 +652,8 @@ void scanner_next_token(struct scanner_state *s)
     case 'F': {
       char first_char = (char)s->c;
       next_char(s);
-      if (s->c == '"') {
-        scan_string_literal(s, T_FORMAT_STRING);
+      if (s->c == '"' || s->c == '\'') {
+        scan_string_literal(s, T_FORMAT_STRING, /*is_unicode=*/true);
         return;
       } else {
         scan_identifier(s, first_char);
@@ -535,8 +665,9 @@ void scanner_next_token(struct scanner_state *s)
     case 'R': {
       char first_char = (char)s->c;
       next_char(s);
-      if (s->c == '"') {
-        scan_string_literal(s, T_RAW_STRING);
+      if (s->c == '"' || s->c == '\'') {
+        abort(); // TODO
+        scan_string_literal(s, T_RAW_STRING, /*is_unicode=*/true);
         return;
       } else {
         scan_identifier(s, first_char);
@@ -548,8 +679,8 @@ void scanner_next_token(struct scanner_state *s)
     case 'U': {
       char first_char = (char)s->c;
       next_char(s);
-      if (s->c == '"') {
-        scan_string_literal(s, T_UNICODE_STRING);
+      if (s->c == '"' || s->c == '\'') {
+        scan_string_literal(s, T_UNICODE_STRING, /*is_unicode=*/true);
         return;
       } else {
         scan_identifier(s, first_char);
@@ -559,7 +690,7 @@ void scanner_next_token(struct scanner_state *s)
 
     case '\'':
     case '"':
-      scan_string_literal(s, T_STRING);
+      scan_string_literal(s, T_STRING, /*is_unicode=*/true);
       return;
 
     case '=':
@@ -804,7 +935,8 @@ invalid_char:
 }
 
 void scanner_init(struct scanner_state *s, FILE *input,
-                  struct symbol_table *symbol_table, struct arena *strings)
+    struct symbol_table *symbol_table, struct object_intern *objects,
+    struct arena *strings)
 {
   memset(s, 0, sizeof(*s));
   s->input            = input;
@@ -812,6 +944,7 @@ void scanner_init(struct scanner_state *s, FILE *input,
   s->read_buffer      = malloc(16 * 1024 - 16);
   s->read_buffer_size = 4096;
   s->symbol_table     = symbol_table;
+  s->objects          = objects;
   s->strings          = strings;
   next_char(s);
 }
@@ -847,10 +980,20 @@ void print_token(FILE *out, const struct token *token)
   case T_BYTE_STRING:    fputc('b', out); goto string;
   case T_STRING:
 string:
-    fprintf(out, "\"%s\"\n", token->u.string);
+    fputc('"', out);
+    struct object_string *string = &token->u.object->string;
+    for (const char *c = string->chars, *e = c + string->length; c != e; ++c) {
+      /* TODO: more escaping... */
+      if (isprint(*c)) {
+        fputc(*c, out);
+      } else {
+        fprintf(out, "\\x%02x", (unsigned char)*c);
+      }
+    }
+    fputc('"', out);
     break;
   case T_INTEGER:
-    fprintf(out, "integer %s\n", token->u.string);
+    fprintf(out, "integer %" PRId64, token->u.object->int_obj.value);
     break;
   case T_IDENTIFIER:
     fprintf(out, "identifier %s\n", token->u.symbol->string);

@@ -15,6 +15,10 @@ add_executable(arena_test
   adt/arena.h
 )
 add_executable(scanner_test
+  object.c
+  object.h
+  object_intern.c
+  object_intern.h
   scanner.c
   scanner.h
   scanner_test.c
@@ -39,12 +43,12 @@ add_executable(parser_test
   codegen_statement.c
   codegen_statement.h
   codegen_types.h
+  object.c
+  object.h
   object_intern.c
   object_intern.h
   object_intern_types.h
-  objects.c
-  objects.h
-  objects_types.h
+  object_types.h
   parser.c
   parser.h
   parser_test.c

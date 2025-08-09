@@ -7,8 +7,8 @@
 
 #include "adt/arena.h"
 #include "adt/dynmemory.h"
-#include "objects.h"
-#include "objects_types.h"
+#include "object.h"
+#include "object_types.h"
 #include "opcodes.h"
 #include "symbol_types.h"
 

@@ -1,3 +1,5 @@
+#include "object_intern.h"
+#include "object_intern_types.h"
 #include "scanner.h"
 #include "scanner_types.h"
 #include "symbol_table.h"
@@ -22,7 +24,9 @@ int main(int argc, char **argv)
   arena_init(&strings);
 
   struct scanner_state s;
-  scanner_init(&s, input, &symbol_table, &strings);
+  struct object_intern objects;
+  object_intern_init(&objects);
+  scanner_init(&s, input, &symbol_table, &objects, &strings);
 
   const struct token *token = &s.token;
   do {

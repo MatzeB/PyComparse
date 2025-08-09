@@ -75,9 +75,9 @@ static inline void *arena_allocate(struct arena *arena, size_t size,
 static inline void arena_free_all(struct arena *arena)
 {
   assert(arena->grow == 0);
-  for (struct block_header *block = arena->block, *next; block != NULL;
-       block = next) {
-    next = block->prev;
+  for (struct block_header *block = arena->block, *prev; block != NULL;
+       block = prev) {
+    prev = block->prev;
     free(block);
   }
   arena->block     = NULL;
@@ -85,19 +85,18 @@ static inline void arena_free_all(struct arena *arena)
   arena->limit     = 0;
 }
 
-static inline void arena_free(struct arena *arena, const void *free_up_to)
+static inline void arena_free_to(struct arena *arena, const void *free_up_to)
 {
   assert(arena->grow == 0);
   struct block_header *block = arena->block;
-  assert(block != NULL);
-  for (struct block_header *next; block != NULL; block = next) {
+  for (struct block_header *prev; block != NULL; block = prev) {
+    assert(block != NULL && "address must be part of arena");
     if (free_up_to > (const void*)block &&
         free_up_to < (const void*)((char*)block + block->block_size))
       break;
-    next = block->prev;
+    prev = block->prev;
     free(block);
   }
-  assert(block != NULL && "address must be part of arena");
   arena->block     = block;
   arena->allocated = (const char*)free_up_to - (const char*)block;
   arena->limit     = block->block_size;

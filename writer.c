@@ -7,8 +7,8 @@
 #include <string.h>
 
 #include "adt/dynmemory.h"
-#include "objects.h"
-#include "objects_types.h"
+#include "object.h"
+#include "object_types.h"
 #include "opcodes.h"
 
 struct writer_state {
@@ -104,6 +104,8 @@ static void write_string(struct writer_state *s,
     write_uint32(s, length);
   }
   for (uint32_t i = 0; i < length; ++i) {
+    assert(type == OBJECT_STRING ||
+           (((uint8_t)string->chars[i]) < 128 && "TODO: non-ascii"));
     write_char(s, string->chars[i]);
   }
 }

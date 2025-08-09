@@ -128,64 +128,6 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   unimplemented();
 }
 
-static union object *constant_expression(struct cg_state *s,
-                                         union ast_expression *expression)
-{
-  switch (expression->type) {
-  case AST_CONST:
-    return expression->cnst.object;
-  case AST_TUPLE_FORM: {
-    struct ast_tuple_list_form *tuple_form = &expression->tuple_list_form;
-    /* TODO: list "leaks" and stays in arena... */
-    struct arena *arena = object_intern_arena(&s->objects);
-    union object *list = object_new_list(arena);
-    for (struct argument *argument = tuple_form->arguments;
-         argument != NULL; argument = argument->next) {
-      union object *const_arg = constant_expression(s, argument->expression);
-      if (const_arg == NULL) return NULL;
-      object_list_append(list, const_arg);
-    }
-    union object *tuple = object_new_tuple(arena, list->list.length);
-    for (unsigned i = 0, e = list->list.length; i < e; i++) {
-      tuple->tuple.items[i] = list->list.items[i];
-    }
-    return tuple;
-  }
-  case AST_ATTR:
-  case AST_BINEXPR_ADD:
-  case AST_BINEXPR_AND:
-  case AST_BINEXPR_ASSIGN:
-  case AST_BINEXPR_EQUAL:
-  case AST_BINEXPR_FLOORDIV:
-  case AST_BINEXPR_GREATER:
-  case AST_BINEXPR_GREATER_EQUAL:
-  case AST_BINEXPR_IN:
-  case AST_BINEXPR_IS:
-  case AST_BINEXPR_IS_NOT:
-  case AST_BINEXPR_LESS:
-  case AST_BINEXPR_LESS_EQUAL:
-  case AST_BINEXPR_LOGICAL_AND:
-  case AST_BINEXPR_LOGICAL_OR:
-  case AST_BINEXPR_MATMUL:
-  case AST_BINEXPR_MOD:
-  case AST_BINEXPR_MUL:
-  case AST_BINEXPR_NOT_IN:
-  case AST_BINEXPR_OR:
-  case AST_BINEXPR_SUB:
-  case AST_BINEXPR_TRUEDIV:
-  case AST_BINEXPR_UNEQUAL:
-  case AST_BINEXPR_XOR:
-  case AST_CALL:
-  case AST_IDENTIFIER:
-  case AST_UNEXPR_INVERT:
-  case AST_UNEXPR_NEGATIVE:
-  case AST_UNEXPR_NOT:
-  case AST_UNEXPR_PLUS:
-    return NULL;
-  }
-  abort();
-}
-
 static void emit_list_form(struct cg_state *s,
                            struct ast_tuple_list_form *list_form)
 {
@@ -202,14 +144,20 @@ static void emit_list_form(struct cg_state *s,
 static void emit_tuple_form(struct cg_state *s,
                             struct ast_tuple_list_form *tuple_form)
 {
-  unsigned num_elements = 0;
+  union object *object = tuple_form->as_constant;
+  if (object != NULL) {
+    cg_load_const(s, object);
+    return;
+  }
+
+  unsigned num_arguments = 0;
   for (struct argument *argument = tuple_form->arguments;
        argument != NULL; argument = argument->next) {
     emit_expression(s, argument->expression);
-    num_elements++;
+    num_arguments++;
   }
-  cg_pop(s, num_elements);
-  cg_push_op(s, OPCODE_BUILD_TUPLE, num_elements);
+  cg_pop(s, num_arguments);
+  cg_push_op(s, OPCODE_BUILD_TUPLE, num_arguments);
 }
 
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)
@@ -353,13 +301,7 @@ static void emit_expression_impl(struct cg_state *s,
     break;
   }
   case AST_TUPLE_FORM: {
-    union object *object = constant_expression(s, expression);
-    if (object != NULL) {
-      unsigned index = cg_register_object(s, object);
-      cg_push_op(s, OPCODE_LOAD_CONST, index);
-    } else {
-      emit_tuple_form(s, &expression->tuple_list_form);
-    }
+    emit_tuple_form(s, &expression->tuple_list_form);
     break;
   }
   case AST_UNEXPR_PLUS:

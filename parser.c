@@ -341,6 +341,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     union ast_expression *tuple =
         ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
     tuple->tuple_list_form.arguments = NULL;
+    tuple->tuple_list_form.as_constant = object_intern_empty_tuple(&s->cg.objects);
     return tuple;
   }
 
@@ -367,6 +368,8 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     union ast_expression *tuple =
       ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
     tuple->tuple_list_form.arguments = first;
+    tuple->tuple_list_form.as_constant =
+        ast_tuple_compute_constant(&s->cg.objects, &tuple->tuple_list_form);
     expression = tuple;
   }
   remove_anchor(s, ',');
@@ -1046,11 +1049,11 @@ static void parse_statement(struct parser_state *s)
   }
 }
 
-union object *parse(struct parser_state *s)
+union object *parse(struct parser_state *s, const char *filename)
 {
   next_token(s);
 
-  cg_init(&s->cg, s->scanner.symbol_table);
+  cg_init(&s->cg, s->scanner.symbol_table, filename);
   emit_module_begin(&s->cg);
 
   add_anchor(s, T_EOF);

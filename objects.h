@@ -55,10 +55,14 @@ union object *object_new_ascii(struct arena *arena, const char *cstring);
 union object *object_new_singleton(struct arena *arena, enum object_type type);
 union object *object_new_code(struct arena *arena);
 union object *object_new_list(struct arena *arena);
-union object *object_new_tuple(struct arena *arena, uint32_t length);
 union object *object_new_string(struct arena *arena, enum object_type type,
                                 uint32_t length, const char *chars);
 union object *object_new_int(struct arena *arena, int32_t value);
+
+union object *object_new_tuple_begin(struct arena *arena, uint32_t length);
+void object_new_tuple_set_at(union object *tuple, uint32_t index,
+                             union object *object);
+void object_new_tuple_end(union object *tuple);
 
 enum object_type object_type(union object *object);
 bool objects_equal(const union object *object0, const union object *object1);

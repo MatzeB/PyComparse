@@ -17,5 +17,6 @@ union object *object_intern_singleton(struct object_intern *s,
                                       enum object_type type);
 union object *object_intern_string(struct object_intern *s,
     enum object_type type, uint32_t length, const char *chars);
+union object *object_intern_empty_tuple(struct object_intern *s);
 
 struct arena *object_intern_arena(struct object_intern *s);

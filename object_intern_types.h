@@ -10,4 +10,5 @@ struct object_intern {
   union object *singleton_true;
   union object *singleton_false;
   union object *singleton_ellipsis;
+  union object *empty_tuple;
 };

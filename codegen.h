@@ -45,5 +45,6 @@ union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_load_const(struct cg_state *s, union object *object);
 
-void cg_init(struct cg_state *s, struct symbol_table *symbol_table);
+void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
+             const char *filename);
 void cg_free(struct cg_state *s);

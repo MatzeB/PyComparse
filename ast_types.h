@@ -46,6 +46,7 @@ struct ast_unexpr {
 struct ast_tuple_list_form {
   struct ast_node_base base;
   struct argument     *arguments;
+  union object        *as_constant;
 };
 
 enum generator_expression_part_type {

@@ -29,6 +29,9 @@ add_executable(parser_test
   adt/arena.h
   adt/dynmemory.h
   adt/stack.h
+  ast.c
+  ast.h
+  ast_types.h
   codegen.c
   codegen.h
   codegen_expression.c

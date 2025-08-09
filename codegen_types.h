@@ -42,6 +42,7 @@ struct cg_state {
   struct code_state    code;
   struct stack         stack;
   struct symbol_table *symbol_table;
+  const char *filename;
 
   uint16_t next_scope_id;
 };

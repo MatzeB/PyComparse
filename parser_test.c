@@ -9,14 +9,14 @@
 
 int main(int argc, char **argv)
 {
-  FILE *input = stdin;
-  if (argc > 1) {
-    const char *filename = argv[1];
-    input = fopen(filename, "r");
-    if (input == NULL) {
-      fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
-      return 1;
-    }
+  if (argc != 2) {
+    fprintf(stderr, "Missing filename argument\n");
+  }
+  const char *filename = argv[1];
+  FILE *input = fopen(filename, "r");
+  if (input == NULL) {
+    fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
+    return 1;
   }
 
   struct symbol_table symbol_table;
@@ -28,12 +28,10 @@ int main(int argc, char **argv)
   parser_init(&s);
   scanner_init(&s.scanner, input, &symbol_table, &strings);
 
-  union object *code = parse(&s);
+  union object *code = parse(&s, filename);
   write_module(stdout, code);
 
-  if (input != stdin) {
-    fclose(input);
-  }
+  fclose(input);
 
   scanner_free(&s.scanner);
   arena_free_all(&strings);

@@ -7,6 +7,8 @@
 #include "adt/arena.h"
 #include "adt/dynmemory.h"
 
+#define OBJECT_TUPLE_CONSTRUCTION  '\1'
+
 static union object *object_allocate_zero_(struct arena *arena,
                                            size_t size, char type) {
   union object *object =
@@ -60,19 +62,44 @@ uint32_t object_list_length(union object *list)
   return list->list.length;
 }
 
-union object *object_new_tuple(struct arena *arena, uint32_t length)
-{
-  union object *object;
-  size_t size =
-      sizeof(struct object_tuple) + length * sizeof(object->tuple.items[0]);
-  object = object_allocate_zero_(arena, size, OBJECT_TUPLE);
-  object->tuple.length = length;
-  return object;
-}
-
 union object *object_new_code(struct arena *arena)
 {
   return object_allocate_zero(arena, struct object_code, OBJECT_CODE);
+}
+
+union object *object_new_tuple_begin(struct arena *arena, uint32_t length)
+{
+  assert(length < UINT32_MAX);
+  union object *object;
+  size_t size =
+      sizeof(struct object_tuple) + length * sizeof(object->tuple.items[0]);
+  object = object_allocate_zero_(arena, size, OBJECT_TUPLE_CONSTRUCTION);
+  object->tuple.length = length;
+#ifndef NDEBUG
+  for (uint32_t i = 0; i < length; i++) {
+    object->tuple.items[i] = (union object*)(-1);
+  }
+#endif
+  return object;
+}
+
+void object_new_tuple_set_at(union object *tuple, uint32_t index,
+                             union object *object)
+{
+  assert(tuple->type == OBJECT_TUPLE_CONSTRUCTION);
+  assert(index < tuple->tuple.length);
+  tuple->tuple.items[index] = object;
+}
+
+void object_new_tuple_end(union object *tuple)
+{
+  assert(tuple->type == OBJECT_TUPLE_CONSTRUCTION);
+#ifndef NDEBUG
+  for (uint32_t i = 0; i < tuple->tuple.length; i++) {
+    assert(tuple->tuple.items[i] != (union object*)(-1));
+  }
+#endif
+  tuple->type = OBJECT_TUPLE;
 }
 
 static bool object_type_is_singleton(enum object_type type)
@@ -113,6 +140,7 @@ union object *object_new_singleton(struct arena *arena, enum object_type type)
 union object *object_new_string(struct arena *arena, enum object_type type,
                                 uint32_t length, const char *chars)
 {
+  assert(length < UINT32_MAX);
   assert(object_type_is_string(type));
   union object *object = object_allocate_zero(arena, struct object_string,
                                               type);

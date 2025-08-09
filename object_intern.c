@@ -13,6 +13,10 @@ void object_intern_init(struct object_intern *s)
   s->singleton_true = object_new_singleton(&s->arena, OBJECT_TRUE);
   s->singleton_false = object_new_singleton(&s->arena, OBJECT_FALSE);
   s->singleton_ellipsis = object_new_singleton(&s->arena, OBJECT_ELLIPSIS);
+
+  union object *empty_tuple = object_new_tuple_begin(&s->arena, 0);
+  object_new_tuple_end(empty_tuple);
+  s->empty_tuple = empty_tuple;
 }
 
 void object_intern_free(struct object_intern *s)
@@ -36,6 +40,11 @@ union object *object_intern_singleton(struct object_intern *s,
   default:
     abort();
   }
+}
+
+union object *object_intern_empty_tuple(struct object_intern *s)
+{
+  return s->empty_tuple;
 }
 
 union object *object_intern_string(struct object_intern *s, enum object_type type,

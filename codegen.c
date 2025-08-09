@@ -186,6 +186,15 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   unsigned code_length = arena_grow_current_size(arena);
   char* code_bytes = arena_grow_finish(arena);
 
+  union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
+                                            code_length, code_bytes);
+  union object *freevars = object_intern_empty_tuple(&s->objects);
+  union object *cellvars = object_intern_empty_tuple(&s->objects);
+  union object *filename = object_intern_cstring(&s->objects, s->filename);
+  union object *name_string = object_intern_cstring(&s->objects, name);
+  union object *lnotab = object_intern_string(&s->objects, OBJECT_BYTES, 0,
+                                              NULL);
+
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
   object->code.posonlyargcount = 0;
@@ -193,17 +202,15 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.nlocals = s->code.varnames->list.length;
   object->code.stacksize = s->code.max_stacksize;
   object->code.flags = s->code.flags;
-  object->code.code = object_new_string(arena, OBJECT_BYTES,
-                                        code_length, code_bytes);
+  object->code.code = code;
   object->code.consts = s->code.consts;
   object->code.names = s->code.names;
   object->code.varnames = s->code.varnames;
-  object->code.freevars = object_new_tuple(arena, 0);
-  object->code.cellvars = object_new_tuple(arena, 0);
-  object->code.filename = object_intern_cstring(&s->objects, "simple.py");
-  object->code.name = object_intern_cstring(&s->objects, name);
-  object->code.lnotab = object_intern_string(&s->objects, OBJECT_BYTES,
-                                             0, NULL);
+  object->code.freevars = freevars;
+  object->code.cellvars = cellvars;
+  object->code.filename = filename;
+  object->code.name = name_string;
+  object->code.lnotab = lnotab;
 
   arena_free_all(&s->code.opcodes);
   return object;
@@ -223,12 +230,14 @@ union object *cg_pop_code(struct cg_state *s, const char *name)
   return object;
 }
 
-void cg_init(struct cg_state *s, struct symbol_table *symbol_table)
+void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
+             const char *filename)
 {
   memset(s, 0, sizeof(*s));
   object_intern_init(&s->objects);
   s->symbol_table = symbol_table;
   s->next_scope_id = 1;
+  s->filename = filename;
 }
 
 void cg_free(struct cg_state *s)

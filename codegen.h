@@ -25,6 +25,7 @@ struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol);
 struct symbol_info *cg_new_symbol_info(struct cg_state *s,
                                        struct symbol* symbol);
 
+void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
 
 void cg_op(struct cg_state *s, uint8_t opcoode, uint32_t arg);

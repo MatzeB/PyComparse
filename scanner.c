@@ -917,6 +917,19 @@ single_char_token:
       next_char(s);
       return;
 
+    case '\\':
+      next_char(s);
+      if (s->c == '\r') {
+        next_char(s);
+      }
+      if (s->c == '\n') {
+        next_char(s);
+        continue;
+      }
+      s->line++;
+      /* report error? */
+      abort();
+
     case C_EOF:
       scan_eof(s);
       return;

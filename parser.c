@@ -202,7 +202,7 @@ static void expect(struct parser_state *s, uint16_t expected_token_kind)
 }
 
 static union ast_expression *ast_allocate_expression_(struct parser_state *s,
-                                                      size_t size, uint8_t type)
+    size_t size, enum ast_expression_type type)
 {
   union ast_expression *expression =
     (union ast_expression*)arena_allocate(&s->ast, size, alignof(union ast_expression));
@@ -291,85 +291,98 @@ static union ast_expression *parse_call(struct parser_state *s,
 
 static inline union ast_expression *parse_unexpr(struct parser_state *s,
                                                  enum precedence prec_op,
-                                                 uint8_t ast_node_type)
+                                                 enum ast_expression_type type)
 {
   next_token(s);
   union ast_expression *op = parse_subexpression(s, prec_op);
 
   union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_unexpr, ast_node_type);
+      ast_allocate_expression(s, struct ast_unexpr, type);
   expression->unexpr.op = op;
+  return expression;
+}
+
+static union ast_expression *
+parse_expression_list_helper(struct parser_state *s,
+    enum ast_expression_type type, union ast_expression *first)
+{
+  union ast_expression *inline_storage[16];
+  union ast_expression **expressions = inline_storage;
+  expressions[0] = first;
+  unsigned capacity = 16;
+  unsigned num_expressions = 1;
+
+  for (;;) {
+    if (!accept(s, ','))
+      break;
+    switch (peek(s)) {
+    case EXPRESSION_START_CASES: {
+      union ast_expression *expression = parse_subexpression(s, PREC_LIST + 1);
+      if (num_expressions + 1 >= capacity) {
+        unsigned new_capacity = capacity * 2;
+        union ast_expression **new_expressions =
+            malloc(new_capacity * sizeof(expressions[0]));
+        memcpy(new_expressions, expressions, capacity * sizeof(expressions[0]));
+        if (expressions != inline_storage) free(expressions);
+        expressions = new_expressions;
+        capacity = new_capacity;
+      }
+      expressions[num_expressions++] = expression;
+      continue;
+    }
+    default:
+      break;
+    }
+    break;
+  }
+
+  size_t expressions_size = num_expressions * sizeof(expressions[0]);
+  union ast_expression *expression = ast_allocate_expression_(s,
+      sizeof(struct ast_expression_list) + expressions_size, type);
+  expression->expression_list.num_expressions = num_expressions;
+  memcpy(expression->expression_list.expressions, expressions,
+         expressions_size);
   return expression;
 }
 
 static union ast_expression *parse_l_bracket(struct parser_state *s)
 {
   eat(s, '[');
-  union ast_expression *list =
-      ast_allocate_expression(s, struct ast_tuple_list_form, AST_LIST_FORM);
-  struct argument *last = NULL;
+
+  if (accept(s, ']')) {
+    union ast_expression *expression
+        = ast_allocate_expression(s, struct ast_expression_list,
+                                  AST_LIST_FORM);
+    expression->expression_list.num_expressions = 0;
+    return expression;
+  }
 
   add_anchor(s, ']');
   add_anchor(s, ',');
 
-  for (;;) {
-    if (peek(s) == ']')
-      break;
-    struct argument *argument = parse_argument(s);
-    if (last == NULL) {
-      list->tuple_list_form.arguments = argument;
-    } else {
-      last->next = argument;
-    }
-    last = argument;
-    if (!accept(s, ','))
-      break;
-  }
+  union ast_expression *first = parse_subexpression(s, PREC_LIST + 1);
+  union ast_expression *expression =
+      parse_expression_list_helper(s, AST_LIST_FORM, first);
 
   remove_anchor(s, ',');
   remove_anchor(s, ']');
   expect(s, ']');
-  return list;
+  return expression;
 }
 
 static union ast_expression *parse_l_paren(struct parser_state *s)
 {
   eat(s, '(');
   if (accept(s, ')')) {
-    union ast_expression *tuple =
-        ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
-    tuple->tuple_list_form.arguments = NULL;
-    tuple->tuple_list_form.as_constant = object_intern_empty_tuple(&s->cg.objects);
-    return tuple;
+    union ast_expression *object =
+        ast_allocate_expression(s, struct ast_expression_list, AST_EXPRESSION_LIST);
+    object->expression_list.num_expressions = 0;
+    return object;
   }
 
   add_anchor(s, ')');
   add_anchor(s, ',');
   union ast_expression *expression = parse_subexpression(s, PREC_LIST);
-  if (accept(s, ',')) {
-    struct argument *argument = arena_allocate_type(&s->ast, struct argument);
-    argument->expression = expression;
-    struct argument *last = argument;
-    struct argument *first = last;
-
-    for (;;) {
-      if (peek(s) == ')')
-        break;
-      argument = parse_argument(s);
-      last->next = argument;
-      last = argument;
-      if (accept(s, ','))
-        continue;
-      break;
-    }
-
-    union ast_expression *tuple =
-      ast_allocate_expression(s, struct ast_tuple_list_form, AST_TUPLE_FORM);
-    tuple->tuple_list_form.arguments = first;
-    tuple->tuple_list_form.as_constant =
-        ast_tuple_compute_constant(&s->cg.objects, &tuple->tuple_list_form);
-    expression = tuple;
-  }
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
@@ -481,14 +494,14 @@ static const struct prefix_expression_parser prefix_parsers[] = {
 
 static inline union ast_expression *parse_binexpr(struct parser_state *s,
                                                   enum precedence prec_right,
-                                                  uint8_t ast_node_type,
+                                                  enum ast_expression_type type,
                                                   union ast_expression *left)
 {
   next_token(s);
   union ast_expression *right = parse_subexpression(s, prec_right);
 
   union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
+      ast_allocate_expression(s, struct ast_binexpr, type);
   expression->binexpr.left = left;
   expression->binexpr.right = right;
   return expression;
@@ -551,6 +564,15 @@ static union ast_expression *parse_subscript(struct parser_state *s,
       ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_SUBSCRIPT);
   expression->binexpr.left = left;
   expression->binexpr.right = right;
+  return expression;
+}
+
+static union ast_expression *parse_expr_list(struct parser_state *s,
+                                             union ast_expression *left)
+{
+  union ast_expression *expression =
+      parse_expression_list_helper(s, AST_EXPRESSION_LIST, left);
+  ast_tuple_compute_constant(&s->cg.objects, &expression->expression_list);
   return expression;
 }
 
@@ -706,6 +728,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['(']    = { .func = parse_call,       .precedence = PREC_PRIMARY    },
   ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
   ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
+  [',']    = { .func = parse_expr_list,  .precedence = PREC_LIST       },
   ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
   ['.']    = { .func = parse_attr,       .precedence = PREC_PRIMARY    },
   ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },

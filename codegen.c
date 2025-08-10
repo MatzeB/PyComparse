@@ -265,9 +265,9 @@ void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
   arena_grow_u8(&s->code.opcodes, (uint8_t)arg);
 }
 
-static void cg_push(struct cg_state *s)
+void cg_push(struct cg_state *s, unsigned n)
 {
-  s->code.stacksize++;
+  s->code.stacksize += n;
   if (s->code.stacksize > s->code.max_stacksize)
     s->code.max_stacksize = s->code.stacksize;
 }
@@ -281,7 +281,7 @@ void cg_pop(struct cg_state *s, unsigned n)
 void cg_push_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
 {
   cg_op(s, opcode, arg);
-  cg_push(s);
+  cg_push(s, 1);
 }
 
 void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg)

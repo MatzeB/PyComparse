@@ -1,0 +1,15 @@
+print("")
+print('')
+print("hello")
+print('world')
+print("'")
+print('"')
+print(repr("\\\'\"\a\b\f\n\r\t\v"))
+print(repr("\0xx"))
+print("inter\
+rupted")
+print(repr('''\
+multi
+line
+      string
+ '''))

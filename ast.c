@@ -12,8 +12,8 @@ union object *ast_expression_as_constant(union ast_expression *expression)
   switch (expression->type) {
   case AST_CONST:
     return expression->cnst.object;
-  case AST_TUPLE_FORM:
-    return expression->tuple_list_form.as_constant;
+  case AST_EXPRESSION_LIST:
+    return expression->expression_list.as_constant;
   case AST_ATTR:
   case AST_BINEXPR_ADD:
   case AST_BINEXPR_AND:
@@ -50,28 +50,23 @@ union object *ast_expression_as_constant(union ast_expression *expression)
 }
 
 union object *ast_tuple_compute_constant(struct object_intern *intern,
-                                         struct ast_tuple_list_form *tuple)
+                                         struct ast_expression_list *tuple)
 {
   /* Check that all arguments are constant or give up. */
-  unsigned length = 0;
-  for (struct argument *argument = tuple->arguments; argument != NULL;
-       argument = argument->next) {
-    union ast_expression *expression = argument->expression;
+  unsigned num_expressions = tuple->num_expressions;
+  for (unsigned i = 0; i < num_expressions; i++) {
+    union ast_expression *expression = tuple->expressions[i];
     if (ast_expression_as_constant(expression) == NULL) {
       return NULL;
     }
-    length++;
   }
 
   struct arena *arena = object_intern_arena(intern);
-  union object *constant = object_new_tuple_begin(arena, length);
-  uint32_t index = 0;
-  for (struct argument *argument = tuple->arguments; argument != NULL;
-       argument = argument->next) {
-    union ast_expression *expression = argument->expression;
+  union object *constant = object_new_tuple_begin(arena, num_expressions);
+  for (unsigned i = 0; i < num_expressions; i++) {
+    union ast_expression *expression = tuple->expressions[i];
     union object *expression_constant = ast_expression_as_constant(expression);
-    object_new_tuple_set_at(constant, index, expression_constant);
-    index++;
+    object_new_tuple_set_at(constant, i, expression_constant);
   }
   object_new_tuple_end(constant);
   /* TODO: intern? */

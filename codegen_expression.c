@@ -121,6 +121,16 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     cg_pop(s, 3);
     return;
   }
+  case AST_EXPRESSION_LIST: {
+    struct ast_expression_list *list = &target->expression_list;
+    unsigned num_expressions = list->num_expressions;
+    cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
+    cg_push(s, num_expressions);
+    for (unsigned i = 0; i < num_expressions; i++) {
+      emit_assignment(s, list->expressions[i]);
+    }
+    return;
+  }
   default:
     break;
   }
@@ -129,35 +139,31 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
 }
 
 static void emit_list_form(struct cg_state *s,
-                           struct ast_tuple_list_form *list_form)
+                           struct ast_expression_list *list)
 {
-  unsigned num_elements = 0;
-  for (struct argument *argument = list_form->arguments;
-       argument != NULL; argument = argument->next) {
-    emit_expression(s, argument->expression);
-    num_elements++;
+  unsigned num_expressions = list->num_expressions;
+  for (unsigned i = 0; i < num_expressions; i++) {
+    emit_expression(s, list->expressions[i]);
   }
-  cg_pop(s, num_elements);
-  cg_push_op(s, OPCODE_BUILD_LIST, num_elements);
+  cg_pop(s, num_expressions);
+  cg_push_op(s, OPCODE_BUILD_LIST, num_expressions);
 }
 
-static void emit_tuple_form(struct cg_state *s,
-                            struct ast_tuple_list_form *tuple_form)
+static void emit_tuple(struct cg_state *s,
+                       struct ast_expression_list *tuple)
 {
-  union object *object = tuple_form->as_constant;
+  union object *object = tuple->as_constant;
   if (object != NULL) {
     cg_load_const(s, object);
     return;
   }
 
-  unsigned num_arguments = 0;
-  for (struct argument *argument = tuple_form->arguments;
-       argument != NULL; argument = argument->next) {
-    emit_expression(s, argument->expression);
-    num_arguments++;
+  unsigned num_expressions = tuple->num_expressions;;
+  for (unsigned i = 0; i < num_expressions; i++) {
+    emit_expression(s, tuple->expressions[i]);
   }
-  cg_pop(s, num_arguments);
-  cg_push_op(s, OPCODE_BUILD_TUPLE, num_arguments);
+  cg_pop(s, num_expressions);
+  cg_push_op(s, OPCODE_BUILD_TUPLE, num_expressions);
 }
 
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)
@@ -289,6 +295,10 @@ static void emit_expression_impl(struct cg_state *s,
   case AST_CONST:
     cg_load_const(s, expression->cnst.object);
     break;
+  case AST_EXPRESSION_LIST: {
+    emit_tuple(s, &expression->expression_list);
+    break;
+  }
   case AST_GENERATOR_EXPRESSION:
     emit_generator_expression(s, &expression->generator_expression);
     break;
@@ -297,11 +307,7 @@ static void emit_expression_impl(struct cg_state *s,
     emit_load(s, expression->identifier.symbol);
     break;
   case AST_LIST_FORM: {
-    emit_list_form(s, &expression->tuple_list_form);
-    break;
-  }
-  case AST_TUPLE_FORM: {
-    emit_tuple_form(s, &expression->tuple_list_form);
+    emit_list_form(s, &expression->expression_list);
     break;
   }
   case AST_UNEXPR_PLUS:

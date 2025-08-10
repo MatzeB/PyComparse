@@ -43,10 +43,11 @@ struct ast_unexpr {
   union ast_expression *op;
 };
 
-struct ast_tuple_list_form {
-  struct ast_node_base base;
-  struct argument     *arguments;
-  union object        *as_constant;
+struct ast_expression_list {
+  struct ast_node_base  base;
+  union object         *as_constant;
+  unsigned              num_expressions;
+  union ast_expression *expressions[];
 };
 
 enum generator_expression_part_type {
@@ -77,7 +78,7 @@ union ast_expression {
   struct ast_const                cnst;
   struct ast_generator_expression generator_expression;
   struct ast_identifier           identifier;
-  struct ast_tuple_list_form      tuple_list_form;
+  struct ast_expression_list      expression_list;
   struct ast_unexpr               unexpr;
 };
 

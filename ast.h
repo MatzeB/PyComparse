@@ -1,11 +1,11 @@
 #pragma once
 
+struct ast_expression_list;
+struct object_intern;
 union ast_expression;
 union object;
-struct ast_tuple_list_form;
-struct object_intern;
 
-enum ast_node_type {
+enum ast_expression_type {
   AST_ATTR,
   AST_BINEXPR_ADD,
   AST_BINEXPR_AND,
@@ -33,10 +33,10 @@ enum ast_node_type {
   AST_BINEXPR_XOR,
   AST_CALL,
   AST_CONST,
+  AST_EXPRESSION_LIST,
   AST_GENERATOR_EXPRESSION,
   AST_IDENTIFIER,
   AST_LIST_FORM,
-  AST_TUPLE_FORM,
   AST_UNEXPR_INVERT,
   AST_UNEXPR_NEGATIVE,
   AST_UNEXPR_NOT,
@@ -46,4 +46,4 @@ enum ast_node_type {
 union object *ast_expression_as_constant(union ast_expression *expression);
 
 union object *ast_tuple_compute_constant(struct object_intern *intern,
-                                         struct ast_tuple_list_form *tuple);
+                                         struct ast_expression_list *tuple);

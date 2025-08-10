@@ -121,7 +121,8 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     cg_pop(s, 3);
     return;
   }
-  case AST_EXPRESSION_LIST: {
+  case AST_EXPRESSION_LIST:
+  case AST_LIST_DISPLAY: {
     struct ast_expression_list *list = &target->expression_list;
     unsigned num_expressions = list->num_expressions;
     cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
@@ -138,8 +139,21 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   unimplemented();
 }
 
-static void emit_list_form(struct cg_state *s,
-                           struct ast_expression_list *list)
+static void emit_dictionary_display(struct cg_state *s,
+                                    struct ast_dict_item_list *list)
+{
+  unsigned num_items = list->num_items;
+  for (unsigned i = 0; i < num_items; i++) {
+    struct dict_item *item = &list->items[i];
+    emit_expression(s, item->key);
+    emit_expression(s, item->value);
+  }
+  cg_pop(s, num_items * 2);
+  cg_push_op(s, OPCODE_BUILD_MAP, num_items);
+}
+
+static void emit_list_display(struct cg_state *s,
+                              struct ast_expression_list *list)
 {
   unsigned num_expressions = list->num_expressions;
   for (unsigned i = 0; i < num_expressions; i++) {
@@ -147,6 +161,17 @@ static void emit_list_form(struct cg_state *s,
   }
   cg_pop(s, num_expressions);
   cg_push_op(s, OPCODE_BUILD_LIST, num_expressions);
+}
+
+static void emit_set_display(struct cg_state *s,
+                             struct ast_expression_list *list)
+{
+  unsigned num_expressions = list->num_expressions;
+  for (unsigned i = 0; i < num_expressions; i++) {
+    emit_expression(s, list->expressions[i]);
+  }
+  cg_pop(s, num_expressions);
+  cg_push_op(s, OPCODE_BUILD_SET, num_expressions);
 }
 
 static void emit_tuple(struct cg_state *s,
@@ -210,7 +235,7 @@ static void emit_generator_expression(struct cg_state *s,
 static void emit_expression_impl(struct cg_state *s,
                                  union ast_expression *expression, bool drop)
 {
-  switch (expression->type) {
+  switch ((enum ast_expression_type)expression->type) {
   case AST_ATTR:
     emit_attr(s, &expression->attr);
     break;
@@ -288,28 +313,30 @@ static void emit_expression_impl(struct cg_state *s,
   case AST_BINEXPR_XOR:
     emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_XOR);
     break;
-  case AST_CALL: {
+  case AST_CALL:
     emit_call(s, &expression->call);
     break;
-  }
   case AST_CONST:
     cg_load_const(s, expression->cnst.object);
     break;
-  case AST_EXPRESSION_LIST: {
+  case AST_DICT_DISPLAY:
+    emit_dictionary_display(s, &expression->dict_item_list);
+    break;
+  case AST_EXPRESSION_LIST:
     emit_tuple(s, &expression->expression_list);
     break;
-  }
   case AST_GENERATOR_EXPRESSION:
     emit_generator_expression(s, &expression->generator_expression);
     break;
   case AST_IDENTIFIER:
-    assert(!drop);
     emit_load(s, expression->identifier.symbol);
     break;
-  case AST_LIST_FORM: {
-    emit_list_form(s, &expression->expression_list);
+  case AST_LIST_DISPLAY:
+    emit_list_display(s, &expression->expression_list);
     break;
-  }
+  case AST_SET_DISPLAY:
+    emit_set_display(s, &expression->expression_list);
+    break;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);
     break;

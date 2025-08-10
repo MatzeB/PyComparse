@@ -25,6 +25,8 @@
   '(': \
   case '+': \
   case '-': \
+  case '[': \
+  case '{': \
   case '~': \
   case T_not: \
   case T_IDENTIFIER:  \
@@ -60,7 +62,8 @@ enum precedence {
 
 static void parse_error_expected(struct parser_state *s, const char *what)
 {
-  fprintf(stderr, "error: expected %s, got ", what);
+  fprintf(stderr, "%s:%u error: expected %s, got ",
+          s->cg.filename, s->scanner.line, what);
   print_token(stderr, &s->scanner.token);
   fputc('\n', stderr);
   s->error = true;
@@ -309,7 +312,7 @@ parse_expression_list_helper(struct parser_state *s,
   union ast_expression *inline_storage[16];
   union ast_expression **expressions = inline_storage;
   expressions[0] = first;
-  unsigned capacity = 16;
+  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
   unsigned num_expressions = 1;
 
   for (;;) {
@@ -322,7 +325,8 @@ parse_expression_list_helper(struct parser_state *s,
         unsigned new_capacity = capacity * 2;
         union ast_expression **new_expressions =
             malloc(new_capacity * sizeof(expressions[0]));
-        memcpy(new_expressions, expressions, capacity * sizeof(expressions[0]));
+        if (new_expressions == NULL) abort();
+        memcpy(new_expressions, expressions, num_expressions * sizeof(expressions[0]));
         if (expressions != inline_storage) free(expressions);
         expressions = new_expressions;
         capacity = new_capacity;
@@ -352,7 +356,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   if (accept(s, ']')) {
     union ast_expression *expression
         = ast_allocate_expression(s, struct ast_expression_list,
-                                  AST_LIST_FORM);
+                                  AST_LIST_DISPLAY);
     expression->expression_list.num_expressions = 0;
     return expression;
   }
@@ -362,7 +366,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
 
   union ast_expression *first = parse_subexpression(s, PREC_LIST + 1);
   union ast_expression *expression =
-      parse_expression_list_helper(s, AST_LIST_FORM, first);
+      parse_expression_list_helper(s, AST_LIST_DISPLAY, first);
 
   remove_anchor(s, ',');
   remove_anchor(s, ']');
@@ -370,14 +374,80 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   return expression;
 }
 
+static union ast_expression *parse_l_curly(struct parser_state *s)
+{
+  eat(s, '{');
+  if (accept(s, '}')) {
+    union ast_expression *expression =
+        ast_allocate_expression(s, struct ast_dict_item_list, AST_DICT_DISPLAY);
+    expression->dict_item_list.num_items = 0;
+    return expression;
+  }
+
+  add_anchor(s, '}');
+  add_anchor(s, ',');
+
+  union ast_expression *first = parse_subexpression(s, PREC_LIST + 1);
+  /* set display */
+  if (peek(s) == ',' || peek(s) == '}') {
+    union ast_expression *expression
+        = parse_expression_list_helper(s, AST_SET_DISPLAY, first);
+
+    remove_anchor(s, ',');
+    remove_anchor(s, '}');
+    expect(s, '}');
+    return expression;
+  }
+
+  struct dict_item  inline_storage[16];
+  struct dict_item *items = inline_storage;
+  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
+  unsigned num_items = 0;
+
+  union ast_expression *key = first;
+  for (;;) {
+    expect(s, ':');
+    union ast_expression *value = parse_subexpression(s, PREC_LIST + 1);
+    if (num_items + 1 >= capacity) {
+      unsigned new_capacity = capacity * 2;
+      struct dict_item *new_items = malloc(new_capacity * sizeof(items[0]));
+      if (new_items == NULL) abort();
+      memcpy(new_items, items, num_items * sizeof(items[0]));
+      if (items != inline_storage) free(items);
+      items = new_items;
+      capacity = new_capacity;
+    }
+    struct dict_item *item = &items[num_items++];
+    item->key = key;
+    item->value = value;
+
+    if (peek(s) == '}' || peek(s) == T_EOF)
+      break;
+    key = parse_subexpression(s, PREC_LIST + 1);
+  }
+
+  remove_anchor(s, ',');
+  remove_anchor(s, '}');
+  eat(s, '}');
+
+  size_t items_size = num_items * sizeof(items[0]);
+  union ast_expression *expression = ast_allocate_expression_(s,
+      sizeof(struct ast_dict_item_list) + items_size, AST_DICT_DISPLAY);
+  expression->dict_item_list.num_items = num_items;
+  memcpy(expression->dict_item_list.items, items, items_size);
+  return expression;
+}
+
 static union ast_expression *parse_l_paren(struct parser_state *s)
 {
   eat(s, '(');
   if (accept(s, ')')) {
-    union ast_expression *object =
+    union ast_expression *expression =
         ast_allocate_expression(s, struct ast_expression_list, AST_EXPRESSION_LIST);
-    object->expression_list.num_expressions = 0;
-    return object;
+    expression->expression_list.num_expressions = 0;
+    expression->expression_list.as_constant =
+        ast_tuple_compute_constant(&s->cg.objects, &expression->expression_list);
+    return expression;
   }
 
   add_anchor(s, ')');
@@ -481,6 +551,7 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
   ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
   ['[']           = { .func = parse_l_bracket,  .precedence = PREC_ATOM },
+  ['{']           = { .func = parse_l_curly,    .precedence = PREC_ATOM },
   ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
   [T_not]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
   [T_IDENTIFIER]  = { .func = parse_identifier, .precedence = PREC_ATOM },
@@ -572,7 +643,8 @@ static union ast_expression *parse_expr_list(struct parser_state *s,
 {
   union ast_expression *expression =
       parse_expression_list_helper(s, AST_EXPRESSION_LIST, left);
-  ast_tuple_compute_constant(&s->cg.objects, &expression->expression_list);
+  expression->expression_list.as_constant =
+      ast_tuple_compute_constant(&s->cg.objects, &expression->expression_list);
   return expression;
 }
 

@@ -50,6 +50,17 @@ struct ast_expression_list {
   union ast_expression *expressions[];
 };
 
+struct dict_item {
+  union ast_expression *key;
+  union ast_expression *value;
+};
+
+struct ast_dict_item_list {
+  struct ast_node_base base;
+  unsigned             num_items;
+  struct dict_item     items[];
+};
+
 enum generator_expression_part_type {
   GENERATOR_EXPRESSION_PART_FOR,
   GENERATOR_EXPRESSION_PART_IF,
@@ -79,6 +90,7 @@ union ast_expression {
   struct ast_generator_expression generator_expression;
   struct ast_identifier           identifier;
   struct ast_expression_list      expression_list;
+  struct ast_dict_item_list       dict_item_list;
   struct ast_unexpr               unexpr;
 };
 

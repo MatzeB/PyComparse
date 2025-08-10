@@ -1,3 +1,4 @@
+/* clang-format off */
 TCHAR('%', T_PERCENT,      "%")
 TCHAR('&', T_AMPERSAND,    "&")
 TCHAR('(', T_LPAREN,       "(")
@@ -97,3 +98,4 @@ TID(with,     T_with)
 TID(yield,    T_yield)
 
 TDES(NUM_TOKENS, NULL)
+/* clang-format on */

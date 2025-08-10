@@ -9,14 +9,14 @@
 #include "ast.h"
 #include "ast_types.h"
 #include "codegen.h"
-#include "codegen_types.h"
 #include "codegen_statement.h"
+#include "codegen_types.h"
 #include "object.h"
 #include "object_types.h"
 #include "opcodes.h"
+#include "symbol_info_types.h"
 #include "symbol_table.h"
 #include "symbol_types.h"
-#include "symbol_info_types.h"
 #include "util.h"
 
 static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr,
@@ -124,7 +124,7 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   case AST_EXPRESSION_LIST:
   case AST_LIST_DISPLAY: {
     struct ast_expression_list *list = &target->expression_list;
-    unsigned num_expressions = list->num_expressions;
+    unsigned                    num_expressions = list->num_expressions;
     cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
     cg_push(s, num_expressions);
     for (unsigned i = 0; i < num_expressions; i++) {
@@ -139,7 +139,7 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   unimplemented();
 }
 
-static void emit_dictionary_display(struct cg_state *s,
+static void emit_dictionary_display(struct cg_state           *s,
                                     struct ast_dict_item_list *list)
 {
   unsigned num_items = list->num_items;
@@ -152,7 +152,7 @@ static void emit_dictionary_display(struct cg_state *s,
   cg_push_op(s, OPCODE_BUILD_MAP, num_items);
 }
 
-static void emit_list_display(struct cg_state *s,
+static void emit_list_display(struct cg_state            *s,
                               struct ast_expression_list *list)
 {
   unsigned num_expressions = list->num_expressions;
@@ -163,7 +163,7 @@ static void emit_list_display(struct cg_state *s,
   cg_push_op(s, OPCODE_BUILD_LIST, num_expressions);
 }
 
-static void emit_set_display(struct cg_state *s,
+static void emit_set_display(struct cg_state            *s,
                              struct ast_expression_list *list)
 {
   unsigned num_expressions = list->num_expressions;
@@ -174,8 +174,7 @@ static void emit_set_display(struct cg_state *s,
   cg_push_op(s, OPCODE_BUILD_SET, num_expressions);
 }
 
-static void emit_tuple(struct cg_state *s,
-                       struct ast_expression_list *tuple)
+static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 {
   union object *object = tuple->as_constant;
   if (object != NULL) {
@@ -183,7 +182,7 @@ static void emit_tuple(struct cg_state *s,
     return;
   }
 
-  unsigned num_expressions = tuple->num_expressions;;
+  unsigned num_expressions = tuple->num_expressions;
   for (unsigned i = 0; i < num_expressions; i++) {
     emit_expression(s, tuple->expressions[i]);
   }
@@ -211,8 +210,8 @@ static void emit_call(struct cg_state *s, struct ast_call *call)
   cg_pop(s, n_arguments);
 }
 
-static void emit_generator_expression(struct cg_state *s,
-    struct ast_generator_expression *generator_expression)
+static void emit_generator_expression(
+    struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
   cg_push_code(s);
   cg_code_begin(s, /*use_locals=*/true);
@@ -220,7 +219,7 @@ static void emit_generator_expression(struct cg_state *s,
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, "<genexpr>");
-  unsigned code_index = cg_register_object(s, code);
+  unsigned      code_index = cg_register_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
   cg_load_const(s, object_intern_cstring(&s->objects, "<genexpr>"));
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
@@ -232,7 +231,7 @@ static void emit_generator_expression(struct cg_state *s,
   cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
 }
 
-static void emit_expression_impl(struct cg_state *s,
+static void emit_expression_impl(struct cg_state      *s,
                                  union ast_expression *expression, bool drop)
 {
   switch ((enum ast_expression_type)expression->type) {
@@ -360,7 +359,7 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   emit_expression_impl(s, expression, false);
 }
 
-void emit_expression_drop_result(struct cg_state *s,
+void emit_expression_drop_result(struct cg_state      *s,
                                  union ast_expression *expression)
 {
   emit_expression_impl(s, expression, true);

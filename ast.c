@@ -49,7 +49,7 @@ union object *ast_expression_as_constant(union ast_expression *expression)
   abort();
 }
 
-union object *ast_tuple_compute_constant(struct object_intern *intern,
+union object *ast_tuple_compute_constant(struct object_intern       *intern,
                                          struct ast_expression_list *tuple)
 {
   /* Check that all arguments are constant or give up. */

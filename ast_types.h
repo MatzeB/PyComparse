@@ -74,7 +74,7 @@ struct generator_expression_part {
 };
 
 struct ast_generator_expression {
-  struct ast_node_base             base;
+  struct ast_node_base              base;
   union ast_expression             *expression;
   struct generator_expression_part *parts;
 };

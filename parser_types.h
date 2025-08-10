@@ -9,8 +9,8 @@
 
 struct parser_state {
   struct scanner_state scanner;
-  struct arena ast;
-  struct cg_state cg;
-  bool error;
-  unsigned short anchor_set[NUM_TOKENS];
+  struct arena         ast;
+  struct cg_state      cg;
+  bool                 error;
+  unsigned short       anchor_set[NUM_TOKENS];
 };

@@ -4,7 +4,7 @@
 #include "object_intern.h"
 
 struct object_intern {
-  struct arena arena;
+  struct arena  arena;
   union object *objects;
   union object *singleton_none;
   union object *singleton_true;

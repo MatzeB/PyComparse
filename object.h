@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 struct arena;
 
@@ -22,25 +22,24 @@ struct arena;
 #define CO_FUTURE_PRINT_FUNCTION   0x0100000
 #define CO_FUTURE_UNICODE_LITERALS 0x0200000
 
-#define CO_FUTURE_BARRY_AS_BDFL    0x0400000
-#define CO_FUTURE_GENERATOR_STOP   0x0800000
-#define CO_FUTURE_ANNOTATIONS      0x1000000
-
+#define CO_FUTURE_BARRY_AS_BDFL  0x0400000
+#define CO_FUTURE_GENERATOR_STOP 0x0800000
+#define CO_FUTURE_ANNOTATIONS    0x1000000
 
 enum object_type {
-  OBJECT_NULL     = '0',
-  OBJECT_NONE     = 'N',
-  OBJECT_TRUE     = 'T',
-  OBJECT_FALSE    = 'F',
-  OBJECT_STRING   = 's',
-  OBJECT_UNICODE  = 'u',
-  OBJECT_CODE     = 'c',
-  OBJECT_TUPLE    = '(',
-  OBJECT_LIST     = '[',
+  OBJECT_NULL = '0',
+  OBJECT_NONE = 'N',
+  OBJECT_TRUE = 'T',
+  OBJECT_FALSE = 'F',
+  OBJECT_STRING = 's',
+  OBJECT_UNICODE = 'u',
+  OBJECT_CODE = 'c',
+  OBJECT_TUPLE = '(',
+  OBJECT_LIST = '[',
   OBJECT_ELLIPSIS = '.',
 
-  OBJECT_ASCII   = 'a',
-  OBJECT_INT     = 'i',
+  OBJECT_ASCII = 'a',
+  OBJECT_INT = 'i',
 
   OBJECT_SHORT_ASCII = 'z',
   OBJECT_SMALL_TUPLE = ')',
@@ -60,9 +59,9 @@ union object *object_new_string(struct arena *arena, enum object_type type,
 union object *object_new_int(struct arena *arena, int32_t value);
 
 union object *object_new_tuple_begin(struct arena *arena, uint32_t length);
-void object_new_tuple_set_at(union object *tuple, uint32_t index,
-                             union object *object);
-void object_new_tuple_end(union object *tuple);
+void          object_new_tuple_set_at(union object *tuple, uint32_t index,
+                                      union object *object);
+void          object_new_tuple_end(union object *tuple);
 
 enum object_type object_type(union object *object);
 bool objects_equal(const union object *object0, const union object *object1);
@@ -72,6 +71,6 @@ bool object_string_equals(union object *object, uint32_t length,
 
 int64_t object_int_value(union object *object);
 
-void object_list_append(union object *list, union object *object);
+void          object_list_append(union object *list, union object *object);
 union object *object_list_at(union object *list, uint32_t index);
-uint32_t object_list_length(union object *list);
+uint32_t      object_list_length(union object *list);

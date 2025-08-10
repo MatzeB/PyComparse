@@ -1,17 +1,17 @@
 #include "adt/arena.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static void alloc_some(struct arena *arena)
 {
   for (int i = 0, e = rand() % 5000; i < e; ++i) {
     size_t sz = rand() % 33;
-    char *m = arena_allocate(arena, sz, 1);
+    char  *m = arena_allocate(arena, sz, 1);
 
     memset(m, rand(), sz);
 
@@ -22,7 +22,7 @@ static void alloc_some(struct arena *arena)
       }
       arena_grow_char(arena, '\0');
       assert(arena_grow_current_size(arena) == 13);
-      char *str = (char*)arena_grow_finish(arena);
+      char *str = (char *)arena_grow_finish(arena);
       assert(strcmp(str, "Hello World!") == 0);
     }
   }

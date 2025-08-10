@@ -12,112 +12,109 @@
 #include <stdlib.h>
 
 #include "adt/arena.h"
+#include "object_intern.h"
+#include "object_types.h"
 #include "symbol_table.h"
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
-#include "object_intern.h"
-#include "object_types.h"
 
-#define UNLIKELY(x)    __builtin_expect((x), 0)
+#define UNLIKELY(x) __builtin_expect((x), 0)
 
-#define IDENTIFIER_START_CASES_WITHOUT_B_F_R_U \
-  'A': \
-  case 'C': \
-  case 'D': \
-  case 'E': \
-  case 'G': \
-  case 'H': \
-  case 'I': \
-  case 'J': \
-  case 'K': \
-  case 'L': \
-  case 'M': \
-  case 'N': \
-  case 'O': \
-  case 'P': \
-  case 'Q': \
-  case 'S': \
-  case 'T': \
-  case 'V': \
-  case 'W': \
-  case 'X': \
-  case 'Y': \
-  case 'Z': \
-  case '_': \
-  case 'a': \
-  case 'c': \
-  case 'd': \
-  case 'e': \
-  case 'g': \
-  case 'h': \
-  case 'i': \
-  case 'j': \
-  case 'l': \
-  case 'm': \
-  case 'n': \
-  case 'o': \
-  case 'p': \
-  case 'q': \
-  case 's': \
-  case 't': \
-  case 'v': \
-  case 'w': \
-  case 'x': \
-  case 'y': \
+#define IDENTIFIER_START_CASES_WITHOUT_B_F_R_U                                \
+  'A' : case 'C':                                                             \
+  case 'D':                                                                   \
+  case 'E':                                                                   \
+  case 'G':                                                                   \
+  case 'H':                                                                   \
+  case 'I':                                                                   \
+  case 'J':                                                                   \
+  case 'K':                                                                   \
+  case 'L':                                                                   \
+  case 'M':                                                                   \
+  case 'N':                                                                   \
+  case 'O':                                                                   \
+  case 'P':                                                                   \
+  case 'Q':                                                                   \
+  case 'S':                                                                   \
+  case 'T':                                                                   \
+  case 'V':                                                                   \
+  case 'W':                                                                   \
+  case 'X':                                                                   \
+  case 'Y':                                                                   \
+  case 'Z':                                                                   \
+  case '_':                                                                   \
+  case 'a':                                                                   \
+  case 'c':                                                                   \
+  case 'd':                                                                   \
+  case 'e':                                                                   \
+  case 'g':                                                                   \
+  case 'h':                                                                   \
+  case 'i':                                                                   \
+  case 'j':                                                                   \
+  case 'l':                                                                   \
+  case 'm':                                                                   \
+  case 'n':                                                                   \
+  case 'o':                                                                   \
+  case 'p':                                                                   \
+  case 'q':                                                                   \
+  case 's':                                                                   \
+  case 't':                                                                   \
+  case 'v':                                                                   \
+  case 'w':                                                                   \
+  case 'x':                                                                   \
+  case 'y':                                                                   \
   case 'z'
 
-#define DIGIT_CASES \
-  '0': \
-  case '1': \
-  case '2': \
-  case '3': \
-  case '4': \
-  case '5': \
-  case '6': \
-  case '7': \
-  case '8': \
+#define DIGIT_CASES                                                           \
+  '0' : case '1':                                                             \
+  case '2':                                                                   \
+  case '3':                                                                   \
+  case '4':                                                                   \
+  case '5':                                                                   \
+  case '6':                                                                   \
+  case '7':                                                                   \
+  case '8':                                                                   \
   case '9'
 
-#define HEX_DIGIT_CASES \
-  DIGIT_CASES: \
-  case 'a': \
-  case 'b': \
-  case 'c': \
-  case 'd': \
-  case 'e': \
-  case 'f': \
-  case 'A': \
-  case 'B': \
-  case 'C': \
-  case 'D': \
-  case 'E': \
+#define HEX_DIGIT_CASES                                                       \
+  DIGIT_CASES:                                                                \
+  case 'a':                                                                   \
+  case 'b':                                                                   \
+  case 'c':                                                                   \
+  case 'd':                                                                   \
+  case 'e':                                                                   \
+  case 'f':                                                                   \
+  case 'A':                                                                   \
+  case 'B':                                                                   \
+  case 'C':                                                                   \
+  case 'D':                                                                   \
+  case 'E':                                                                   \
   case 'F'
 
-#define IDENTIFIER_CASES \
-  DIGIT_CASES: \
-  case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: \
-  case 'B': \
-  case 'F': \
-  case 'R': \
-  case 'U': \
-  case 'b': \
-  case 'f': \
-  case 'r': \
+#define IDENTIFIER_CASES                                                      \
+  DIGIT_CASES:                                                                \
+  case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U:                                \
+  case 'B':                                                                   \
+  case 'F':                                                                   \
+  case 'R':                                                                   \
+  case 'U':                                                                   \
+  case 'b':                                                                   \
+  case 'f':                                                                   \
+  case 'r':                                                                   \
   case 'u'
 
-static const unsigned TABSIZE   = 8;
-static const int      C_EOF     = -1;
+static const unsigned TABSIZE = 8;
+static const int      C_EOF = -1;
 
 // TODO: Measure if the faster string operations on aligned addresses make up
 // for less dense packing...
-static const unsigned string_alignment = alignof(void*);
+static const unsigned string_alignment = alignof(void *);
 
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
-  size_t read_size = fread(s->read_buffer, 1, s->read_buffer_size,
-                           s->input);
+  size_t read_size = fread(s->read_buffer, 1, s->read_buffer_size, s->input);
   if (read_size < s->read_buffer_size) {
     if (ferror(s->input)) {
       fprintf(stderr, "Error: Read Error! TODO: report error\n");
@@ -127,7 +124,7 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
       return C_EOF;
     }
   }
-  s->p          = s->read_buffer + 1;
+  s->p = s->read_buffer + 1;
   s->buffer_end = s->read_buffer + read_size;
   return *s->read_buffer;
 }
@@ -152,8 +149,10 @@ static void eat_line_comment(struct scanner_state *s)
     case '\r':
       next_char(s);
       if (s->c == '\n') {
+        /* clang-format off */
         /* fallthrough */
     case '\n':
+        /* clang-format on */
         next_char(s);
       }
       ++s->line;
@@ -185,17 +184,18 @@ static void scan_identifier(struct scanner_state *s, char first_char)
   }
 
   arena_grow_char(arena, '\0');
-  char *string = arena_grow_finish(arena);
+  char          *string = arena_grow_finish(arena);
   struct symbol *symbol = symbol_table_get_or_insert(s->symbol_table, string);
   if (symbol->string != string) {
     arena_free_to(arena, string);
   }
 
-  s->token.kind     = symbol->token_kind;
+  s->token.kind = symbol->token_kind;
   s->token.u.symbol = symbol;
 }
 
-static void scan_hexinteger(struct scanner_state *s, struct arena* arena) {
+static void scan_hexinteger(struct scanner_state *s, struct arena *arena)
+{
   arena_grow_char(arena, 'x');
   for (;;) {
     next_char(s);
@@ -210,19 +210,22 @@ static void scan_hexinteger(struct scanner_state *s, struct arena* arena) {
   }
 }
 
-static void scan_octinteger(struct scanner_state *s, struct arena* arena) {
+static void scan_octinteger(struct scanner_state *s, struct arena *arena)
+{
   (void)s;
   (void)arena;
   abort();
 }
 
-static void scan_bininteger(struct scanner_state *s, struct arena* arena) {
+static void scan_bininteger(struct scanner_state *s, struct arena *arena)
+{
   (void)s;
   (void)arena;
   abort();
 }
 
-static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena) {
+static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena)
+{
   for (;;) {
     switch (s->c) {
     case '0':
@@ -236,7 +239,8 @@ static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena) {
   }
 }
 
-static void scan_decinteger(struct scanner_state *s, struct arena *arena) {
+static void scan_decinteger(struct scanner_state *s, struct arena *arena)
+{
   for (;;) {
     next_char(s);
     switch (s->c) {
@@ -280,7 +284,7 @@ static void scan_number(struct scanner_state *s)
     abort();
   }
   arena_grow_char(strings, '\0');
-  char *chars = (char*)arena_grow_finish(strings);
+  char *chars = (char *)arena_grow_finish(strings);
 
   char *endptr;
   errno = 0;
@@ -289,8 +293,7 @@ static void scan_number(struct scanner_state *s)
     /* TODO: report error */
     abort();
   }
-  if ((value == LONG_MIN || value == LONG_MAX) &&
-      errno != 0) {
+  if ((value == LONG_MIN || value == LONG_MAX) && errno != 0) {
     /* TODO: report error */
     abort();
   }
@@ -301,8 +304,8 @@ static void scan_number(struct scanner_state *s)
   s->token.kind = T_INTEGER;
 }
 
-static void scan_escape_sequence(struct scanner_state *s, struct arena *strings,
-                                 bool is_unicode)
+static void scan_escape_sequence(struct scanner_state *s,
+                                 struct arena *strings, bool is_unicode)
 {
   assert(s->c == '\\');
   next_char(s);
@@ -347,8 +350,9 @@ static void scan_escape_sequence(struct scanner_state *s, struct arena *strings,
     int num_digits = 1;
     for (;;) {
       next_char(s);
-      if (s->c < '0' || s->c > '7' || ++num_digits > 3)
+      if (s->c < '0' || s->c > '7' || ++num_digits > 3) {
         break;
+      }
       num = (num * 8) + (s->c - '0');
     }
     if (num > 0377) {
@@ -378,7 +382,9 @@ static void scan_escape_sequence(struct scanner_state *s, struct arena *strings,
     next_char(s);
     if (s->c == '\n') {
       /* fallthrough */
+      /* clang-format off */
   case '\n':
+      /* clang-format on */
       next_char(s);
     }
     ++s->line;
@@ -422,8 +428,9 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
     switch (s->c) {
     case '"':
     case '\'': {
-      if (s->c != quote)
+      if (s->c != quote) {
         break;
+      }
       next_char(s);
       if (!triplequote) goto finish_string;
       if (s->c != quote) {
@@ -445,8 +452,10 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
     case '\r':
       next_char(s);
       if (s->c == '\n') {
+        /* clang-format off */
         /* fallthrough */
     case '\n':
+        /* clang-format on */
         next_char(s);
       }
       ++s->line;
@@ -468,10 +477,10 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
   }
 
 finish_string:;
-  size_t length = arena_grow_current_size(strings);
-  char  *chars  = (char*)arena_grow_finish(strings);
-  union object *object = object_intern_string(s->objects, OBJECT_ASCII,
-                                              length, chars);
+  size_t        length = arena_grow_current_size(strings);
+  char         *chars = (char *)arena_grow_finish(strings);
+  union object *object
+      = object_intern_string(s->objects, OBJECT_ASCII, length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);
   }
@@ -484,7 +493,7 @@ static void scan_eof(struct scanner_state *s)
   if (s->last_line_indent > 0) {
     assert(s->indentation_stack_top > 0);
     s->last_line_indent = 0;
-    s->pending_dedents  = s->indentation_stack_top - 1;
+    s->pending_dedents = s->indentation_stack_top - 1;
     s->at_begin_of_line = true;
     s->token.kind = T_DEDENT;
     return;
@@ -517,8 +526,10 @@ static bool scan_indentation(struct scanner_state *s)
     case '\r':
       next_char(s);
       if (s->c == '\n') {
+        /* clang-format off */
         /* fallthrough */
     case '\n':
+        /* clang-format on */
         next_char(s);
       }
       // TODO: empty line as NEWLINE in interactive mode
@@ -565,15 +576,16 @@ static bool scan_indentation(struct scanner_state *s)
   if (column < last_line_indent) {
     unsigned dedents = 1;
     for (unsigned t = s->indentation_stack_top; t-- > 0;) {
-      if (column >= s->indentation_stack[t])
+      if (column >= s->indentation_stack[t]) {
         break;
+      }
       ++dedents;
     }
-    unsigned target_cols =
-        s->indentation_stack[s->indentation_stack_top - dedents];
+    unsigned target_cols
+        = s->indentation_stack[s->indentation_stack_top - dedents];
     /* we report 1 dedent right now, the rest is pending */
     unsigned pending_dedents = dedents - 1;
-    s->pending_dedents  = pending_dedents;
+    s->pending_dedents = pending_dedents;
     s->last_line_indent = column;
     s->at_begin_of_line = pending_dedents > 0;
     if (column != target_cols) {
@@ -592,8 +604,9 @@ static bool scan_indentation(struct scanner_state *s)
 void scanner_next_token(struct scanner_state *s)
 {
   if (s->at_begin_of_line) {
-    if (scan_indentation(s))
+    if (scan_indentation(s)) {
       return;
+    }
   }
 
   int invalid_c;
@@ -602,13 +615,16 @@ void scanner_next_token(struct scanner_state *s)
     case '\r':
       next_char(s);
       if (s->c == '\n') {
+        /* clang-format off */
         /* fallthrough */
     case '\n':
+        /* clang-format on */
         next_char(s);
       }
       ++s->line;
-      if (s->paren_level > 0)
+      if (s->paren_level > 0) {
         continue;
+      }
       s->at_begin_of_line = true;
       s->token.kind = T_NEWLINE;
       return;
@@ -912,7 +928,7 @@ void scanner_next_token(struct scanner_state *s)
     case ':':
     case ';':
     case '~':
-single_char_token:
+    single_char_token:
       s->token.kind = (uint16_t)s->c;
       next_char(s);
       return;
@@ -940,7 +956,7 @@ single_char_token:
       }
       invalid_c = s->c;
       next_char(s);
-invalid_char:
+    invalid_char:
       fprintf(stderr, "Unexpected input char '%c'\n", invalid_c);
       return;
     }
@@ -948,17 +964,17 @@ invalid_char:
 }
 
 void scanner_init(struct scanner_state *s, FILE *input,
-    struct symbol_table *symbol_table, struct object_intern *objects,
-    struct arena *strings)
+                  struct symbol_table  *symbol_table,
+                  struct object_intern *objects, struct arena *strings)
 {
   memset(s, 0, sizeof(*s));
-  s->input            = input;
+  s->input = input;
   s->at_begin_of_line = true;
-  s->read_buffer      = malloc(16 * 1024 - 16);
+  s->read_buffer = malloc(16 * 1024 - 16);
   s->read_buffer_size = 4096;
-  s->symbol_table     = symbol_table;
-  s->objects          = objects;
-  s->strings          = strings;
+  s->symbol_table = symbol_table;
+  s->objects = objects;
+  s->strings = strings;
   next_char(s);
 }
 
@@ -967,10 +983,10 @@ void scanner_free(struct scanner_state *s)
   free(s->read_buffer);
 }
 
-static const char* const token_names[] = {
-#define TCHAR(val, name, desc)  TDES(name, desc)
-#define TDES(name, desc)        [name] = desc,
-#define TID(id, name)           [name] = #id,
+static const char *const token_names[] = {
+#define TCHAR(val, name, desc) TDES(name, desc)
+#define TDES(name, desc)       [name] = desc,
+#define TID(id, name)          [name] = #id,
 #include "tokens.h"
 #undef TID
 #undef TDES
@@ -979,7 +995,7 @@ static const char* const token_names[] = {
 
 const char *token_kind_name(uint16_t token_kind)
 {
-  assert(token_kind < sizeof(token_names)/sizeof(token_names[0]));
+  assert(token_kind < sizeof(token_names) / sizeof(token_names[0]));
   assert(token_names[token_kind] != NULL);
   return token_names[token_kind];
 }
@@ -987,12 +1003,20 @@ const char *token_kind_name(uint16_t token_kind)
 void print_token(FILE *out, const struct token *token)
 {
   switch (token->kind) {
-  case T_FORMAT_STRING:  fputc('f', out); goto string;
-  case T_RAW_STRING:     fputc('r', out); goto string;
-  case T_UNICODE_STRING: fputc('u', out); goto string;
-  case T_BYTE_STRING:    fputc('b', out); goto string;
+  case T_FORMAT_STRING:
+    fputc('f', out);
+    goto string;
+  case T_RAW_STRING:
+    fputc('r', out);
+    goto string;
+  case T_UNICODE_STRING:
+    fputc('u', out);
+    goto string;
+  case T_BYTE_STRING:
+    fputc('b', out);
+    goto string;
   case T_STRING:
-string:
+  string:
     fputc('"', out);
     struct object_string *string = &token->u.object->string;
     for (const char *c = string->chars, *e = c + string->length; c != e; ++c) {

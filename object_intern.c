@@ -30,13 +30,17 @@ struct arena *object_intern_arena(struct object_intern *s)
 }
 
 union object *object_intern_singleton(struct object_intern *s,
-                                      enum object_type type)
+                                      enum object_type      type)
 {
   switch (type) {
-  case OBJECT_NONE: return s->singleton_none;
-  case OBJECT_TRUE: return s->singleton_true;
-  case OBJECT_FALSE: return s->singleton_false;
-  case OBJECT_ELLIPSIS: return s->singleton_ellipsis;
+  case OBJECT_NONE:
+    return s->singleton_none;
+  case OBJECT_TRUE:
+    return s->singleton_true;
+  case OBJECT_FALSE:
+    return s->singleton_false;
+  case OBJECT_ELLIPSIS:
+    return s->singleton_ellipsis;
   default:
     abort();
   }
@@ -47,15 +51,16 @@ union object *object_intern_empty_tuple(struct object_intern *s)
   return s->empty_tuple;
 }
 
-union object *object_intern_string(struct object_intern *s, enum object_type type,
-                                   uint32_t length, const char *chars)
+union object *object_intern_string(struct object_intern *s,
+                                   enum object_type type, uint32_t length,
+                                   const char *chars)
 {
   assert(type == OBJECT_STRING || type == OBJECT_ASCII);
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
-    if (object_type(object) == type &&
-        object_string_equals(object, length, chars)) {
+    if (object_type(object) == type
+        && object_string_equals(object, length, chars)) {
       return object;
     }
   }
@@ -66,7 +71,7 @@ union object *object_intern_string(struct object_intern *s, enum object_type typ
 }
 
 union object *object_intern_cstring(struct object_intern *s,
-                                    const char *cstring)
+                                    const char           *cstring)
 {
   size_t length = strlen(cstring);
   assert(length == (uint32_t)length);
@@ -78,8 +83,8 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
-    if (object_type(object) == OBJECT_INT &&
-        object_int_value(object) == value) {
+    if (object_type(object) == OBJECT_INT
+        && object_int_value(object) == value) {
       return object;
     }
   }

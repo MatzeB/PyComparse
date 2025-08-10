@@ -1,0 +1,17 @@
+BasedOnStyle: GNU
+
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+BreakAfterReturnType: Automatic
+BreakBeforeBraces: Linux
+IndentWidth: 2
+InsertNewlineAtEOF: true
+AlignConsecutiveDeclarations: true
+AlignConsecutiveMacros: Consecutive
+IndentCaseBlocks: false
+IndentCaseLabels: false
+QualifierAlignment: Custom
+QualifierOrder: [static, inline, volatile, const, type]
+RemoveBracesLLVM: false
+SortIncludes: true
+SpaceBeforeParens: ControlStatements

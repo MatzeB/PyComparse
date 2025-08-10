@@ -5,7 +5,7 @@
 #include "dynmemory.h"
 
 struct stack {
-  char *data;
+  char    *data;
   unsigned size;
   unsigned capacity;
 };
@@ -15,8 +15,8 @@ static inline void *stack_push(struct stack *stack, unsigned size)
   unsigned old_size = stack->size;
   unsigned new_size = old_size + size;
   if (new_size > stack->capacity) {
-    stack->data = (char*)dynmemory_grow(stack->data, &stack->capacity, new_size,
-                                        1);
+    stack->data
+        = (char *)dynmemory_grow(stack->data, &stack->capacity, new_size, 1);
     if (stack->data == NULL) {
       abort();
     }

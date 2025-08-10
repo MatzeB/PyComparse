@@ -32,7 +32,7 @@ int main(int argc, char **argv)
   do {
     scanner_next_token(&s);
     print_token(stdout, token);
-  } while(token->kind != T_EOF);
+  } while (token->kind != T_EOF);
 
   if (input != stdin) {
     fclose(input);

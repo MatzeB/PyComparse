@@ -21,9 +21,9 @@ unsigned cg_append_varname(struct cg_state *s, const char *name);
 
 bool cg_use_locals(struct cg_state *s);
 
-struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol);
+struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol *symbol);
 struct symbol_info *cg_new_symbol_info(struct cg_state *s,
-                                       struct symbol* symbol);
+                                       struct symbol   *symbol);
 
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
@@ -36,12 +36,12 @@ struct basic_block *cg_allocate_block(struct cg_state *s);
 
 void cg_block_begin(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_block_end(struct cg_state *s);
-bool cg_in_block(struct cg_state *s);
+bool                cg_in_block(struct cg_state *s);
 
-void cg_code_begin(struct cg_state *s, bool use_locals);
+void          cg_code_begin(struct cg_state *s, bool use_locals);
 union object *cg_code_end(struct cg_state *s, const char *name);
 
-void cg_push_code(struct cg_state *s);
+void          cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_load_const(struct cg_state *s, union object *object);

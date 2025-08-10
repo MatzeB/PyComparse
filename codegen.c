@@ -24,7 +24,7 @@ static inline void arena_grow_u8(struct arena *arena, uint8_t value)
 
 struct basic_block *cg_allocate_block(struct cg_state *s)
 {
-  struct arena *arena = object_intern_arena(&s->objects);
+  struct arena       *arena = object_intern_arena(&s->objects);
   struct basic_block *block = arena_allocate_type(arena, struct basic_block);
   memset(block, 0, sizeof(*block));
   return block;
@@ -76,8 +76,9 @@ void cg_code_begin(struct cg_state *s, bool use_locals)
   code->cg_stack_begin = stack_size(&s->stack);
   code->use_locals = use_locals;
 
-  if (use_locals)
+  if (use_locals) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
+  }
 
   struct basic_block *first = cg_allocate_block(s);
   code->first_block = first;
@@ -89,8 +90,8 @@ static void pop_symbol_infos(struct cg_state *s)
   unsigned cg_stack_begin = s->code.cg_stack_begin;
   assert(stack_size(&s->stack) >= cg_stack_begin);
   while (stack_size(&s->stack) > cg_stack_begin) {
-    struct saved_symbol_info *saved =
-      (struct saved_symbol_info*)stack_last(&s->stack, sizeof(*saved));
+    struct saved_symbol_info *saved
+        = (struct saved_symbol_info *)stack_last(&s->stack, sizeof(*saved));
     struct symbol *symbol = saved->symbol;
     memcpy(&symbol->info, &saved->info, sizeof(symbol->info));
     stack_pop(&s->stack, sizeof(*saved));
@@ -109,7 +110,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   // Finalize block layout: First assign minimum offsets necessary,
   // then expand as necessary.
-  unsigned offset = 0;
+  unsigned            offset = 0;
   struct basic_block *first_block = s->code.first_block;
   for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     b->offset = offset;
@@ -135,48 +136,59 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   arena_grow_begin(arena, 1);
   for (struct basic_block *b = first_block; b != NULL; b = b->next) {
     unsigned jump_length = 0;
-    if (b->jump_opcode != 0)
+    if (b->jump_opcode != 0) {
       jump_length += 2;
-    if (b->default_target != NULL && b->default_target != b->next)
+    }
+    if (b->default_target != NULL && b->default_target != b->next) {
       jump_length += 2;
+    }
     unsigned block_length = b->code_length + jump_length;
     assert(b->next == NULL || b->next->offset == b->offset + block_length);
 
-    void* dst = arena_grow(arena, block_length);
+    void *dst = arena_grow(arena, block_length);
     memcpy(dst, b->code_bytes, b->code_length);
-    uint8_t* j = (uint8_t*)dst + b->code_length;
+    uint8_t *j = (uint8_t *)dst + b->code_length;
     if (b->jump_opcode != 0) {
       unsigned dest_offset = b->jump_target->offset;
-      assert((dest_offset > 0 || (first_block->code_length == 0 &&
-                                  first_block->jump_opcode == 0)) &&
-             "target block not processed?");
+      assert(
+          (dest_offset > 0
+           || (first_block->code_length == 0 && first_block->jump_opcode == 0))
+          && "target block not processed?");
       *j++ = b->jump_opcode;
       if (is_absjump(b->jump_opcode)) {
-        if (dest_offset > 255)
+        if (dest_offset > 255) {
           abort(); /* TODO */
+        }
         *j++ = (uint8_t)dest_offset;
       } else {
-        unsigned delta = dest_offset - b->offset - block_length
-          - ((b->default_target != NULL && b->default_target != b->next) ? 2 : 0);
-        if (delta > 255)
+        unsigned delta
+            = dest_offset - b->offset - block_length
+              - ((b->default_target != NULL && b->default_target != b->next)
+                     ? 2
+                     : 0);
+        if (delta > 255) {
           abort();
+        }
         *j++ = (uint8_t)delta;
       }
     }
     if (b->default_target != NULL && b->default_target != b->next) {
       unsigned dest_offset = b->default_target->offset;
-      assert((dest_offset > 0 || (first_block->code_length == 0 &&
-                                  first_block->jump_opcode == 0)) &&
-             "target block not processed?");
+      assert(
+          (dest_offset > 0
+           || (first_block->code_length == 0 && first_block->jump_opcode == 0))
+          && "target block not processed?");
       if (dest_offset <= b->offset) {
-        if (dest_offset > 255)
+        if (dest_offset > 255) {
           abort(); /* TODO */
+        }
         *j++ = OPCODE_JUMP_ABSOLUTE;
         *j++ = (uint8_t)dest_offset;
       } else {
         unsigned delta = dest_offset - b->offset - block_length;
-        if (delta > 255)
+        if (delta > 255) {
           abort();
+        }
         *j++ = OPCODE_JUMP_FORWARD;
         *j++ = (uint8_t)delta;
       }
@@ -184,7 +196,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   }
 
   unsigned code_length = arena_grow_current_size(arena);
-  char* code_bytes = arena_grow_finish(arena);
+  char    *code_bytes = arena_grow_finish(arena);
 
   union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
                                             code_length, code_bytes);
@@ -192,8 +204,8 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   union object *cellvars = object_intern_empty_tuple(&s->objects);
   union object *filename = object_intern_cstring(&s->objects, s->filename);
   union object *name_string = object_intern_cstring(&s->objects, name);
-  union object *lnotab = object_intern_string(&s->objects, OBJECT_BYTES, 0,
-                                              NULL);
+  union object *lnotab
+      = object_intern_string(&s->objects, OBJECT_BYTES, 0, NULL);
 
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
@@ -218,7 +230,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
 void cg_push_code(struct cg_state *s)
 {
-  void* slot = stack_push(&s->stack, sizeof(s->code));
+  void *slot = stack_push(&s->stack, sizeof(s->code));
   memcpy(slot, &s->code, sizeof(s->code));
 }
 
@@ -315,11 +327,10 @@ void cg_load_const(struct cg_state *s, union object *object)
 unsigned cg_register_name(struct cg_state *s, const char *name)
 {
   union object *names = s->code.names;
-  unsigned length = strlen(name);
+  unsigned      length = strlen(name);
   for (unsigned i = 0; i < names->list.length; ++i) {
     const union object *object = names->list.items[i];
-    if (object->type != OBJECT_ASCII)
-      continue;
+    if (object->type != OBJECT_ASCII) continue;
     const struct object_string *string = &object->string;
     if (string->length == length && memcmp(string->chars, name, length) == 0) {
       return i;
@@ -344,7 +355,7 @@ unsigned cg_append_varname(struct cg_state *s, const char *name)
   return varnames->list.length - 1;
 }
 
-struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol)
+struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol *symbol)
 {
   if (symbol->info.scope_id != s->code.scope_id) {
     return NULL;
@@ -353,13 +364,13 @@ struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol* symbol)
 }
 
 struct symbol_info *cg_new_symbol_info(struct cg_state *s,
-                                       struct symbol* symbol)
+                                       struct symbol   *symbol)
 {
   assert(symbol->info.scope_id != s->code.scope_id);
 
   if (symbol->info.scope_id != 0) {
-    struct saved_symbol_info *saved =
-        (struct saved_symbol_info*)stack_push(&s->stack, sizeof(*saved));
+    struct saved_symbol_info *saved
+        = (struct saved_symbol_info *)stack_push(&s->stack, sizeof(*saved));
     saved->symbol = symbol;
     memcpy(&saved->info, &symbol->info, sizeof(saved->info));
   }

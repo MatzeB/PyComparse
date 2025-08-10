@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "Missing filename argument\n");
   }
   const char *filename = argv[1];
-  FILE *input = fopen(filename, "r");
+  FILE       *input = fopen(filename, "r");
   if (input == NULL) {
     fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
     return 1;

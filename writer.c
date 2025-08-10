@@ -41,7 +41,7 @@ static void write_uint16(struct writer_state *s, uint16_t value)
 
 static void write_header(struct writer_state *s)
 {
-  write_uint16(s, 3413);  // Python 3.8b4
+  write_uint16(s, 3413); // Python 3.8b4
   write_uint8(s, '\r');
   write_uint8(s, '\n');
   write_uint32(s, 0); // 0
@@ -62,8 +62,8 @@ static void write_list(struct writer_state *s, const struct object_list *list)
   }
 }
 
-static void write_tuple_(struct writer_state *s,
-                         uint32_t length, union object *const *items)
+static void write_tuple_(struct writer_state *s, uint32_t length,
+                         union object *const *items)
 {
   if (length < 256) {
     write_char(s, OBJECT_SMALL_TUPLE);
@@ -77,20 +77,20 @@ static void write_tuple_(struct writer_state *s,
   }
 }
 
-static void write_tuple(struct writer_state *s,
+static void write_tuple(struct writer_state       *s,
                         const struct object_tuple *tuple)
 {
   write_tuple_(s, tuple->length, tuple->items);
 }
 
 static void write_list_as_tuple(struct writer_state *s,
-                                const union object *list)
+                                const union object  *list)
 {
   assert(list->type == OBJECT_LIST);
   write_tuple_(s, list->list.length, list->list.items);
 }
 
-static void write_string(struct writer_state *s,
+static void write_string(struct writer_state        *s,
                          const struct object_string *string)
 {
   char type = string->base.type;
@@ -104,21 +104,19 @@ static void write_string(struct writer_state *s,
     write_uint32(s, length);
   }
   for (uint32_t i = 0; i < length; ++i) {
-    assert(type == OBJECT_STRING ||
-           (((uint8_t)string->chars[i]) < 128 && "TODO: non-ascii"));
+    assert(type == OBJECT_STRING
+           || (((uint8_t)string->chars[i]) < 128 && "TODO: non-ascii"));
     write_char(s, string->chars[i]);
   }
 }
 
-static void write_int(struct writer_state *s,
-                      const struct object_int *obj_int)
+static void write_int(struct writer_state *s, const struct object_int *obj_int)
 {
   write_char(s, OBJECT_INT);
   write_uint32(s, (uint32_t)obj_int->value);
 }
 
-static void write_code(struct writer_state *s,
-                       const struct object_code *code)
+static void write_code(struct writer_state *s, const struct object_code *code)
 {
   write_char(s, OBJECT_CODE);
   write_uint32(s, code->argcount);

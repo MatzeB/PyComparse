@@ -217,32 +217,83 @@ static union ast_expression *ast_allocate_expression_(struct parser_state *s,
 #define ast_allocate_expression(s, type, type_id) \
     ast_allocate_expression_((s), sizeof(type), (type_id))
 
-static union ast_expression *make_invalid_expression(struct parser_state *s)
+static union ast_expression *ast_new_const(struct parser_state *s,
+                                           union object *object)
 {
-  (void)s;
-  /* TODO */
-  unimplemented();
+  union ast_expression *expression =
+      ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.object = object;
+  return expression;
 }
 
-static union ast_expression *parse_subexpression(struct parser_state *s,
-                                                 enum precedence precedence);
+static union ast_expression *ast_new_invalid(struct parser_state *s)
+{
+  union object *object = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
+  return ast_new_const(s, object);
+}
+
+static union ast_expression *parse_expression(struct parser_state *s,
+                                              enum precedence precedence);
+
+static union ast_expression *parse_generator_expression(struct parser_state *s,
+    union ast_expression *left)
+{
+  union ast_expression *generator_expression
+      = ast_allocate_expression(s, struct ast_generator_expression,
+                                AST_GENERATOR_EXPRESSION);
+  generator_expression->generator_expression.expression = left;
+
+  struct generator_expression_part *last = NULL;
+
+  for (;;) {
+    struct generator_expression_part *part;
+    if (peek(s) == T_for) {
+      eat(s, T_for);
+      part = arena_allocate_type(&s->ast, struct generator_expression_part);
+      part->type = GENERATOR_EXPRESSION_PART_FOR;
+      part->target = parse_expression(s, PREC_OR);
+      expect(s, T_in);
+      part->expression = parse_expression(s, PREC_OR);
+    } else if (peek(s) == T_if) {
+      eat(s, T_if);
+      part = arena_allocate_type(&s->ast, struct generator_expression_part);
+      part->type = GENERATOR_EXPRESSION_PART_IF;
+      part->target = NULL;
+      part->expression = parse_expression(s, PREC_COMPARISON);
+    } else {
+      break;
+    }
+    if (last == NULL) {
+      generator_expression->generator_expression.parts = part;
+    } else {
+      last->next = part;
+    }
+    last = part;
+  }
+  return generator_expression;
+}
 
 static struct argument *parse_argument(struct parser_state *s)
 {
   struct argument *argument = arena_allocate_type(&s->ast, struct argument);
   switch (peek(s)) {
   case '*':
-    parse_subexpression(s, PREC_TEST);
+    parse_expression(s, PREC_TEST);
     unimplemented();
   case T_ASTERISK_ASTERISK:
-    parse_subexpression(s, PREC_TEST);
+    parse_expression(s, PREC_TEST);
     unimplemented();
   default: {
-    union ast_expression *expression = parse_subexpression(s, PREC_TEST);
+    union ast_expression *expression = parse_expression(s, PREC_TEST);
     if (accept(s, '=')) {
-      expression = parse_subexpression(s, PREC_TEST);
+      expression = parse_expression(s, PREC_TEST);
       unimplemented();
     }
+
+    if (peek(s) == T_for) {
+      expression = parse_generator_expression(s, expression);
+    }
+
     argument->expression = expression;
     return argument;
   }
@@ -253,7 +304,7 @@ static union ast_expression *parse_attr(struct parser_state *s,
                                         union ast_expression *left)
 {
   eat(s, '.');
-  if (!skip_till(s, T_IDENTIFIER)) return make_invalid_expression(s);
+  if (!skip_till(s, T_IDENTIFIER)) return ast_new_invalid(s);
   struct symbol *symbol = eat_identifier(s);
 
   union ast_expression *expression =
@@ -297,7 +348,7 @@ static inline union ast_expression *parse_unexpr(struct parser_state *s,
                                                  enum ast_expression_type type)
 {
   next_token(s);
-  union ast_expression *op = parse_subexpression(s, prec_op);
+  union ast_expression *op = parse_expression(s, prec_op);
 
   union ast_expression *expression =
       ast_allocate_expression(s, struct ast_unexpr, type);
@@ -320,7 +371,7 @@ parse_expression_list_helper(struct parser_state *s,
       break;
     switch (peek(s)) {
     case EXPRESSION_START_CASES: {
-      union ast_expression *expression = parse_subexpression(s, PREC_LIST + 1);
+      union ast_expression *expression = parse_expression(s, PREC_LIST + 1);
       if (num_expressions + 1 >= capacity) {
         unsigned new_capacity = capacity * 2;
         union ast_expression **new_expressions =
@@ -364,7 +415,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   add_anchor(s, ']');
   add_anchor(s, ',');
 
-  union ast_expression *first = parse_subexpression(s, PREC_LIST + 1);
+  union ast_expression *first = parse_expression(s, PREC_LIST + 1);
   union ast_expression *expression =
       parse_expression_list_helper(s, AST_LIST_DISPLAY, first);
 
@@ -387,7 +438,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   add_anchor(s, '}');
   add_anchor(s, ',');
 
-  union ast_expression *first = parse_subexpression(s, PREC_LIST + 1);
+  union ast_expression *first = parse_expression(s, PREC_LIST + 1);
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
     union ast_expression *expression
@@ -407,7 +458,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *key = first;
   for (;;) {
     expect(s, ':');
-    union ast_expression *value = parse_subexpression(s, PREC_LIST + 1);
+    union ast_expression *value = parse_expression(s, PREC_LIST + 1);
     if (num_items + 1 >= capacity) {
       unsigned new_capacity = capacity * 2;
       struct dict_item *new_items = malloc(new_capacity * sizeof(items[0]));
@@ -423,7 +474,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
 
     if (peek(s) == '}' || peek(s) == T_EOF)
       break;
-    key = parse_subexpression(s, PREC_LIST + 1);
+    key = parse_expression(s, PREC_LIST + 1);
   }
 
   remove_anchor(s, ',');
@@ -452,7 +503,12 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
 
   add_anchor(s, ')');
   add_anchor(s, ',');
-  union ast_expression *expression = parse_subexpression(s, PREC_LIST);
+  union ast_expression *expression = parse_expression(s, PREC_LIST);
+
+  if (peek(s) == T_for) {
+    expression = parse_generator_expression(s, expression);
+  }
+
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
@@ -489,27 +545,18 @@ static union ast_expression *parse_identifier(struct parser_state *s)
   return node;
 }
 
-static union ast_expression *make_ast_const(struct parser_state *s,
-                                            union object *object)
-{
-  union ast_expression *expression =
-      ast_allocate_expression(s, struct ast_const, AST_CONST);
-  expression->cnst.object = object;
-  return expression;
-}
-
 static union ast_expression *parse_string(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_STRING);
   eat(s, T_STRING);
-  return make_ast_const(s, object);
+  return ast_new_const(s, object);
 }
 
 static union ast_expression *parse_integer(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_INTEGER);
   eat(s, T_INTEGER);
-  return make_ast_const(s, object);
+  return ast_new_const(s, object);
 }
 
 static union ast_expression *parse_singleton(struct parser_state *s,
@@ -517,7 +564,7 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 {
   next_token(s);
   union object *object = object_intern_singleton(&s->cg.objects, type);
-  return make_ast_const(s, object);
+  return ast_new_const(s, object);
 }
 
 static union ast_expression *parse_true(struct parser_state *s)
@@ -569,7 +616,7 @@ static inline union ast_expression *parse_binexpr(struct parser_state *s,
                                                   union ast_expression *left)
 {
   next_token(s);
-  union ast_expression *right = parse_subexpression(s, prec_right);
+  union ast_expression *right = parse_expression(s, prec_right);
 
   union ast_expression *expression =
       ast_allocate_expression(s, struct ast_binexpr, type);
@@ -626,7 +673,7 @@ static union ast_expression *parse_subscript(struct parser_state *s,
   eat(s, '[');
   add_anchor(s, ']');
   add_anchor(s, ',');
-  union ast_expression *right = parse_subexpression(s, PREC_LIST);
+  union ast_expression *right = parse_expression(s, PREC_LIST);
   remove_anchor(s, ',');
   remove_anchor(s, ']');
   expect(s, ']');
@@ -714,54 +761,16 @@ static union ast_expression *parse_xor(struct parser_state *s,
   return parse_binexpr(s, PREC_XOR + 1, AST_BINEXPR_XOR, left);
 }
 
-static union ast_expression *parse_gen_expr(struct parser_state *s,
-                                            union ast_expression *left)
-{
-  union ast_expression *generator_expression
-      = ast_allocate_expression(s, struct ast_generator_expression,
-                                AST_GENERATOR_EXPRESSION);
-  generator_expression->generator_expression.expression = left;
-
-  struct generator_expression_part *last = NULL;
-
-  for (;;) {
-    struct generator_expression_part *part;
-    if (peek(s) == T_for) {
-      eat(s, T_for);
-      part = arena_allocate_type(&s->ast, struct generator_expression_part);
-      part->type = GENERATOR_EXPRESSION_PART_FOR;
-      part->target = parse_subexpression(s, PREC_OR);
-      expect(s, T_in);
-      part->expression = parse_subexpression(s, PREC_OR);
-    } else if (peek(s) == T_if) {
-      eat(s, T_if);
-      part = arena_allocate_type(&s->ast, struct generator_expression_part);
-      part->type = GENERATOR_EXPRESSION_PART_IF;
-      part->target = NULL;
-      part->expression = parse_subexpression(s, PREC_COMPARISON);
-    } else {
-      break;
-    }
-    if (last == NULL) {
-      generator_expression->generator_expression.parts = part;
-    } else {
-      last->next = part;
-    }
-    last = part;
-  }
-  return generator_expression;
-}
-
 static union ast_expression *parse_not_in(struct parser_state *s,
                                           union ast_expression *left)
 {
   eat(s, T_not);
   if (!accept(s, T_in)) {
     parse_error_expected(s, "in");
-    return make_invalid_expression(s);
+    return ast_new_invalid(s);
   }
 
-  union ast_expression *right = parse_subexpression(s, PREC_COMPARISON + 1);
+  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
 
   union ast_expression *expression =
       ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
@@ -777,7 +786,7 @@ static union ast_expression *parse_is(struct parser_state *s,
   uint8_t ast_node_type = accept(s, T_not) ? AST_BINEXPR_IS_NOT
                                            : AST_BINEXPR_IS;
 
-  union ast_expression *right = parse_subexpression(s, PREC_COMPARISON + 1);
+  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
 
   union ast_expression *expression =
       ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
@@ -811,7 +820,6 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['[']    = { .func = parse_subscript,  .precedence = PREC_PRIMARY    },
   ['^']    = { .func = parse_xor,        .precedence = PREC_XOR        },
   ['|']    = { .func = parse_or,         .precedence = PREC_OR         },
-  [T_for]  = { .func = parse_gen_expr,   .precedence = PREC_TEST       },
   [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
   [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
@@ -827,8 +835,8 @@ static const struct postfix_expression_parser postfix_parsers[] = {
       = { .func = parse_unequal,       .precedence = PREC_COMPARISON },
 };
 
-union ast_expression *parse_subexpression(struct parser_state *s,
-                                          enum precedence precedence)
+union ast_expression *parse_expression(struct parser_state *s,
+                                       enum precedence precedence)
 {
   uint16_t token_kind = peek(s);
   if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
@@ -861,7 +869,7 @@ union ast_expression *parse_subexpression(struct parser_state *s,
 
 static void parse_expression_statement(struct parser_state *s)
 {
-  union ast_expression *expression = parse_subexpression(s, PREC_ASSIGN);
+  union ast_expression *expression = parse_expression(s, PREC_ASSIGN);
   emit_expression_statement(&s->cg, expression);
 }
 
@@ -906,13 +914,10 @@ static void parse_return_statement(struct parser_state *s)
   eat(s, T_return);
 
   union ast_expression *expression;
-  switch (peek(s)) {
-  case EXPRESSION_START_CASES:
-    expression = parse_subexpression(s, PREC_LIST);
-    break;
-  default:
+  if (peek(s) != T_NEWLINE) {
+    expression = parse_expression(s, PREC_LIST);
+  } else {
     expression = NULL;
-    break;
   }
   emit_return_statement(&s->cg, expression);
 }
@@ -970,7 +975,7 @@ static void parse_suite(struct parser_state *s)
 static void parse_if(struct parser_state *s)
 {
   eat(s, T_if);
-  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');
 
   struct if_state state;
@@ -990,9 +995,9 @@ static void parse_if(struct parser_state *s)
 static void parse_for(struct parser_state *s)
 {
   eat(s, T_for);
-  union ast_expression *target = parse_subexpression(s, PREC_OR);
+  union ast_expression *target = parse_expression(s, PREC_OR);
   expect(s, T_in);
-  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');
 
   struct for_state state;
@@ -1006,7 +1011,7 @@ static void parse_for(struct parser_state *s)
 static void parse_while(struct parser_state *s)
 {
   eat(s, T_while);
-  union ast_expression *expression = parse_subexpression(s, PREC_TEST);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');
 
   struct while_state state;
@@ -1066,7 +1071,7 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
 
   parse_parameters(s);
   if (accept(s, T_MINUS_GREATER_THAN)) {
-    parse_subexpression(s, PREC_TEST);
+    parse_expression(s, PREC_TEST);
     unimplemented();
   }
   expect(s, ':');
@@ -1080,7 +1085,7 @@ static void parse_decorator(struct parser_state *s,
                             unsigned num_decorators)
 {
   eat(s, '@');
-  union ast_expression *expression = parse_subexpression(s, PREC_ASSIGN);
+  union ast_expression *expression = parse_expression(s, PREC_ASSIGN);
   expect(s, T_NEWLINE);
   emit_expression(&s->cg, expression);
 

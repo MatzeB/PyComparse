@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "ast.h"
 #include "ast_types.h"
 #include "codegen.h"
 #include "codegen_expression.h"
@@ -166,6 +167,7 @@ static void emit_for_begin_impl(struct cg_state *s, struct for_state *state,
 
   cg_block_begin(s, state->header);
   emit_condjump(s, OPCODE_FOR_ITER, state->after, state->body);
+  cg_push(s, 1);
 
   cg_block_begin(s, state->body);
   emit_assignment(s, target);
@@ -194,6 +196,7 @@ void emit_for_end(struct cg_state *s, struct for_state *state)
   }
 
   cg_block_begin(s, after);
+  cg_pop(s, 1);
 }
 
 void emit_continue(struct cg_state *s, struct for_state *state)
@@ -304,34 +307,53 @@ void emit_def_end(struct cg_state *s, struct symbol *symbol,
 }
 
 static void emit_generator_expression_part(
-    struct cg_state *s, struct generator_expression_part *part,
-    struct for_state *outer_for, union ast_expression *inner_expression)
+    struct cg_state *s, struct ast_generator_expression *generator_expression,
+    unsigned part_index, struct for_state *outer_for)
 {
-  if (part == NULL) {
-    emit_expression(s, inner_expression);
-    s->code.flags |= CO_GENERATOR;
-    cg_op(s, OPCODE_YIELD_VALUE, 0);
-    cg_pop_op(s, OPCODE_POP_TOP, 0);
-  } else if (part->type == GENERATOR_EXPRESSION_PART_FOR) {
+  if (part_index >= generator_expression->num_parts) {
+    emit_expression(s, generator_expression->expression);
+    if (generator_expression->base.type == AST_LIST_COMPREHENSION) {
+      /* Need to compute position of list in stack...
+       * using "number of for" + 1 for now but this feels sketchy... */
+      unsigned num_for = 0;
+      unsigned num_parts = generator_expression->num_parts;
+      for (unsigned i = 0; i < num_parts; i++) {
+        if (generator_expression->parts[i].type
+            == GENERATOR_EXPRESSION_PART_FOR) {
+          num_for++;
+        }
+      }
+      cg_pop_op(s, OPCODE_LIST_APPEND, num_for + 1);
+    } else {
+      s->code.flags |= CO_GENERATOR;
+      cg_op(s, OPCODE_YIELD_VALUE, 0);
+      cg_pop_op(s, OPCODE_POP_TOP, 0);
+    }
+    return;
+  }
+  struct generator_expression_part *part
+      = &generator_expression->parts[part_index];
+  if (part->type == GENERATOR_EXPRESSION_PART_FOR) {
     struct for_state state;
     emit_for_begin(s, &state, part->target, part->expression);
 
-    emit_generator_expression_part(s, /*part=*/part->next,
-                                   /*outer_for=*/&state, inner_expression);
+    emit_generator_expression_part(s, generator_expression, part_index + 1,
+                                   /*outer_for=*/&state);
 
     emit_for_end(s, &state);
-  } else if (part->type == GENERATOR_EXPRESSION_PART_IF) {
-    struct basic_block *false_block = cg_allocate_block(s);
-
-    emit_expression(s, part->expression);
-    struct basic_block *loop_header = outer_for->header;
-    emit_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
-    cg_pop(s, 1);
-    cg_block_begin(s, false_block);
-
-    emit_generator_expression_part(s, /*part=*/part->next,
-                                   /*outer_for=*/outer_for, inner_expression);
+    return;
   }
+  assert(part->type == GENERATOR_EXPRESSION_PART_IF);
+  struct basic_block *false_block = cg_allocate_block(s);
+
+  emit_expression(s, part->expression);
+  struct basic_block *loop_header = outer_for->header;
+  emit_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
+  cg_pop(s, 1);
+  cg_block_begin(s, false_block);
+
+  emit_generator_expression_part(s, generator_expression, part_index + 1,
+                                 outer_for);
 }
 
 void emit_generator_expression_code(
@@ -340,14 +362,24 @@ void emit_generator_expression_code(
   emit_parameter(s, symbol_table_get_or_insert(s->symbol_table, ".0"));
   s->code.argcount = 1;
 
+  enum ast_expression_type type = generator_expression->base.type;
+  assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION);
+  if (type == AST_LIST_COMPREHENSION) {
+    cg_push_op(s, OPCODE_BUILD_LIST, 0);
+  }
+
   struct generator_expression_part *part = generator_expression->parts;
   cg_push_op(s, OPCODE_LOAD_FAST, 0);
   struct for_state state;
   emit_for_begin_impl(s, &state, part->target);
 
-  emit_generator_expression_part(
-      s, /*part=*/part->next, /*outer_for=*/&state,
-      /*inner_expression=*/generator_expression->expression);
+  emit_generator_expression_part(s, generator_expression, /*part_index=*/1,
+                                 /*outer_for=*/&state);
 
   emit_for_end(s, &state);
+
+  if (type == AST_LIST_COMPREHENSION) {
+    cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
+    cg_block_end(s);
+  }
 }

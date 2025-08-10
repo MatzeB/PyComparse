@@ -1033,16 +1033,10 @@ void print_token(FILE *out, const struct token *token)
     fprintf(out, "integer %" PRId64, token->u.object->int_obj.value);
     break;
   case T_IDENTIFIER:
-    fprintf(out, "identifier %s\n", token->u.symbol->string);
+    fprintf(out, "identifier %s", token->u.symbol->string);
     break;
   default:
-    fprintf(out, "%s\n", token_kind_name(token->kind));
+    fprintf(out, "%s", token_kind_name(token->kind));
     break;
   }
-}
-
-__attribute__((used)) void dump_token(const struct token *token);
-__attribute__((used)) void dump_token(const struct token *token)
-{
-  print_token(stderr, token);
 }

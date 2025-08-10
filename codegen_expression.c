@@ -152,6 +152,28 @@ static void emit_dictionary_display(struct cg_state           *s,
   cg_push_op(s, OPCODE_BUILD_MAP, num_items);
 }
 
+static void
+emit_list_comprehension(struct cg_state                 *s,
+                        struct ast_generator_expression *generator_expression)
+{
+  cg_push_code(s);
+  cg_code_begin(s, /*use_locals=*/true);
+  emit_generator_expression_code(s, generator_expression);
+  emit_code_end(s);
+
+  union object *code = cg_pop_code(s, "<listcomp>");
+  unsigned      code_index = cg_register_object(s, code);
+  cg_push_op(s, OPCODE_LOAD_CONST, code_index);
+  cg_load_const(s, object_intern_cstring(&s->objects, "<listcomp>"));
+  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+
+  struct generator_expression_part *part = &generator_expression->parts[0];
+  emit_expression(s, part->expression);
+  cg_op(s, OPCODE_GET_ITER, 0);
+  cg_pop(s, 2);
+  cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
+}
+
 static void emit_list_display(struct cg_state            *s,
                               struct ast_expression_list *list)
 {
@@ -224,7 +246,7 @@ static void emit_generator_expression(
   cg_load_const(s, object_intern_cstring(&s->objects, "<genexpr>"));
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
 
-  struct generator_expression_part *part = generator_expression->parts;
+  struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
   cg_op(s, OPCODE_GET_ITER, 0);
   cg_pop(s, 2);
@@ -329,6 +351,9 @@ static void emit_expression_impl(struct cg_state      *s,
     break;
   case AST_IDENTIFIER:
     emit_load(s, expression->identifier.symbol);
+    break;
+  case AST_LIST_COMPREHENSION:
+    emit_list_comprehension(s, &expression->generator_expression);
     break;
   case AST_LIST_DISPLAY:
     emit_list_display(s, &expression->expression_list);

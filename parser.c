@@ -242,40 +242,49 @@ static union ast_expression *parse_expression(struct parser_state *s,
                                               enum precedence      precedence);
 
 static union ast_expression *
-parse_generator_expression(struct parser_state *s, union ast_expression *left)
+parse_generator_expression(struct parser_state     *s,
+                           enum ast_expression_type type,
+                           union ast_expression    *left)
 {
-  union ast_expression *generator_expression = ast_allocate_expression(
-      s, struct ast_generator_expression, AST_GENERATOR_EXPRESSION);
-  generator_expression->generator_expression.expression = left;
+  assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION);
+  struct generator_expression_part  inline_storage[4];
+  struct generator_expression_part *parts = inline_storage;
+  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
+  unsigned num_parts = 0;
 
-  struct generator_expression_part *last = NULL;
-
-  for (;;) {
-    struct generator_expression_part *part;
+  while (peek(s) == T_for || peek(s) == T_if) {
+    if (num_parts + 1 >= capacity) {
+      unsigned                          new_capacity = capacity * 2;
+      struct generator_expression_part *new_parts
+          = malloc(new_capacity * sizeof(parts[0]));
+      if (new_parts == NULL) abort();
+      memcpy(new_parts, parts, num_parts * sizeof(parts[0]));
+      if (parts != inline_storage) free(parts);
+      parts = new_parts;
+      capacity = new_capacity;
+    }
+    struct generator_expression_part *part = &parts[num_parts++];
     if (peek(s) == T_for) {
       eat(s, T_for);
-      part = arena_allocate_type(&s->ast, struct generator_expression_part);
       part->type = GENERATOR_EXPRESSION_PART_FOR;
       part->target = parse_expression(s, PREC_OR);
       expect(s, T_in);
       part->expression = parse_expression(s, PREC_OR);
-    } else if (peek(s) == T_if) {
+    } else {
       eat(s, T_if);
-      part = arena_allocate_type(&s->ast, struct generator_expression_part);
       part->type = GENERATOR_EXPRESSION_PART_IF;
       part->target = NULL;
       part->expression = parse_expression(s, PREC_COMPARISON);
-    } else {
-      break;
     }
-    if (last == NULL) {
-      generator_expression->generator_expression.parts = part;
-    } else {
-      last->next = part;
-    }
-    last = part;
   }
-  return generator_expression;
+
+  size_t                parts_size = num_parts * sizeof(parts[0]);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_generator_expression) + parts_size, type);
+  expression->generator_expression.expression = left;
+  expression->generator_expression.num_parts = num_parts;
+  memcpy(&expression->generator_expression.parts, parts, parts_size);
+  return expression;
 }
 
 static struct argument *parse_argument(struct parser_state *s)
@@ -296,7 +305,8 @@ static struct argument *parse_argument(struct parser_state *s)
     }
 
     if (peek(s) == T_for) {
-      expression = parse_generator_expression(s, expression);
+      expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION,
+                                              expression);
     }
 
     argument->expression = expression;
@@ -421,8 +431,13 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   add_anchor(s, ',');
 
   union ast_expression *first = parse_expression(s, PREC_LIST + 1);
-  union ast_expression *expression
-      = parse_expression_list_helper(s, AST_LIST_DISPLAY, first);
+
+  union ast_expression *expression;
+  if (peek(s) == T_for) {
+    expression = parse_generator_expression(s, AST_LIST_COMPREHENSION, first);
+  } else {
+    expression = parse_expression_list_helper(s, AST_LIST_DISPLAY, first);
+  }
 
   remove_anchor(s, ',');
   remove_anchor(s, ']');
@@ -510,7 +525,8 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   union ast_expression *expression = parse_expression(s, PREC_LIST);
 
   if (peek(s) == T_for) {
-    expression = parse_generator_expression(s, expression);
+    expression
+        = parse_generator_expression(s, AST_GENERATOR_EXPRESSION, expression);
   }
 
   remove_anchor(s, ',');

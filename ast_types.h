@@ -70,13 +70,13 @@ struct generator_expression_part {
   enum generator_expression_part_type type;
   union ast_expression               *target;
   union ast_expression               *expression;
-  struct generator_expression_part   *next;
 };
 
 struct ast_generator_expression {
-  struct ast_node_base              base;
-  union ast_expression             *expression;
-  struct generator_expression_part *parts;
+  struct ast_node_base             base;
+  union ast_expression            *expression;
+  unsigned                         num_parts;
+  struct generator_expression_part parts[];
 };
 
 union ast_expression {

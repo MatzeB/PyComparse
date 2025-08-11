@@ -974,10 +974,11 @@ static void parse_import_statement(struct parser_state *s)
 
   do {
     struct dotted_name *dotted_name = parse_dotted_name(s);
-    if (accept(s, T_as)) {
-      unimplemented();
+    struct symbol *as = NULL;
+    if (accept(s, T_as) && skip_till(s, T_IDENTIFIER)) {
+      as = eat_identifier(s);
     }
-    emit_import_statement(&s->cg, dotted_name, NULL);
+    emit_import_statement(&s->cg, dotted_name, as);
   } while (accept(s, ','));
 }
 

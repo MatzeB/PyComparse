@@ -52,7 +52,7 @@ void emit_store(struct cg_state *s, struct symbol *symbol)
       info->index = cg_append_varname(s, symbol->string);
     } else {
       info->type = SYMBOL_NAME;
-      info->index = cg_append_name(s, symbol->string);
+      info->index = cg_register_name(s, symbol->string);
     }
   }
 

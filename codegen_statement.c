@@ -81,8 +81,23 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *name,
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
   cg_pop_op(s, OPCODE_IMPORT_NAME, name_index);
 
-  assert(as == NULL && "TODO");
-  emit_store(s, name->symbols[0]);
+  if (as == NULL) {
+    emit_store(s, name->symbols[0]);
+  } else {
+    unsigned num_symbols = name->num_symbols;
+    for (unsigned i = 1; i < num_symbols; i++) {
+      if (i > 1) {
+        cg_op(s, OPCODE_ROT_TWO, 0);
+        cg_pop_op(s, OPCODE_POP_TOP, 0);
+      }
+      cg_push_op(s, OPCODE_IMPORT_FROM,
+                 cg_register_name(s, name->symbols[i]->string));
+    }
+    emit_store(s, as);
+    if (num_symbols > 1) {
+      cg_pop_op(s, OPCODE_POP_TOP, 0);
+    }
+  }
 }
 
 void emit_return_statement(struct cg_state      *s,

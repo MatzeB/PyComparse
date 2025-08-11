@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "adt/arena.h"
+#include "adt/idynarray.h"
 #include "ast.h"
 #include "ast_types.h"
 #include "codegen.h"
@@ -248,23 +249,13 @@ parse_generator_expression(struct parser_state     *s,
                            union ast_expression    *left)
 {
   assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION);
-  struct generator_expression_part  inline_storage[4];
-  struct generator_expression_part *parts = inline_storage;
-  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
-  unsigned num_parts = 0;
+  struct generator_expression_part inline_storage[4];
+  struct idynarray                 parts;
+  idynarray_init(&parts, inline_storage, sizeof(inline_storage));
 
   while (peek(s) == T_for || peek(s) == T_if) {
-    if (num_parts + 1 >= capacity) {
-      unsigned                          new_capacity = capacity * 2;
-      struct generator_expression_part *new_parts
-          = malloc(new_capacity * sizeof(parts[0]));
-      if (new_parts == NULL) abort();
-      memcpy(new_parts, parts, num_parts * sizeof(parts[0]));
-      if (parts != inline_storage) free(parts);
-      parts = new_parts;
-      capacity = new_capacity;
-    }
-    struct generator_expression_part *part = &parts[num_parts++];
+    struct generator_expression_part *part
+        = idynarray_append(&parts, struct generator_expression_part);
     if (peek(s) == T_for) {
       eat(s, T_for);
       part->type = GENERATOR_EXPRESSION_PART_FOR;
@@ -279,12 +270,16 @@ parse_generator_expression(struct parser_state     *s,
     }
   }
 
-  size_t                parts_size = num_parts * sizeof(parts[0]);
+  unsigned num_parts
+      = idynarray_length(&parts, struct generator_expression_part);
+  size_t parts_size = num_parts * sizeof(struct generator_expression_part);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_generator_expression) + parts_size, type);
   expression->generator_expression.expression = left;
   expression->generator_expression.num_parts = num_parts;
-  memcpy(&expression->generator_expression.parts, parts, parts_size);
+  memcpy(&expression->generator_expression.parts, idynarray_data(&parts),
+         parts_size);
+  idynarray_free(&parts);
   return expression;
 }
 
@@ -415,11 +410,11 @@ parse_expression_list_helper(struct parser_state     *s,
                              enum ast_expression_type type,
                              union ast_expression *first, bool allow_slices)
 {
-  union ast_expression  *inline_storage[16];
-  union ast_expression **expressions = inline_storage;
-  expressions[0] = first;
-  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
-  unsigned num_expressions = 1;
+  union ast_expression *inline_storage[16];
+  struct idynarray      expressions;
+  idynarray_init(&expressions, inline_storage, sizeof(inline_storage));
+
+  *(idynarray_append(&expressions, union ast_expression *)) = first;
 
   for (;;) {
     if (!accept(s, ',')) break;
@@ -432,26 +427,18 @@ parse_expression_list_helper(struct parser_state     *s,
     } else {
       expression = parse_expression(s, PREC_LIST + 1);
     }
-    if (num_expressions + 1 >= capacity) {
-      unsigned               new_capacity = capacity * 2;
-      union ast_expression **new_expressions
-          = malloc(new_capacity * sizeof(expressions[0]));
-      if (new_expressions == NULL) abort();
-      memcpy(new_expressions, expressions,
-             num_expressions * sizeof(expressions[0]));
-      if (expressions != inline_storage) free(expressions);
-      expressions = new_expressions;
-      capacity = new_capacity;
-    }
-    expressions[num_expressions++] = expression;
+    *(idynarray_append(&expressions, union ast_expression *)) = expression;
   }
 
-  size_t expressions_size = num_expressions * sizeof(expressions[0]);
+  unsigned num_expressions
+      = idynarray_length(&expressions, union ast_expression *);
+  size_t expressions_size = num_expressions * sizeof(union ast_expression *);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_expression_list) + expressions_size, type);
   expression->expression_list.num_expressions = num_expressions;
-  memcpy(expression->expression_list.expressions, expressions,
+  memcpy(expression->expression_list.expressions, idynarray_data(&expressions),
          expressions_size);
+  idynarray_free(&expressions);
   return expression;
 }
 
@@ -511,25 +498,15 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
     return expression;
   }
 
-  struct dict_item  inline_storage[16];
-  struct dict_item *items = inline_storage;
-  unsigned capacity = sizeof(inline_storage) / sizeof(inline_storage[0]);
-  unsigned num_items = 0;
+  struct dict_item inline_storage[16];
+  struct idynarray items;
+  idynarray_init(&items, inline_storage, sizeof(inline_storage));
 
   union ast_expression *key = first;
   for (;;) {
     expect(s, ':');
     union ast_expression *value = parse_expression(s, PREC_LIST + 1);
-    if (num_items + 1 >= capacity) {
-      unsigned          new_capacity = capacity * 2;
-      struct dict_item *new_items = malloc(new_capacity * sizeof(items[0]));
-      if (new_items == NULL) abort();
-      memcpy(new_items, items, num_items * sizeof(items[0]));
-      if (items != inline_storage) free(items);
-      items = new_items;
-      capacity = new_capacity;
-    }
-    struct dict_item *item = &items[num_items++];
+    struct dict_item     *item = idynarray_append(&items, struct dict_item);
     item->key = key;
     item->value = value;
 
@@ -541,11 +518,13 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   remove_anchor(s, '}');
   eat(s, '}');
 
-  size_t                items_size = num_items * sizeof(items[0]);
+  unsigned              num_items = idynarray_length(&items, struct dict_item);
+  size_t                items_size = num_items * sizeof(struct dict_item);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_dict_item_list) + items_size, AST_DICT_DISPLAY);
   expression->dict_item_list.num_items = num_items;
-  memcpy(expression->dict_item_list.items, items, items_size);
+  memcpy(expression->dict_item_list.items, idynarray_data(&items), items_size);
+  idynarray_free(&items);
   return expression;
 }
 
@@ -974,7 +953,7 @@ static void parse_import_statement(struct parser_state *s)
 
   do {
     struct dotted_name *dotted_name = parse_dotted_name(s);
-    struct symbol *as = NULL;
+    struct symbol      *as = NULL;
     if (accept(s, T_as) && skip_till(s, T_IDENTIFIER)) {
       as = eat_identifier(s);
     }

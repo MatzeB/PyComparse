@@ -7,46 +7,21 @@
 #include "ast_types.h"
 #include "object_intern.h"
 
+enum ast_expression_type ast_expression_type(union ast_expression *expression)
+{
+  return expression->type;
+}
+
 union object *ast_expression_as_constant(union ast_expression *expression)
 {
-  switch (expression->type) {
+  switch (ast_expression_type(expression)) {
   case AST_CONST:
     return expression->cnst.object;
   case AST_EXPRESSION_LIST:
     return expression->expression_list.as_constant;
-  case AST_ATTR:
-  case AST_BINEXPR_ADD:
-  case AST_BINEXPR_AND:
-  case AST_BINEXPR_ASSIGN:
-  case AST_BINEXPR_EQUAL:
-  case AST_BINEXPR_FLOORDIV:
-  case AST_BINEXPR_GREATER:
-  case AST_BINEXPR_GREATER_EQUAL:
-  case AST_BINEXPR_IN:
-  case AST_BINEXPR_IS:
-  case AST_BINEXPR_IS_NOT:
-  case AST_BINEXPR_LESS:
-  case AST_BINEXPR_LESS_EQUAL:
-  case AST_BINEXPR_LOGICAL_AND:
-  case AST_BINEXPR_LOGICAL_OR:
-  case AST_BINEXPR_MATMUL:
-  case AST_BINEXPR_MOD:
-  case AST_BINEXPR_MUL:
-  case AST_BINEXPR_NOT_IN:
-  case AST_BINEXPR_OR:
-  case AST_BINEXPR_SUB:
-  case AST_BINEXPR_TRUEDIV:
-  case AST_BINEXPR_UNEQUAL:
-  case AST_BINEXPR_XOR:
-  case AST_CALL:
-  case AST_IDENTIFIER:
-  case AST_UNEXPR_INVERT:
-  case AST_UNEXPR_NEGATIVE:
-  case AST_UNEXPR_NOT:
-  case AST_UNEXPR_PLUS:
+  default:
     return NULL;
   }
-  abort();
 }
 
 union object *ast_tuple_compute_constant(struct object_intern       *intern,

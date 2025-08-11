@@ -68,7 +68,7 @@ static void parse_error_expected(struct parser_state *s, const char *what)
   s->error = true;
 }
 
-static inline uint16_t peek(const struct parser_state *s)
+static inline enum token_kind peek(const struct parser_state *s)
 {
   return s->scanner.token.kind;
 }
@@ -78,7 +78,7 @@ static inline void next_token(struct parser_state *s)
   scanner_next_token(&s->scanner);
 }
 
-static inline void eat(struct parser_state *s, uint16_t token_kind)
+static inline void eat(struct parser_state *s, enum token_kind token_kind)
 {
   assert(peek(s) == token_kind);
   (void)token_kind;
@@ -94,14 +94,14 @@ static inline struct symbol *eat_identifier(struct parser_state *s)
 }
 
 static inline union object *peek_get_object(struct parser_state *s,
-                                            uint16_t             token_kind)
+                                            enum token_kind      token_kind)
 {
   assert(token_kind == T_STRING || token_kind == T_INTEGER);
   assert(peek(s) == token_kind);
   return s->scanner.token.u.object;
 }
 
-static inline bool accept(struct parser_state *s, uint16_t token_kind)
+static inline bool accept(struct parser_state *s, enum token_kind token_kind)
 {
   if (peek(s) == token_kind) {
     next_token(s);
@@ -110,13 +110,13 @@ static inline bool accept(struct parser_state *s, uint16_t token_kind)
   return false;
 }
 
-static void add_anchor(struct parser_state *s, uint16_t token_kind)
+static void add_anchor(struct parser_state *s, enum token_kind token_kind)
 {
   assert(token_kind < sizeof(s->anchor_set) / sizeof(s->anchor_set[0]));
   ++s->anchor_set[token_kind];
 }
 
-static void remove_anchor(struct parser_state *s, uint16_t token_kind)
+static void remove_anchor(struct parser_state *s, enum token_kind token_kind)
 {
   assert(token_kind < sizeof(s->anchor_set) / sizeof(s->anchor_set[0]));
   assert(s->anchor_set[token_kind] > 0);
@@ -124,9 +124,9 @@ static void remove_anchor(struct parser_state *s, uint16_t token_kind)
 }
 
 static void eat_until_matching_token(struct parser_state *s,
-                                     uint16_t             token_kind)
+                                     enum token_kind      token_kind)
 {
-  uint16_t end_token_kind;
+  enum token_kind end_token_kind;
   switch (token_kind) {
   case '(':
     end_token_kind = ')';
@@ -191,7 +191,8 @@ static void eat_until_anchor(struct parser_state *s)
   }
 }
 
-static bool skip_till(struct parser_state *s, uint16_t expected_token_kind)
+static bool skip_till(struct parser_state *s,
+                      enum token_kind      expected_token_kind)
 {
   if (UNLIKELY(peek(s) != expected_token_kind)) {
     parse_error_expected(s, token_kind_name(expected_token_kind));
@@ -204,7 +205,7 @@ static bool skip_till(struct parser_state *s, uint16_t expected_token_kind)
   return true;
 }
 
-static void expect(struct parser_state *s, uint16_t expected_token_kind)
+static void expect(struct parser_state *s, enum token_kind expected_token_kind)
 {
   if (skip_till(s, expected_token_kind)) eat(s, expected_token_kind);
 }
@@ -223,7 +224,7 @@ ast_allocate_expression_(struct parser_state *s, size_t size,
 #define ast_allocate_expression(s, type, type_id)                             \
   ast_allocate_expression_((s), sizeof(type), (type_id))
 
-static union ast_expression *ast_new_const(struct parser_state *s,
+static union ast_expression *ast_const_new(struct parser_state *s,
                                            union object        *object)
 {
   union ast_expression *expression
@@ -232,10 +233,10 @@ static union ast_expression *ast_new_const(struct parser_state *s,
   return expression;
 }
 
-static union ast_expression *ast_new_invalid(struct parser_state *s)
+static union ast_expression *ast_invalid(struct parser_state *s)
 {
   union object *object = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
-  return ast_new_const(s, object);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_expression(struct parser_state *s,
@@ -319,7 +320,7 @@ static union ast_expression *parse_attr(struct parser_state  *s,
                                         union ast_expression *left)
 {
   eat(s, '.');
-  if (!skip_till(s, T_IDENTIFIER)) return ast_new_invalid(s);
+  if (!skip_till(s, T_IDENTIFIER)) return ast_invalid(s);
   struct symbol *symbol = eat_identifier(s);
 
   union ast_expression *expression
@@ -371,10 +372,48 @@ static inline union ast_expression *parse_unexpr(struct parser_state *s,
   return expression;
 }
 
+static bool is_expression_start(enum token_kind token_kind)
+{
+  switch (token_kind) {
+  case EXPRESSION_START_CASES:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static union ast_expression *parse_expression_or_slice(struct parser_state *s)
+{
+  union ast_expression *expression = NULL;
+  if (peek(s) != ':') {
+    expression = parse_expression(s, PREC_LIST + 1);
+    if (peek(s) != ':') {
+      return expression;
+    }
+  }
+  eat(s, ':');
+
+  union ast_expression *start = expression;
+  union ast_expression *stop = NULL;
+  union ast_expression *step = NULL;
+  if (is_expression_start(peek(s))) {
+    stop = parse_expression(s, PREC_LIST + 1);
+  }
+  if (accept(s, ':') && is_expression_start(peek(s))) {
+    step = parse_expression(s, PREC_LIST + 1);
+  }
+
+  expression = ast_allocate_expression(s, struct ast_slice, AST_SLICE);
+  expression->slice.start = start;
+  expression->slice.stop = stop;
+  expression->slice.step = step;
+  return expression;
+}
+
 static union ast_expression *
 parse_expression_list_helper(struct parser_state     *s,
                              enum ast_expression_type type,
-                             union ast_expression    *first)
+                             union ast_expression *first, bool allow_slices)
 {
   union ast_expression  *inline_storage[16];
   union ast_expression **expressions = inline_storage;
@@ -384,27 +423,27 @@ parse_expression_list_helper(struct parser_state     *s,
 
   for (;;) {
     if (!accept(s, ',')) break;
-    switch (peek(s)) {
-    case EXPRESSION_START_CASES: {
-      union ast_expression *expression = parse_expression(s, PREC_LIST + 1);
-      if (num_expressions + 1 >= capacity) {
-        unsigned               new_capacity = capacity * 2;
-        union ast_expression **new_expressions
-            = malloc(new_capacity * sizeof(expressions[0]));
-        if (new_expressions == NULL) abort();
-        memcpy(new_expressions, expressions,
-               num_expressions * sizeof(expressions[0]));
-        if (expressions != inline_storage) free(expressions);
-        expressions = new_expressions;
-        capacity = new_capacity;
-      }
-      expressions[num_expressions++] = expression;
-      continue;
-    }
-    default:
+    if (!is_expression_start(peek(s)) && (!allow_slices || peek(s) != ':')) {
       break;
     }
-    break;
+    union ast_expression *expression;
+    if (allow_slices) {
+      expression = parse_expression_or_slice(s);
+    } else {
+      expression = parse_expression(s, PREC_LIST + 1);
+    }
+    if (num_expressions + 1 >= capacity) {
+      unsigned               new_capacity = capacity * 2;
+      union ast_expression **new_expressions
+          = malloc(new_capacity * sizeof(expressions[0]));
+      if (new_expressions == NULL) abort();
+      memcpy(new_expressions, expressions,
+             num_expressions * sizeof(expressions[0]));
+      if (expressions != inline_storage) free(expressions);
+      expressions = new_expressions;
+      capacity = new_capacity;
+    }
+    expressions[num_expressions++] = expression;
   }
 
   size_t expressions_size = num_expressions * sizeof(expressions[0]);
@@ -436,7 +475,8 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   if (peek(s) == T_for) {
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION, first);
   } else {
-    expression = parse_expression_list_helper(s, AST_LIST_DISPLAY, first);
+    expression = parse_expression_list_helper(s, AST_LIST_DISPLAY, first,
+                                              /*allow_slices=*/false);
   }
 
   remove_anchor(s, ',');
@@ -462,7 +502,8 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
     union ast_expression *expression
-        = parse_expression_list_helper(s, AST_SET_DISPLAY, first);
+        = parse_expression_list_helper(s, AST_SET_DISPLAY, first,
+                                       /*allow_slices=*/false);
 
     remove_anchor(s, ',');
     remove_anchor(s, '}');
@@ -569,14 +610,14 @@ static union ast_expression *parse_string(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_STRING);
   eat(s, T_STRING);
-  return ast_new_const(s, object);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_integer(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_INTEGER);
   eat(s, T_INTEGER);
-  return ast_new_const(s, object);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_singleton(struct parser_state *s,
@@ -584,7 +625,7 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 {
   next_token(s);
   union object *object = object_intern_singleton(&s->cg.objects, type);
-  return ast_new_const(s, object);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_true(struct parser_state *s)
@@ -694,7 +735,13 @@ static union ast_expression *parse_subscript(struct parser_state  *s,
   eat(s, '[');
   add_anchor(s, ']');
   add_anchor(s, ',');
-  union ast_expression *right = parse_expression(s, PREC_LIST);
+
+  union ast_expression *right = parse_expression_or_slice(s);
+  if (peek(s) == ',') {
+    right = parse_expression_list_helper(s, AST_EXPRESSION_LIST, right,
+                                         /*allow_slices=*/true);
+  }
+
   remove_anchor(s, ',');
   remove_anchor(s, ']');
   expect(s, ']');
@@ -710,7 +757,8 @@ static union ast_expression *parse_expr_list(struct parser_state  *s,
                                              union ast_expression *left)
 {
   union ast_expression *expression
-      = parse_expression_list_helper(s, AST_EXPRESSION_LIST, left);
+      = parse_expression_list_helper(s, AST_EXPRESSION_LIST, left,
+                                     /*allow_slices=*/false);
   expression->expression_list.as_constant = ast_tuple_compute_constant(
       &s->cg.objects, &expression->expression_list);
   return expression;
@@ -789,7 +837,7 @@ static union ast_expression *parse_not_in(struct parser_state  *s,
   eat(s, T_not);
   if (!accept(s, T_in)) {
     parse_error_expected(s, "in");
-    return ast_new_invalid(s);
+    return ast_invalid(s);
   }
 
   union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
@@ -862,21 +910,21 @@ static const struct postfix_expression_parser postfix_parsers[] = {
 union ast_expression *parse_expression(struct parser_state *s,
                                        enum precedence      precedence)
 {
-  uint16_t token_kind = peek(s);
+  enum token_kind token_kind = peek(s);
   if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
     parse_error_expected(s, "expression");
-    unimplemented();
+    return ast_invalid(s);
   }
   const struct prefix_expression_parser *prefix_parser
       = &prefix_parsers[token_kind];
   if (prefix_parser->func == NULL || prefix_parser->precedence < precedence) {
     parse_error_expected(s, "expression");
-    unimplemented();
+    return ast_invalid(s);
   }
   union ast_expression *result = prefix_parser->func(s);
 
   for (;;) {
-    uint16_t postifx_token_kind = peek(s);
+    enum token_kind postifx_token_kind = peek(s);
     if (postifx_token_kind
         >= sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
       break;
@@ -1159,10 +1207,10 @@ static void parse_statement(struct parser_state *s)
 
 union object *parse(struct parser_state *s, const char *filename)
 {
-  next_token(s);
-
   cg_init(&s->cg, s->scanner.symbol_table, filename);
   emit_module_begin(&s->cg);
+
+  next_token(s);
 
   add_anchor(s, T_EOF);
   while (peek(s) != T_EOF) {

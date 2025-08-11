@@ -101,7 +101,7 @@ void emit_load(struct cg_state *s, struct symbol *symbol)
 
 void emit_assignment(struct cg_state *s, union ast_expression *target)
 {
-  switch (target->type) {
+  switch (ast_expression_type(target)) {
   case AST_IDENTIFIER:
     emit_store(s, target->identifier.symbol);
     return;
@@ -196,6 +196,34 @@ static void emit_set_display(struct cg_state            *s,
   cg_push_op(s, OPCODE_BUILD_SET, num_expressions);
 }
 
+static void emit_none(struct cg_state *s)
+{
+  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+}
+
+static void emit_slice(struct cg_state *s, struct ast_slice *slice)
+{
+  if (slice->start) {
+    emit_expression(s, slice->start);
+  } else {
+    emit_none(s);
+  }
+  if (slice->stop) {
+    emit_expression(s, slice->stop);
+  } else {
+    emit_none(s);
+  }
+  unsigned arg;
+  if (slice->step) {
+    emit_expression(s, slice->step);
+    arg = 3;
+  } else {
+    arg = 2;
+  }
+  cg_pop(s, arg);
+  cg_push_op(s, OPCODE_BUILD_SLICE, arg);
+}
+
 static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 {
   union object *object = tuple->as_constant;
@@ -256,7 +284,7 @@ static void emit_generator_expression(
 static void emit_expression_impl(struct cg_state      *s,
                                  union ast_expression *expression, bool drop)
 {
-  switch ((enum ast_expression_type)expression->type) {
+  switch (ast_expression_type(expression)) {
   case AST_ATTR:
     emit_attr(s, &expression->attr);
     break;
@@ -360,6 +388,9 @@ static void emit_expression_impl(struct cg_state      *s,
     break;
   case AST_SET_DISPLAY:
     emit_set_display(s, &expression->expression_list);
+    break;
+  case AST_SLICE:
+    emit_slice(s, &expression->slice);
     break;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);

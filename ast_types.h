@@ -16,14 +16,15 @@ struct ast_attr {
   struct symbol        *attr;
 };
 
-struct ast_identifier {
-  struct ast_node_base base;
-  struct symbol       *symbol;
+struct ast_binexpr {
+  struct ast_node_base  base;
+  union ast_expression *left;
+  union ast_expression *right;
 };
 
-struct ast_const {
-  struct ast_node_base base;
-  union object        *object;
+struct argument {
+  union ast_expression *expression;
+  struct argument      *next;
 };
 
 struct ast_call {
@@ -32,22 +33,9 @@ struct ast_call {
   struct argument      *arguments;
 };
 
-struct ast_binexpr {
-  struct ast_node_base  base;
-  union ast_expression *left;
-  union ast_expression *right;
-};
-
-struct ast_unexpr {
-  struct ast_node_base  base;
-  union ast_expression *op;
-};
-
-struct ast_expression_list {
-  struct ast_node_base  base;
-  union object         *as_constant;
-  unsigned              num_expressions;
-  union ast_expression *expressions[];
+struct ast_const {
+  struct ast_node_base base;
+  union object        *object;
 };
 
 struct dict_item {
@@ -59,6 +47,13 @@ struct ast_dict_item_list {
   struct ast_node_base base;
   unsigned             num_items;
   struct dict_item     items[];
+};
+
+struct ast_expression_list {
+  struct ast_node_base  base;
+  union object         *as_constant;
+  unsigned              num_expressions;
+  union ast_expression *expressions[];
 };
 
 enum generator_expression_part_type {
@@ -79,6 +74,23 @@ struct ast_generator_expression {
   struct generator_expression_part parts[];
 };
 
+struct ast_identifier {
+  struct ast_node_base base;
+  struct symbol       *symbol;
+};
+
+struct ast_slice {
+  struct ast_node_base  base;
+  union ast_expression *start;
+  union ast_expression *stop;
+  union ast_expression *step;
+};
+
+struct ast_unexpr {
+  struct ast_node_base  base;
+  union ast_expression *op;
+};
+
 union ast_expression {
   uint8_t              type;
   struct ast_node_base base;
@@ -87,16 +99,12 @@ union ast_expression {
   struct ast_binexpr              binexpr;
   struct ast_call                 call;
   struct ast_const                cnst;
+  struct ast_dict_item_list       dict_item_list;
+  struct ast_expression_list      expression_list;
   struct ast_generator_expression generator_expression;
   struct ast_identifier           identifier;
-  struct ast_expression_list      expression_list;
-  struct ast_dict_item_list       dict_item_list;
+  struct ast_slice                slice;
   struct ast_unexpr               unexpr;
-};
-
-struct argument {
-  union ast_expression *expression;
-  struct argument      *next;
 };
 
 struct dotted_name {

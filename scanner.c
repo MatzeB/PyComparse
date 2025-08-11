@@ -141,20 +141,19 @@ static void eat(struct scanner_state *s, int c)
   next_char(s);
 }
 
-static void eat_line_comment(struct scanner_state *s)
+static void scan_line_comment(struct scanner_state *s)
 {
   eat(s, '#');
   for (;;) {
     switch (s->c) {
     case '\r':
       next_char(s);
-      if (s->c == '\n') {
-        /* clang-format off */
-        /* fallthrough */
+      if (s->c == '\n') next_char(s);
+      goto new_line;
     case '\n':
-        /* clang-format on */
-        next_char(s);
-      }
+      next_char(s);
+      /* fallthrough */
+    new_line:
       ++s->line;
       return;
     case C_EOF:
@@ -380,13 +379,12 @@ static void scan_escape_sequence(struct scanner_state *s,
     abort();
   case '\r':
     next_char(s);
-    if (s->c == '\n') {
-      /* fallthrough */
-      /* clang-format off */
+    if (s->c == '\n') next_char(s);
+    goto new_line;
   case '\n':
-      /* clang-format on */
-      next_char(s);
-    }
+    next_char(s);
+    /* fallthrough */
+  new_line:
     ++s->line;
     return;
   case C_EOF:
@@ -451,13 +449,12 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
       continue;
     case '\r':
       next_char(s);
-      if (s->c == '\n') {
-        /* clang-format off */
-        /* fallthrough */
+      if (s->c == '\n') next_char(s);
+      goto new_line;
     case '\n':
-        /* clang-format on */
-        next_char(s);
-      }
+      next_char(s);
+      /* fallthrough */
+    new_line:
       ++s->line;
       if (!triplequote) {
         fprintf(stderr, "TODO: error unterminated string literal\n");
@@ -509,6 +506,7 @@ static void scan_eof(struct scanner_state *s)
 
 static bool scan_indentation(struct scanner_state *s)
 {
+  assert(s->at_begin_of_line);
   if (s->pending_dedents > 0) {
     assert(s->indentation_stack_top > 0);
     --s->indentation_stack_top;
@@ -525,13 +523,12 @@ static bool scan_indentation(struct scanner_state *s)
     switch (s->c) {
     case '\r':
       next_char(s);
-      if (s->c == '\n') {
-        /* clang-format off */
-        /* fallthrough */
+      if (s->c == '\n') next_char(s);
+      goto new_line;
     case '\n':
-        /* clang-format on */
-        next_char(s);
-      }
+      next_char(s);
+      /* fallthrough */
+    new_line:
       // TODO: empty line as NEWLINE in interactive mode
       ++s->line;
       column = 0;
@@ -549,7 +546,8 @@ static bool scan_indentation(struct scanner_state *s)
       column = 0;
       continue;
     case '#':
-      eat_line_comment(s);
+      scan_line_comment(s);
+      column = 0;
       continue;
     case C_EOF:
       scan_eof(s);
@@ -603,6 +601,7 @@ static bool scan_indentation(struct scanner_state *s)
 
 void scanner_next_token(struct scanner_state *s)
 {
+restart:
   if (s->at_begin_of_line) {
     if (scan_indentation(s)) {
       return;
@@ -614,13 +613,12 @@ void scanner_next_token(struct scanner_state *s)
     switch (s->c) {
     case '\r':
       next_char(s);
-      if (s->c == '\n') {
-        /* clang-format off */
-        /* fallthrough */
+      if (s->c == '\n') next_char(s);
+      goto new_line;
     case '\n':
-        /* clang-format on */
-        next_char(s);
-      }
+      next_char(s);
+      /* fallthrough */
+    new_line:
       ++s->line;
       if (s->paren_level > 0) {
         continue;
@@ -636,8 +634,9 @@ void scanner_next_token(struct scanner_state *s)
       continue;
 
     case '#':
-      eat_line_comment(s);
-      continue;
+      scan_line_comment(s);
+      s->at_begin_of_line = true;
+      goto restart;
 
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
       char first_char = (char)s->c;
@@ -968,6 +967,7 @@ void scanner_init(struct scanner_state *s, FILE *input,
                   struct object_intern *objects, struct arena *strings)
 {
   memset(s, 0, sizeof(*s));
+  s->line = 1;
   s->input = input;
   s->at_begin_of_line = true;
   s->read_buffer = malloc(16 * 1024 - 16);

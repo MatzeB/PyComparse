@@ -40,11 +40,14 @@ enum ast_expression_type {
   AST_LIST_COMPREHENSION,
   AST_LIST_DISPLAY,
   AST_SET_DISPLAY,
+  AST_SLICE,
   AST_UNEXPR_INVERT,
   AST_UNEXPR_NEGATIVE,
   AST_UNEXPR_NOT,
   AST_UNEXPR_PLUS,
 };
+
+enum ast_expression_type ast_expression_type(union ast_expression *expression);
 
 union object *ast_expression_as_constant(union ast_expression *expression);
 

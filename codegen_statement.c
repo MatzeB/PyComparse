@@ -58,7 +58,9 @@ static unsigned emit_dotted_name(struct cg_state *s, struct dotted_name *name)
   char         *chars = (char *)arena_allocate(arena, length, 1);
   char         *c = chars;
   for (unsigned i = 0; i < num_symbols; i++) {
-    if (i > 0) *c++ = '.';
+    if (i > 0) {
+      *c++ = '.';
+    }
     const char *symbol_string = name->symbols[i]->string;
     size_t      symbol_length = strlen(symbol_string);
     memcpy(c, symbol_string, symbol_length);

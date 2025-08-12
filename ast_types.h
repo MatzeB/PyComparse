@@ -111,3 +111,8 @@ struct dotted_name {
   unsigned       num_symbols;
   struct symbol *symbols[];
 };
+
+struct from_import_pair {
+  struct symbol *name;
+  struct symbol *as;
+};

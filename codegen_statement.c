@@ -47,7 +47,8 @@ void emit_expression_statement(struct cg_state      *s,
   emit_expression_drop_result(s, expression);
 }
 
-static unsigned emit_dotted_name(struct cg_state *s, struct dotted_name *name)
+static unsigned register_dotted_name(struct cg_state    *s,
+                                     struct dotted_name *name)
 {
   unsigned num_symbols = name->num_symbols;
   unsigned length = num_symbols;
@@ -71,27 +72,77 @@ static unsigned emit_dotted_name(struct cg_state *s, struct dotted_name *name)
   return cg_register_name(s, chars);
 }
 
-void emit_import_statement(struct cg_state *s, struct dotted_name *name,
+void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
+                                struct dotted_name *module, unsigned num_pairs,
+                                struct from_import_pair *pairs)
+{
+  if (unreachable(s)) return;
+  unsigned module_name = module != NULL ? register_dotted_name(s, module)
+                                        : cg_register_name(s, "");
+  bool     import_star = (num_pairs == 0);
+
+  struct arena *arena = object_intern_arena(&s->objects);
+  union object *name_tuple;
+  if (import_star) {
+    name_tuple = object_new_tuple_begin(arena, 1);
+    union object *name = object_intern_cstring(&s->objects, "*");
+    object_new_tuple_set_at(name_tuple, 0, name);
+  } else {
+    name_tuple = object_new_tuple_begin(arena, num_pairs);
+    for (unsigned i = 0; i < num_pairs; i++) {
+      struct from_import_pair *pair = &pairs[i];
+      union object            *name
+          = object_intern_cstring(&s->objects, pair->name->string);
+      object_new_tuple_set_at(name_tuple, i, name);
+    }
+  }
+  object_new_tuple_end(name_tuple);
+
+  cg_load_const(s, object_intern_int(&s->objects, num_prefix_dots));
+  cg_load_const(s, name_tuple);
+  cg_pop_op(s, OPCODE_IMPORT_NAME, module_name);
+  if (import_star) {
+    cg_pop_op(s, OPCODE_IMPORT_STAR, 0);
+  } else {
+    for (unsigned i = 0; i < num_pairs; i++) {
+      struct from_import_pair *pair = &pairs[i];
+      struct symbol           *name = pair->name;
+      struct symbol           *as = pair->as != NULL ? pair->as : name;
+      cg_push_op(s, OPCODE_IMPORT_FROM, cg_register_name(s, name->string));
+      emit_store(s, as);
+    }
+    cg_pop_op(s, OPCODE_POP_TOP, 0);
+  }
+}
+
+void emit_from_import_star_statement(struct cg_state    *s,
+                                     unsigned            num_prefix_dots,
+                                     struct dotted_name *module)
+{
+  emit_from_import_statement(s, num_prefix_dots, module, 0, NULL);
+}
+
+void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as)
 {
   if (unreachable(s)) return;
-  unsigned      name_index = emit_dotted_name(s, name);
+  unsigned      module_name = register_dotted_name(s, module);
   union object *object = object_intern_int(&s->objects, 0);
   cg_load_const(s, object);
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
-  cg_pop_op(s, OPCODE_IMPORT_NAME, name_index);
+  cg_pop_op(s, OPCODE_IMPORT_NAME, module_name);
 
   if (as == NULL) {
-    emit_store(s, name->symbols[0]);
+    emit_store(s, module->symbols[0]);
   } else {
-    unsigned num_symbols = name->num_symbols;
+    unsigned num_symbols = module->num_symbols;
     for (unsigned i = 1; i < num_symbols; i++) {
       if (i > 1) {
         cg_op(s, OPCODE_ROT_TWO, 0);
         cg_pop_op(s, OPCODE_POP_TOP, 0);
       }
       cg_push_op(s, OPCODE_IMPORT_FROM,
-                 cg_register_name(s, name->symbols[i]->string));
+                 cg_register_name(s, module->symbols[i]->string));
     }
     emit_store(s, as);
     if (num_symbols > 1) {

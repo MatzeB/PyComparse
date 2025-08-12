@@ -2,11 +2,12 @@
 
 #include <stdbool.h>
 
+struct ast_generator_expression;
 struct basic_block;
 struct cg_state;
 struct dotted_name;
+struct from_import_pair;
 struct symbol;
-struct ast_generator_expression;
 union ast_expression;
 
 struct if_state {
@@ -30,8 +31,14 @@ union object *emit_module_end(struct cg_state *s);
 
 void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression);
-void emit_import_statement(struct cg_state *s, struct dotted_name *name,
+void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as);
+void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
+                                struct dotted_name *module, unsigned num_pairs,
+                                struct from_import_pair *pairs);
+void emit_from_import_star_statement(struct cg_state    *s,
+                                     unsigned            num_prefix_dots,
+                                     struct dotted_name *module);
 void emit_return_statement(struct cg_state      *s,
                            union ast_expression *expression);
 

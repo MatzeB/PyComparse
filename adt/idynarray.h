@@ -57,7 +57,7 @@ static inline unsigned idynarray_size(struct idynarray *a)
 #define idynarray_length(dynarray, type)                                      \
   (idynarray_size((dynarray)) / (unsigned)sizeof(type))
 
-static char *idynarray_data(struct idynarray *a)
+static void *idynarray_data(struct idynarray *a)
 {
   return a->data;
 }

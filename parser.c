@@ -240,6 +240,12 @@ static union ast_expression *ast_invalid(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
+static struct symbol *symbol_invalid(struct parser_state *s)
+{
+  (void)s;
+  unimplemented();
+}
+
 static union ast_expression *parse_expression(struct parser_state *s,
                                               enum precedence      precedence);
 
@@ -947,6 +953,63 @@ static struct dotted_name *parse_dotted_name(struct parser_state *s)
   return result;
 }
 
+static void parse_from_import_statement(struct parser_state *s)
+{
+  eat(s, T_from);
+
+  unsigned num_prefix_dots = 0;
+  while (accept(s, '.')) {
+    num_prefix_dots++;
+  }
+
+  struct dotted_name *module = NULL;
+  if (num_prefix_dots == 0 || peek(s) == T_IDENTIFIER) {
+    module = parse_dotted_name(s);
+  }
+
+  struct from_import_pair inline_storage[16];
+  struct idynarray        pairs;
+  idynarray_init(&pairs, inline_storage, sizeof(inline_storage));
+
+  expect(s, T_import);
+
+  if (accept(s, '*')) {
+    emit_from_import_star_statement(&s->cg, num_prefix_dots, module);
+    return;
+  }
+
+  bool braced = accept(s, '(');
+  for (;;) {
+    struct symbol *name;
+    if (skip_till(s, T_IDENTIFIER)) {
+      name = eat_identifier(s);
+    } else {
+      name = symbol_invalid(s);
+    }
+    struct symbol *as = NULL;
+    if (accept(s, T_as)) {
+      if (skip_till(s, T_IDENTIFIER)) {
+        as = eat_identifier(s);
+      } else {
+        as = symbol_invalid(s);
+      }
+    }
+    struct from_import_pair *pair
+        = idynarray_append(&pairs, struct from_import_pair);
+    pair->name = name;
+    pair->as = as;
+
+    if (!accept(s, ',')) break;
+    if (braced && peek(s) == ')') break;
+  }
+
+  if (braced) expect(s, ')');
+
+  unsigned num_pairs = idynarray_length(&pairs, struct from_import_pair);
+  emit_from_import_statement(&s->cg, num_prefix_dots, module, num_pairs,
+                             idynarray_data(&pairs));
+}
+
 static void parse_import_statement(struct parser_state *s)
 {
   eat(s, T_import);
@@ -979,6 +1042,9 @@ static void parse_small_statement(struct parser_state *s)
   switch (peek(s)) {
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
+    break;
+  case T_from:
+    parse_from_import_statement(s);
     break;
   case T_import:
     parse_import_statement(s);

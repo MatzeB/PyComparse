@@ -19,12 +19,137 @@
 #include "symbol_types.h"
 #include "util.h"
 
-static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr,
-                         uint8_t opcode)
+static enum opcode ast_binexpr_to_opcode(enum ast_expression_type type)
+{
+  static const enum opcode opcodes[] = {
+    [AST_BINEXPR_ADD] = OPCODE_BINARY_ADD,
+    [AST_BINEXPR_ADD_ASSIGN] = OPCODE_INPLACE_ADD,
+    [AST_BINEXPR_AND] = OPCODE_BINARY_AND,
+    [AST_BINEXPR_AND_ASSIGN] = OPCODE_INPLACE_AND,
+    [AST_BINEXPR_FLOORDIV] = OPCODE_BINARY_FLOOR_DIVIDE,
+    [AST_BINEXPR_FLOORDIV_ASSIGN] = OPCODE_INPLACE_FLOOR_DIVIDE,
+    [AST_BINEXPR_MATMUL] = OPCODE_BINARY_MATRIX_MULTIPLY,
+    [AST_BINEXPR_MATMUL_ASSIGN] = OPCODE_INPLACE_MATRIX_MULTIPLY,
+    [AST_BINEXPR_MOD] = OPCODE_BINARY_MODULO,
+    [AST_BINEXPR_MOD_ASSIGN] = OPCODE_INPLACE_MODULO,
+    [AST_BINEXPR_MUL] = OPCODE_BINARY_MULTIPLY,
+    [AST_BINEXPR_MUL_ASSIGN] = OPCODE_INPLACE_MULTIPLY,
+    [AST_BINEXPR_OR] = OPCODE_BINARY_OR,
+    [AST_BINEXPR_OR_ASSIGN] = OPCODE_INPLACE_OR,
+    [AST_BINEXPR_POWER] = OPCODE_BINARY_POWER,
+    [AST_BINEXPR_POWER_ASSIGN] = OPCODE_INPLACE_POWER,
+    [AST_BINEXPR_SHIFT_LEFT] = OPCODE_BINARY_LSHIFT,
+    [AST_BINEXPR_SHIFT_LEFT_ASSIGN] = OPCODE_INPLACE_LSHIFT,
+    [AST_BINEXPR_SHIFT_RIGHT] = OPCODE_INPLACE_RSHIFT,
+    [AST_BINEXPR_SHIFT_RIGHT_ASSIGN] = OPCODE_INPLACE_RSHIFT,
+    [AST_BINEXPR_SUB] = OPCODE_BINARY_SUBTRACT,
+    [AST_BINEXPR_SUB_ASSIGN] = OPCODE_INPLACE_SUBTRACT,
+    [AST_BINEXPR_SUBSCRIPT] = OPCODE_BINARY_SUBSCR,
+    [AST_BINEXPR_TRUEDIV] = OPCODE_BINARY_TRUE_DIVIDE,
+    [AST_BINEXPR_TRUEDIV_ASSIGN] = OPCODE_INPLACE_TRUE_DIVIDE,
+    [AST_BINEXPR_XOR] = OPCODE_BINARY_XOR,
+    [AST_BINEXPR_XOR_ASSIGN] = OPCODE_INPLACE_XOR,
+  };
+  assert(type < sizeof(opcodes) / sizeof(opcodes[0]));
+  enum opcode result = opcodes[type];
+  assert(result > 0);
+  return result;
+}
+
+static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr)
 {
   emit_expression(s, binexpr->left);
   emit_expression(s, binexpr->right);
+  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
   cg_pop_op(s, opcode, 0);
+}
+
+void emit_assignment(struct cg_state *s, union ast_expression *target)
+{
+  switch (ast_expression_type(target)) {
+  case AST_IDENTIFIER:
+    emit_store(s, target->identifier.symbol);
+    return;
+  case AST_ATTR: {
+    struct ast_attr *attr = &target->attr;
+    emit_expression(s, attr->expression);
+    unsigned index = cg_append_name(s, attr->symbol->string);
+    cg_op(s, OPCODE_STORE_ATTR, index);
+    cg_pop(s, 2);
+    return;
+  }
+  case AST_BINEXPR_SUBSCRIPT: {
+    struct ast_binexpr *binexpr = &target->binexpr;
+    emit_expression(s, binexpr->left);
+    emit_expression(s, binexpr->right);
+    cg_op(s, OPCODE_STORE_SUBSCR, 0);
+    cg_pop(s, 3);
+    return;
+  }
+  case AST_EXPRESSION_LIST:
+  case AST_LIST_DISPLAY: {
+    struct ast_expression_list *list = &target->expression_list;
+    unsigned                    num_expressions = list->num_expressions;
+    cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
+    cg_push(s, num_expressions);
+    for (unsigned i = 0; i < num_expressions; i++) {
+      emit_assignment(s, list->expressions[i]);
+    }
+    return;
+  }
+  default:
+    abort();
+  }
+}
+
+static void emit_binexpr_assign_inner(struct cg_state    *s,
+                                      struct ast_binexpr *binexpr)
+{
+  emit_expression(s, binexpr->right);
+  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
+  cg_pop_op(s, opcode, 0);
+}
+
+static void emit_binexpr_assign(struct cg_state    *s,
+                                struct ast_binexpr *binexpr)
+{
+  union ast_expression *target = binexpr->left;
+  switch (ast_expression_type(target)) {
+  case AST_IDENTIFIER: {
+    struct symbol *symbol = target->identifier.symbol;
+    emit_load(s, symbol);
+    emit_binexpr_assign_inner(s, binexpr);
+    emit_store(s, symbol);
+    return;
+  }
+  case AST_ATTR: {
+    struct ast_attr *attr = &target->attr;
+    emit_expression(s, attr->expression);
+    cg_push_op(s, OPCODE_DUP_TOP, 0);
+    unsigned index = cg_append_name(s, attr->symbol->string);
+    cg_op(s, OPCODE_LOAD_ATTR, index);
+    emit_binexpr_assign_inner(s, binexpr);
+    cg_op(s, OPCODE_ROT_TWO, 0);
+    cg_op(s, OPCODE_STORE_ATTR, index);
+    cg_pop(s, 2);
+    return;
+  }
+  case AST_BINEXPR_SUBSCRIPT: {
+    struct ast_binexpr *subscript = &target->binexpr;
+    emit_expression(s, subscript->left);
+    emit_expression(s, subscript->right);
+    cg_op(s, OPCODE_DUP_TOP_TWO, 0);
+    cg_push(s, 2);
+    cg_pop_op(s, OPCODE_BINARY_SUBSCR, 0);
+    emit_binexpr_assign_inner(s, binexpr);
+    cg_op(s, OPCODE_ROT_THREE, 0);
+    cg_op(s, OPCODE_STORE_SUBSCR, 0);
+    cg_pop(s, 3);
+    return;
+  }
+  default:
+    abort();
+  }
 }
 
 static void emit_comparison(struct cg_state *s, struct ast_binexpr *binexpr,
@@ -97,46 +222,6 @@ void emit_load(struct cg_state *s, struct symbol *symbol)
   }
   fprintf(stderr, "invalid symbol_info type\n");
   abort();
-}
-
-void emit_assignment(struct cg_state *s, union ast_expression *target)
-{
-  switch (ast_expression_type(target)) {
-  case AST_IDENTIFIER:
-    emit_store(s, target->identifier.symbol);
-    return;
-  case AST_ATTR: {
-    struct ast_attr *attr = &target->attr;
-    emit_expression(s, attr->expression);
-    unsigned index = cg_append_name(s, attr->attr->string);
-    cg_op(s, OPCODE_STORE_ATTR, index);
-    cg_pop(s, 2);
-    return;
-  }
-  case AST_BINEXPR_SUBSCRIPT: {
-    struct ast_binexpr *binexpr = &target->binexpr;
-    emit_expression(s, binexpr->left);
-    emit_expression(s, binexpr->right);
-    cg_op(s, OPCODE_STORE_SUBSCR, 0);
-    cg_pop(s, 3);
-    return;
-  }
-  case AST_EXPRESSION_LIST:
-  case AST_LIST_DISPLAY: {
-    struct ast_expression_list *list = &target->expression_list;
-    unsigned                    num_expressions = list->num_expressions;
-    cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
-    cg_push(s, num_expressions);
-    for (unsigned i = 0; i < num_expressions; i++) {
-      emit_assignment(s, list->expressions[i]);
-    }
-    return;
-  }
-  default:
-    break;
-  }
-  fprintf(stderr, "Unsupported or invalid lvalue\n");
-  unimplemented();
 }
 
 static void emit_dictionary_display(struct cg_state           *s,
@@ -243,7 +328,7 @@ static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)
 {
   emit_expression(s, attr->expression);
-  unsigned index = cg_append_name(s, attr->attr->string);
+  unsigned index = cg_append_name(s, attr->symbol->string);
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
@@ -295,11 +380,37 @@ static void emit_expression_impl(struct cg_state      *s,
     emit_attr(s, &expression->attr);
     break;
   case AST_BINEXPR_ADD:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_ADD);
-    break;
   case AST_BINEXPR_AND:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_AND);
+  case AST_BINEXPR_FLOORDIV:
+  case AST_BINEXPR_MATMUL:
+  case AST_BINEXPR_MOD:
+  case AST_BINEXPR_MUL:
+  case AST_BINEXPR_OR:
+  case AST_BINEXPR_POWER:
+  case AST_BINEXPR_SHIFT_LEFT:
+  case AST_BINEXPR_SHIFT_RIGHT:
+  case AST_BINEXPR_SUB:
+  case AST_BINEXPR_SUBSCRIPT:
+  case AST_BINEXPR_TRUEDIV:
+  case AST_BINEXPR_XOR:
+    emit_binexpr(s, &expression->binexpr);
     break;
+  case AST_BINEXPR_ADD_ASSIGN:
+  case AST_BINEXPR_AND_ASSIGN:
+  case AST_BINEXPR_FLOORDIV_ASSIGN:
+  case AST_BINEXPR_MATMUL_ASSIGN:
+  case AST_BINEXPR_MOD_ASSIGN:
+  case AST_BINEXPR_MUL_ASSIGN:
+  case AST_BINEXPR_OR_ASSIGN:
+  case AST_BINEXPR_POWER_ASSIGN:
+  case AST_BINEXPR_SHIFT_LEFT_ASSIGN:
+  case AST_BINEXPR_SHIFT_RIGHT_ASSIGN:
+  case AST_BINEXPR_SUB_ASSIGN:
+  case AST_BINEXPR_TRUEDIV_ASSIGN:
+  case AST_BINEXPR_XOR_ASSIGN:
+    assert(drop);
+    emit_binexpr_assign(s, &expression->binexpr);
+    return;
   case AST_BINEXPR_ASSIGN:
     emit_expression(s, expression->binexpr.right);
     if (!drop) {
@@ -309,9 +420,6 @@ static void emit_expression_impl(struct cg_state      *s,
     return;
   case AST_BINEXPR_EQUAL:
     emit_comparison(s, &expression->binexpr, COMPARE_OP_EQ);
-    break;
-  case AST_BINEXPR_FLOORDIV:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_FLOOR_DIVIDE);
     break;
   case AST_BINEXPR_GREATER:
     emit_comparison(s, &expression->binexpr, COMPARE_OP_GT);
@@ -338,35 +446,11 @@ static void emit_expression_impl(struct cg_state      *s,
     unimplemented();
   case AST_BINEXPR_LOGICAL_OR:
     unimplemented();
-  case AST_BINEXPR_MATMUL:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_MATRIX_MULTIPLY);
-    break;
-  case AST_BINEXPR_MOD:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_MODULO);
-    break;
-  case AST_BINEXPR_MUL:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_MULTIPLY);
-    break;
   case AST_BINEXPR_NOT_IN:
     emit_comparison(s, &expression->binexpr, COMPARE_OP_NOT_IN);
     break;
-  case AST_BINEXPR_OR:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_OR);
-    break;
-  case AST_BINEXPR_SUB:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_SUBTRACT);
-    break;
-  case AST_BINEXPR_SUBSCRIPT:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_SUBSCR);
-    break;
-  case AST_BINEXPR_TRUEDIV:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_TRUE_DIVIDE);
-    break;
   case AST_BINEXPR_UNEQUAL:
     emit_comparison(s, &expression->binexpr, COMPARE_OP_NE);
-    break;
-  case AST_BINEXPR_XOR:
-    emit_binexpr(s, &expression->binexpr, OPCODE_BINARY_XOR);
     break;
   case AST_CALL:
     emit_call(s, &expression->call);

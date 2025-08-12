@@ -301,7 +301,7 @@ static union ast_expression *parse_attr(struct parser_state  *s,
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
   expression->attr.expression = left;
-  expression->attr.attr = symbol;
+  expression->attr.symbol = symbol;
   return expression;
 }
 
@@ -680,10 +680,11 @@ parse_binexpr(struct parser_state *s, enum precedence prec_right,
   return expression;
 }
 
-static union ast_expression *parse_matmul(struct parser_state  *s,
-                                          union ast_expression *left)
+static inline union ast_expression *
+parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
+                     union ast_expression *left)
 {
-  return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MATMUL, left);
+  return parse_binexpr(s, PREC_ASSIGN, type, left);
 }
 
 static union ast_expression *parse_add(struct parser_state  *s,
@@ -692,10 +693,22 @@ static union ast_expression *parse_add(struct parser_state  *s,
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_ADD, left);
 }
 
+static union ast_expression *parse_add_assign(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_ADD_ASSIGN, left);
+}
+
 static union ast_expression *parse_and(struct parser_state  *s,
                                        union ast_expression *left)
 {
   return parse_binexpr(s, PREC_AND + 1, AST_BINEXPR_AND, left);
+}
+
+static union ast_expression *parse_and_assign(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_AND_ASSIGN, left);
 }
 
 static union ast_expression *parse_assignment(struct parser_state  *s,
@@ -704,10 +717,93 @@ static union ast_expression *parse_assignment(struct parser_state  *s,
   return parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
 }
 
+static union ast_expression *parse_equal(struct parser_state  *s,
+                                         union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_EQUAL, left);
+}
+
+static union ast_expression *parse_floor_div(struct parser_state  *s,
+                                             union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_FLOORDIV, left);
+}
+
+static union ast_expression *parse_floor_div_assign(struct parser_state  *s,
+                                                    union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_FLOORDIV_ASSIGN, left);
+}
+
+static union ast_expression *parse_greater(struct parser_state  *s,
+                                           union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER, left);
+}
+
+static union ast_expression *parse_greater_equal(struct parser_state  *s,
+                                                 union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER_EQUAL,
+                       left);
+}
+
+static union ast_expression *parse_in(struct parser_state  *s,
+                                      union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
+}
+
+static union ast_expression *parse_is(struct parser_state  *s,
+                                      union ast_expression *left)
+{
+  eat(s, T_is);
+  uint8_t ast_node_type
+      = accept(s, T_not) ? AST_BINEXPR_IS_NOT : AST_BINEXPR_IS;
+
+  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
+}
+
+static union ast_expression *parse_less(struct parser_state  *s,
+                                        union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS, left);
+}
+
+static union ast_expression *parse_less_equal(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
+}
+
+static union ast_expression *parse_matmul(struct parser_state  *s,
+                                          union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MATMUL, left);
+}
+
+static union ast_expression *parse_matmul_assign(struct parser_state  *s,
+                                                 union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_MATMUL_ASSIGN, left);
+}
+
 static union ast_expression *parse_mod(struct parser_state  *s,
                                        union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MOD, left);
+}
+
+static union ast_expression *parse_mod_assign(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_MOD_ASSIGN, left);
 }
 
 static union ast_expression *parse_mul(struct parser_state  *s,
@@ -716,10 +812,88 @@ static union ast_expression *parse_mul(struct parser_state  *s,
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_MUL, left);
 }
 
+static union ast_expression *parse_mul_assign(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_MUL_ASSIGN, left);
+}
+
+static union ast_expression *parse_not_in(struct parser_state  *s,
+                                          union ast_expression *left)
+{
+  eat(s, T_not);
+  if (!accept(s, T_in)) {
+    parse_error_expected(s, "in");
+    return ast_invalid(s);
+  }
+
+  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
+  return expression;
+}
+
+static union ast_expression *parse_or(struct parser_state  *s,
+                                      union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_OR + 1, AST_BINEXPR_OR, left);
+}
+
+static union ast_expression *parse_or_assign(struct parser_state  *s,
+                                             union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_OR_ASSIGN, left);
+}
+
+static union ast_expression *parse_power(struct parser_state  *s,
+                                         union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_POWER + 1, AST_BINEXPR_POWER, left);
+}
+
+static union ast_expression *parse_power_assign(struct parser_state  *s,
+                                                union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_POWER_ASSIGN, left);
+}
+
+static union ast_expression *parse_shift_left(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_SHIFT + 1, AST_BINEXPR_SHIFT_LEFT, left);
+}
+
+static union ast_expression *
+parse_shift_left_assign(struct parser_state *s, union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_SHIFT_LEFT_ASSIGN, left);
+}
+
+static union ast_expression *parse_shift_right(struct parser_state  *s,
+                                               union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_SHIFT + 1, AST_BINEXPR_SHIFT_RIGHT, left);
+}
+
+static union ast_expression *
+parse_shift_right_assign(struct parser_state *s, union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_SHIFT_RIGHT_ASSIGN, left);
+}
+
 static union ast_expression *parse_sub(struct parser_state  *s,
                                        union ast_expression *left)
 {
   return parse_binexpr(s, PREC_ARITH + 1, AST_BINEXPR_SUB, left);
+}
+
+static union ast_expression *parse_sub_assign(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr_assign(s, AST_BINEXPR_SUB_ASSIGN, left);
 }
 
 static union ast_expression *parse_subscript(struct parser_state  *s,
@@ -756,47 +930,16 @@ static union ast_expression *parse_expr_list(struct parser_state  *s,
   return expression;
 }
 
-static union ast_expression *parse_floor_div(struct parser_state  *s,
-                                             union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_FLOORDIV, left);
-}
-
 static union ast_expression *parse_true_div(struct parser_state  *s,
                                             union ast_expression *left)
 {
   return parse_binexpr(s, PREC_TERM + 1, AST_BINEXPR_TRUEDIV, left);
 }
 
-static union ast_expression *parse_greater(struct parser_state  *s,
-                                           union ast_expression *left)
+static union ast_expression *parse_true_div_assign(struct parser_state  *s,
+                                                   union ast_expression *left)
 {
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER, left);
-}
-
-static union ast_expression *parse_less(struct parser_state  *s,
-                                        union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS, left);
-}
-
-static union ast_expression *parse_equal(struct parser_state  *s,
-                                         union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_EQUAL, left);
-}
-
-static union ast_expression *parse_greater_equal(struct parser_state  *s,
-                                                 union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER_EQUAL,
-                       left);
-}
-
-static union ast_expression *parse_less_equal(struct parser_state  *s,
-                                              union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
+  return parse_binexpr_assign(s, AST_BINEXPR_TRUEDIV_ASSIGN, left);
 }
 
 static union ast_expression *parse_unequal(struct parser_state  *s,
@@ -805,56 +948,16 @@ static union ast_expression *parse_unequal(struct parser_state  *s,
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_UNEQUAL, left);
 }
 
-static union ast_expression *parse_in(struct parser_state  *s,
-                                      union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
-}
-
-static union ast_expression *parse_or(struct parser_state  *s,
-                                      union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_OR + 1, AST_BINEXPR_OR, left);
-}
-
 static union ast_expression *parse_xor(struct parser_state  *s,
                                        union ast_expression *left)
 {
   return parse_binexpr(s, PREC_XOR + 1, AST_BINEXPR_XOR, left);
 }
 
-static union ast_expression *parse_not_in(struct parser_state  *s,
-                                          union ast_expression *left)
+static union ast_expression *parse_xor_assign(struct parser_state  *s,
+                                              union ast_expression *left)
 {
-  eat(s, T_not);
-  if (!accept(s, T_in)) {
-    parse_error_expected(s, "in");
-    return ast_invalid(s);
-  }
-
-  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
-  expression->binexpr.left = left;
-  expression->binexpr.right = right;
-  return expression;
-}
-
-static union ast_expression *parse_is(struct parser_state  *s,
-                                      union ast_expression *left)
-{
-  eat(s, T_is);
-  uint8_t ast_node_type
-      = accept(s, T_not) ? AST_BINEXPR_IS_NOT : AST_BINEXPR_IS;
-
-  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
-  expression->binexpr.left = left;
-  expression->binexpr.right = right;
-  return expression;
+  return parse_binexpr_assign(s, AST_BINEXPR_XOR_ASSIGN, left);
 }
 
 typedef union ast_expression *(*postfix_parser_func)(
@@ -886,16 +989,48 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
   [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
   [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
-  [T_SLASH_SLASH]
-      = { .func = parse_floor_div,     .precedence = PREC_TERM       },
+  [T_AMPERSAND_EQUALS]
+    = { .func = parse_and_assign,         .precedence = PREC_ASSIGN     },
+  [T_ASTERISK_ASTERISK_EQUALS]
+    = { .func = parse_power_assign,       .precedence = PREC_ASSIGN     },
+  [T_ASTERISK_ASTERISK]
+    = { .func = parse_power,              .precedence = PREC_POWER      },
+  [T_ASTERISK_EQUALS]
+    = { .func = parse_mul_assign,         .precedence = PREC_ASSIGN     },
+  [T_AT_EQUALS]
+    = { .func = parse_matmul_assign,      .precedence = PREC_ASSIGN     },
+  [T_BAR_EQUALS]
+    = { .func = parse_or_assign,          .precedence = PREC_ASSIGN     },
+  [T_CARET_EQUALS]
+    = { .func = parse_xor_assign,         .precedence = PREC_ASSIGN     },
   [T_EQUALS_EQUALS]
-      = { .func = parse_equal,         .precedence = PREC_COMPARISON },
-  [T_GREATER_THAN_EQUALS]
-      = { .func = parse_greater_equal, .precedence = PREC_COMPARISON },
-  [T_LESS_THAN_EQUALS]
-      = { .func = parse_less_equal,    .precedence = PREC_COMPARISON },
+    = { .func = parse_equal,              .precedence = PREC_COMPARISON },
   [T_EXCLAMATIONMARKEQUALS]
-      = { .func = parse_unequal,       .precedence = PREC_COMPARISON },
+    = { .func = parse_unequal,            .precedence = PREC_COMPARISON },
+  [T_GREATER_THAN_EQUALS]
+    = { .func = parse_greater_equal,      .precedence = PREC_COMPARISON },
+  [T_GREATER_THAN_GREATER_THAN_EQUALS]
+    = { .func = parse_shift_right_assign, .precedence = PREC_ASSIGN     },
+  [ T_GREATER_THAN_GREATER_THAN]
+    = { .func = parse_shift_right,        .precedence = PREC_SHIFT      },
+  [T_LESS_THAN_EQUALS]
+    = { .func = parse_less_equal,         .precedence = PREC_COMPARISON },
+  [T_LESS_THAN_LESS_THAN_EQUALS]
+    = { .func = parse_shift_left_assign,  .precedence = PREC_ASSIGN     },
+  [T_LESS_THAN_LESS_THAN]
+    = { .func = parse_shift_left,         .precedence = PREC_ASSIGN     },
+  [T_MINUS_EQUALS]
+    = { .func = parse_sub_assign,         .precedence = PREC_ASSIGN     },
+  [T_PERCENT_EQUALS]
+    = { .func = parse_mod_assign,         .precedence = PREC_ASSIGN     },
+  [T_PLUS_EQUALS]
+    = { .func = parse_add_assign,         .precedence = PREC_ASSIGN     },
+  [T_SLASH_EQUALS]
+    = { .func = parse_true_div_assign,    .precedence = PREC_ASSIGN     },
+  [T_SLASH_SLASH_EQUALS]
+    = { .func = parse_floor_div_assign,   .precedence = PREC_ASSIGN     },
+  [T_SLASH_SLASH]
+    = { .func = parse_floor_div,          .precedence = PREC_TERM       },
   /* clang-format on */
 };
 

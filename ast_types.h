@@ -13,7 +13,7 @@ struct ast_node_base {
 struct ast_attr {
   struct ast_node_base  base;
   union ast_expression *expression;
-  struct symbol        *attr;
+  struct symbol        *symbol;
 };
 
 struct ast_binexpr {

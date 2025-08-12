@@ -8,9 +8,10 @@
 
 int main(int argc, char **argv)
 {
-  FILE *input = stdin;
+  FILE       *input = stdin;
+  const char *filename = "-";
   if (argc > 1) {
-    const char *filename = argv[1];
+    filename = argv[1];
     input = fopen(filename, "r");
     if (input == NULL) {
       fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
@@ -26,7 +27,7 @@ int main(int argc, char **argv)
   struct scanner_state s;
   struct object_intern objects;
   object_intern_init(&objects);
-  scanner_init(&s, input, &symbol_table, &objects, &strings);
+  scanner_init(&s, input, filename, &symbol_table, &objects, &strings);
 
   const struct token *token = &s.token;
   do {

@@ -26,8 +26,8 @@ int main(int argc, char **argv)
 
   struct parser_state parser;
   parser_init(&parser);
-  scanner_init(&parser.scanner, input, &symbol_table, &parser.cg.objects,
-               &strings);
+  scanner_init(&parser.scanner, input, filename, &symbol_table,
+               &parser.cg.objects, &strings);
 
   union object *code = parse(&parser, filename);
   write_module(stdout, code);

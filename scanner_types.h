@@ -29,8 +29,9 @@ struct scanner_state {
 
   struct token token;
 
-  unsigned line;
-  unsigned paren_level;
+  const char *filename;
+  unsigned    line;
+  unsigned    paren_level;
 
   struct symbol_table  *symbol_table;
   struct object_intern *objects;

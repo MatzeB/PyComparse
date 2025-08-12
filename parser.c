@@ -411,10 +411,9 @@ static union ast_expression *parse_expression_or_slice(struct parser_state *s)
   return expression;
 }
 
-static union ast_expression *
-parse_expression_list_helper(struct parser_state     *s,
-                             enum ast_expression_type type,
-                             union ast_expression *first, bool allow_slices)
+static union ast_expression *parse_expression_list_helper(
+    struct parser_state *s, enum ast_expression_type type,
+    union ast_expression *first, enum precedence precedence, bool allow_slices)
 {
   union ast_expression *inline_storage[16];
   struct idynarray      expressions;
@@ -431,7 +430,7 @@ parse_expression_list_helper(struct parser_state     *s,
     if (allow_slices) {
       expression = parse_expression_or_slice(s);
     } else {
-      expression = parse_expression(s, PREC_LIST + 1);
+      expression = parse_expression(s, precedence);
     }
     *(idynarray_append(&expressions, union ast_expression *)) = expression;
   }
@@ -468,8 +467,8 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   if (peek(s) == T_for) {
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION, first);
   } else {
-    expression = parse_expression_list_helper(s, AST_LIST_DISPLAY, first,
-                                              /*allow_slices=*/false);
+    expression = parse_expression_list_helper(
+        s, AST_LIST_DISPLAY, first, PREC_LIST + 1, /*allow_slices=*/false);
   }
 
   remove_anchor(s, ',');
@@ -494,9 +493,8 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *first = parse_expression(s, PREC_LIST + 1);
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
-    union ast_expression *expression
-        = parse_expression_list_helper(s, AST_SET_DISPLAY, first,
-                                       /*allow_slices=*/false);
+    union ast_expression *expression = parse_expression_list_helper(
+        s, AST_SET_DISPLAY, first, PREC_LIST + 1, /*allow_slices=*/false);
 
     remove_anchor(s, ',');
     remove_anchor(s, '}');
@@ -724,7 +722,7 @@ static union ast_expression *parse_subscript(struct parser_state  *s,
   union ast_expression *right = parse_expression_or_slice(s);
   if (peek(s) == ',') {
     right = parse_expression_list_helper(s, AST_EXPRESSION_LIST, right,
-                                         /*allow_slices=*/true);
+                                         PREC_LIST + 1, /*allow_slices=*/true);
   }
 
   remove_anchor(s, ',');
@@ -741,9 +739,8 @@ static union ast_expression *parse_subscript(struct parser_state  *s,
 static union ast_expression *parse_expr_list(struct parser_state  *s,
                                              union ast_expression *left)
 {
-  union ast_expression *expression
-      = parse_expression_list_helper(s, AST_EXPRESSION_LIST, left,
-                                     /*allow_slices=*/false);
+  union ast_expression *expression = parse_expression_list_helper(
+      s, AST_EXPRESSION_LIST, left, PREC_LIST + 1, /*allow_slices=*/false);
   expression->expression_list.as_constant = ast_tuple_compute_constant(
       &s->cg.objects, &expression->expression_list);
   return expression;
@@ -1114,6 +1111,10 @@ static void parse_for(struct parser_state *s)
 {
   eat(s, T_for);
   union ast_expression *target = parse_expression(s, PREC_OR);
+  if (peek(s) == ',') {
+    target = parse_expression_list_helper(s, AST_EXPRESSION_LIST, target,
+                                          PREC_OR, /*allow_slices=*/false);
+  }
   expect(s, T_in);
   union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');

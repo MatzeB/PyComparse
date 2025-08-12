@@ -52,6 +52,7 @@
   case 'h':                                                                   \
   case 'i':                                                                   \
   case 'j':                                                                   \
+  case 'k':                                                                   \
   case 'l':                                                                   \
   case 'm':                                                                   \
   case 'n':                                                                   \
@@ -956,17 +957,19 @@ restart:
       invalid_c = s->c;
       next_char(s);
     invalid_char:
-      fprintf(stderr, "Unexpected input char '%c'\n", invalid_c);
+      fprintf(stderr, "%s:%u error: Unexpected input char '%c'\n", s->filename,
+              s->line, invalid_c);
       return;
     }
   }
 }
 
-void scanner_init(struct scanner_state *s, FILE *input,
+void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct symbol_table  *symbol_table,
                   struct object_intern *objects, struct arena *strings)
 {
   memset(s, 0, sizeof(*s));
+  s->filename = filename;
   s->line = 1;
   s->input = input;
   s->at_begin_of_line = true;

@@ -5,3 +5,14 @@ class C:
 c = C(42)
 print(c.x)
 print(type(c))
+
+class Empty:
+    pass
+
+class B(list, Empty):
+    pass
+
+b = B(range(5))
+print(b)
+print(type(b))
+print(isinstance(b, Empty))

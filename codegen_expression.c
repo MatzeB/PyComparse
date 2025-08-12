@@ -247,17 +247,23 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
+unsigned emit_arguments(struct cg_state *s, struct argument *arguments)
+{
+  unsigned num_arguments = 0;
+  for (struct argument *argument = arguments; argument != NULL;
+       argument = argument->next) {
+    emit_expression(s, argument->expression);
+    ++num_arguments;
+  }
+  return num_arguments;
+}
+
 static void emit_call(struct cg_state *s, struct ast_call *call)
 {
   emit_expression(s, call->callee);
-  unsigned n_arguments = 0;
-  for (struct argument *argument = call->arguments; argument != NULL;
-       argument = argument->next) {
-    emit_expression(s, argument->expression);
-    ++n_arguments;
-  }
-  cg_op(s, OPCODE_CALL_FUNCTION, n_arguments);
-  cg_pop(s, n_arguments);
+  unsigned num_arguments = emit_arguments(s, call->arguments);
+  cg_op(s, OPCODE_CALL_FUNCTION, num_arguments);
+  cg_pop(s, num_arguments);
 }
 
 static void emit_generator_expression(

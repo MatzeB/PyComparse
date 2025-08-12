@@ -40,6 +40,8 @@
 enum precedence {
   PREC_ASSIGN,      /* = */
   PREC_LIST,        /* , */
+  PREC_WALRUS,      /* := */
+  PREC_LAMBDA,      /* lambda ... */
   PREC_TEST,        /* postfix 'if' _ 'else' _ */
   PREC_LOGICAL_OR,  /* OR */
   PREC_LOGICAL_AND, /* AND */
@@ -289,6 +291,20 @@ parse_generator_expression(struct parser_state     *s,
   return expression;
 }
 
+static union ast_expression *parse_attr(struct parser_state  *s,
+                                        union ast_expression *left)
+{
+  eat(s, '.');
+  if (!skip_till(s, T_IDENTIFIER)) return ast_invalid(s);
+  struct symbol *symbol = eat_identifier(s);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
+  expression->attr.expression = left;
+  expression->attr.attr = symbol;
+  return expression;
+}
+
 static struct argument *parse_argument(struct parser_state *s)
 {
   struct argument *argument = arena_allocate_type(&s->ast, struct argument);
@@ -317,37 +333,19 @@ static struct argument *parse_argument(struct parser_state *s)
   }
 }
 
-static union ast_expression *parse_attr(struct parser_state  *s,
-                                        union ast_expression *left)
+static struct argument *parse_arguments(struct parser_state *s)
 {
-  eat(s, '.');
-  if (!skip_till(s, T_IDENTIFIER)) return ast_invalid(s);
-  struct symbol *symbol = eat_identifier(s);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
-  expression->attr.expression = left;
-  expression->attr.attr = symbol;
-  return expression;
-}
-
-static union ast_expression *parse_call(struct parser_state  *s,
-                                        union ast_expression *left)
-{
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_call, AST_CALL);
-  expression->call.callee = left;
-
   eat(s, '(');
   add_anchor(s, ')');
   add_anchor(s, ',');
 
+  struct argument *first = NULL;
   struct argument *argument = NULL;
   if (peek(s) != ')') {
     do {
       struct argument *new_argument = parse_argument(s);
       if (argument == NULL) {
-        expression->call.arguments = new_argument;
+        first = new_argument;
       } else {
         argument->next = new_argument;
       }
@@ -357,6 +355,18 @@ static union ast_expression *parse_call(struct parser_state  *s,
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
+  return first;
+}
+
+static union ast_expression *parse_call(struct parser_state  *s,
+                                        union ast_expression *left)
+{
+  struct argument *arguments = parse_arguments(s);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_call, AST_CALL);
+  expression->call.callee = left;
+  expression->call.arguments = arguments;
   return expression;
 }
 
@@ -1141,6 +1151,13 @@ static void parse_while(struct parser_state *s)
   emit_while_end(&s->cg, &state);
 }
 
+static void parse_type_parameters(struct parser_state *s)
+{
+  if (accept(s, '[')) {
+    unimplemented();
+  }
+}
+
 static void parse_parameters(struct parser_state *s)
 {
   expect(s, '(');
@@ -1171,13 +1188,19 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   if (!skip_till(s, T_IDENTIFIER)) return;
   struct symbol *name = eat_identifier(s);
 
+  parse_type_parameters(s);
+
+  struct argument *arguments = NULL;
+  if (peek(s) == '(') {
+    arguments = parse_arguments(s);
+  }
+
   emit_class_begin(&s->cg, name);
 
-  /* TODO: parse parameters to class */
   expect(s, ':');
   parse_suite(s);
 
-  emit_class_end(&s->cg, name, num_decorators);
+  emit_class_end(&s->cg, name, arguments, num_decorators);
 }
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)

@@ -30,7 +30,9 @@ int main(int argc, char **argv)
                &parser.cg.objects, &strings);
 
   union object *code = parse(&parser, filename);
-  write_module(stdout, code);
+  if (!parser.error) {
+    write_module(stdout, code);
+  }
 
   fclose(input);
 

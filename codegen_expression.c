@@ -456,6 +456,7 @@ static void emit_expression_impl(struct cg_state      *s,
     emit_call(s, &expression->call);
     break;
   case AST_CONST:
+  case AST_INVALID:
     cg_load_const(s, expression->cnst.object);
     break;
   case AST_DICT_DISPLAY:

@@ -492,7 +492,7 @@ static void scan_eof(struct scanner_state *s)
     assert(s->indentation_stack_top > 0);
     s->last_line_indent = 0;
     s->pending_dedents = s->indentation_stack_top - 1;
-    s->at_begin_of_line = true;
+    s->at_begin_of_line = false; /* force emission of newline */
     s->token.kind = T_DEDENT;
     return;
   }
@@ -962,6 +962,12 @@ restart:
       return;
     }
   }
+}
+
+struct location scanner_location(struct scanner_state *s)
+{
+  struct location location = { s->line };
+  return location;
 }
 
 void scanner_init(struct scanner_state *s, FILE *input, const char *filename,

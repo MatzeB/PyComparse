@@ -62,13 +62,72 @@ enum precedence {
   PREC_ATOM,    /* name, number, string, ..., None, True, False */
 };
 
-static void parse_error_expected(struct parser_state *s, const char *what)
+static void error_begin(struct parser_state *s, struct location location)
 {
-  fprintf(stderr, "%s:%u error: expected %s, got ", s->cg.filename,
-          s->scanner.line, what);
-  print_token(stderr, &s->scanner.token);
-  fputc('\n', stderr);
   s->error = true;
+  fprintf(stderr, "%s:%u error: ", s->cg.filename, location.line);
+}
+
+static void error_frag(struct parser_state *s, const char *message)
+{
+  (void)s;
+  fputs(message, stderr);
+}
+
+static void error_token(struct parser_state *s, struct token *token)
+{
+  (void)s;
+  print_token(stderr, token);
+}
+
+static void error_symbol(struct parser_state *s, struct symbol *symbol)
+{
+  (void)s;
+  fputc('\'', stderr);
+  fputs(symbol->string, stderr);
+  fputc('\'', stderr);
+}
+
+static void error_expression(struct parser_state  *s,
+                             union ast_expression *expression)
+{
+  const char *name;
+  switch (ast_expression_type(expression)) {
+  case AST_INVALID:
+    name = "<invalid>";
+    break;
+  case AST_CONST:
+    name = "literal";
+    break;
+  case AST_DICT_DISPLAY:
+    name = "dict literal";
+    break;
+  case AST_SET_DISPLAY:
+    name = "set literal";
+    break;
+  default:
+    name = "expression";
+    break;
+  }
+  error_frag(s, name);
+}
+
+static void error_end(struct parser_state *s)
+{
+  (void)s;
+  assert(s->error);
+  fputc('\n', stderr);
+  fflush(stderr);
+}
+
+static void error_expected(struct parser_state *s, const char *what)
+{
+  error_begin(s, scanner_location(&s->scanner));
+  error_frag(s, "expected ");
+  error_frag(s, what);
+  error_frag(s, ", got ");
+  error_token(s, &s->scanner.token);
+  error_end(s);
 }
 
 static inline enum token_kind peek(const struct parser_state *s)
@@ -198,7 +257,7 @@ static bool skip_till(struct parser_state *s,
                       enum token_kind      expected_token_kind)
 {
   if (UNLIKELY(peek(s) != expected_token_kind)) {
-    parse_error_expected(s, token_kind_name(expected_token_kind));
+    error_expected(s, token_kind_name(expected_token_kind));
 
     add_anchor(s, expected_token_kind);
     eat_until_anchor(s);
@@ -238,8 +297,11 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 
 static union ast_expression *ast_invalid(struct parser_state *s)
 {
-  union object *object = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
-  return ast_const_new(s, object);
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_const, AST_INVALID);
+  expression->cnst.object
+      = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
+  return expression;
 }
 
 static struct symbol *symbol_invalid(struct parser_state *s)
@@ -680,11 +742,35 @@ parse_binexpr(struct parser_state *s, enum precedence prec_right,
   return expression;
 }
 
+static bool check_binexpr_assign_target(struct parser_state  *s,
+                                        union ast_expression *target,
+                                        struct location       location)
+{
+  enum ast_expression_type type = ast_expression_type(target);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR)
+    return false;
+  error_begin(s, location);
+  error_frag(s, "cannot assign to ");
+  error_expression(s, target);
+  if (type == AST_EXPRESSION_LIST) {
+    error_frag(s, " for agumented assignment");
+  }
+  error_frag(s, ".");
+  error_end(s);
+  return true;
+}
+
 static inline union ast_expression *
 parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
                      union ast_expression *left)
 {
-  return parse_binexpr(s, PREC_ASSIGN, type, left);
+  struct location       location = scanner_location(&s->scanner);
+  union ast_expression *expression = parse_binexpr(s, PREC_ASSIGN, type, left);
+  if (check_binexpr_assign_target(s, left, location)) {
+    expression = ast_invalid(s);
+  }
+  return expression;
 }
 
 static union ast_expression *parse_add(struct parser_state  *s,
@@ -711,10 +797,42 @@ static union ast_expression *parse_and_assign(struct parser_state  *s,
   return parse_binexpr_assign(s, AST_BINEXPR_AND_ASSIGN, left);
 }
 
+static bool check_assignment_target(struct parser_state  *s,
+                                    union ast_expression *expression,
+                                    struct location       location)
+{
+  enum ast_expression_type type = ast_expression_type(expression);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR)
+    return false;
+  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
+    unsigned num_expressions = expression->expression_list.num_expressions;
+    union ast_expression **expressions
+        = expression->expression_list.expressions;
+    for (unsigned i = 0; i < num_expressions; i++) {
+      if (check_assignment_target(s, expressions[i], location)) return true;
+    }
+    return false;
+  }
+  error_begin(s, location);
+  error_frag(s, "cannot assign to ");
+  error_expression(s, expression);
+  /* TODO: only show ':=' suggestion where it makes sense like python... */
+  error_frag(s, ". Maybe you meant '==', or ':=' instead of '='?");
+  error_end(s);
+  return true;
+}
+
 static union ast_expression *parse_assignment(struct parser_state  *s,
                                               union ast_expression *left)
 {
-  return parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
+  struct location       location = scanner_location(&s->scanner);
+  union ast_expression *expression
+      = parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
+  if (check_assignment_target(s, left, location)) {
+    expression = ast_invalid(s);
+  }
+  return expression;
 }
 
 static union ast_expression *parse_equal(struct parser_state  *s,
@@ -822,13 +940,9 @@ static union ast_expression *parse_not_in(struct parser_state  *s,
                                           union ast_expression *left)
 {
   eat(s, T_not);
-  if (!accept(s, T_in)) {
-    parse_error_expected(s, "in");
-    return ast_invalid(s);
-  }
+  expect(s, T_in);
 
   union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
-
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
   expression->binexpr.left = left;
@@ -1039,13 +1153,13 @@ union ast_expression *parse_expression(struct parser_state *s,
 {
   enum token_kind token_kind = peek(s);
   if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
-    parse_error_expected(s, "expression");
+    error_expected(s, "expression");
     return ast_invalid(s);
   }
   const struct prefix_expression_parser *prefix_parser
       = &prefix_parsers[token_kind];
   if (prefix_parser->func == NULL || prefix_parser->precedence < precedence) {
-    parse_error_expected(s, "expression");
+    error_expected(s, "expression");
     return ast_invalid(s);
   }
   union ast_expression *result = prefix_parser->func(s);
@@ -1200,16 +1314,18 @@ static void parse_small_statement(struct parser_state *s)
   /* TODO: del, break, continue, return, raise, yield,
    * import, global, nonlocal, assert */
   default:
-    parse_error_expected(s, "statement");
-    unimplemented(); /* recovery */
+    error_expected(s, "statement");
+    eat_until_anchor(s);
   }
 }
 
 static void parse_simple_statement(struct parser_state *s)
 {
+  add_anchor(s, T_NEWLINE);
   do {
     parse_small_statement(s);
   } while (accept(s, ';') && peek(s) != T_NEWLINE);
+  remove_anchor(s, T_NEWLINE);
   expect(s, T_NEWLINE);
 }
 
@@ -1302,8 +1418,10 @@ static void parse_parameters(struct parser_state *s)
     struct symbol *symbol = eat_identifier(s);
 
     if (!emit_parameter(&s->cg, symbol)) {
-      fprintf(stderr, "error: duplicate parameter '%s'\n", symbol->string);
-      s->error = true;
+      error_begin(s, scanner_location(&s->scanner));
+      error_frag(s, "duplicate parameter ");
+      error_symbol(s, symbol);
+      error_end(s);
     } else {
       num_parameters++;
     }
@@ -1376,38 +1494,40 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
     parse_def(s, num_decorators + 1);
     return;
   default:
-    parse_error_expected(s, "@, class or def after decorator");
+    error_expected(s, "@, class or def after decorator");
     return;
   }
 }
 
 static void parse_statement(struct parser_state *s)
 {
+  add_anchor(s, T_NEWLINE);
   switch (peek(s)) {
   case '@':
     parse_decorator(s, /*num_decorators=*/0);
-    return;
+    break;
   case T_class:
     parse_class(s, /*num_decorators=*/0);
-    return;
+    break;
   case T_def:
     parse_def(s, /*num_decorators=*/0);
-    return;
+    break;
   case T_for:
     parse_for(s);
-    return;
+    break;
   case T_if:
     parse_if(s);
-    return;
+    break;
   case T_while:
     parse_while(s);
-    return;
+    break;
   case T_EOF:
-    return;
+    break;
   default:
     parse_simple_statement(s);
-    return;
+    break;
   }
+  remove_anchor(s, T_NEWLINE);
 }
 
 union object *parse(struct parser_state *s, const char *filename)
@@ -1429,7 +1549,8 @@ union object *parse(struct parser_state *s, const char *filename)
   for (uint16_t i = 0; i < sizeof(s->anchor_set) / sizeof(s->anchor_set[0]);
        ++i) {
     if (s->anchor_set[i] != 0) {
-      fprintf(stderr, "Anchor for token %s not removed\n", token_kind_name(i));
+      fprintf(stderr, "Internal error: Anchor for token %s not removed\n",
+              token_kind_name(i));
       abort();
     }
   }

@@ -326,7 +326,7 @@ static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
 }
 
 void emit_class_end(struct cg_state *s, struct symbol *symbol,
-                    struct argument *arguments, unsigned num_decorators)
+                    struct ast_call *call, unsigned num_decorators)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
@@ -337,9 +337,7 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol,
   cg_load_const(s, string);
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
   cg_load_const(s, string);
-  unsigned num_arguments = 2 + emit_arguments(s, arguments);
-  cg_pop(s, num_arguments + 1);
-  cg_push_op(s, OPCODE_CALL_FUNCTION, num_arguments);
+  emit_call_helper(s, call, /*extra_args=*/2);
   emit_decorator_calls(s, num_decorators);
   emit_store(s, symbol);
 }

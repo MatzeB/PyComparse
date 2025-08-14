@@ -48,6 +48,7 @@ enum ast_expression_type {
   AST_BINEXPR_XOR,
   AST_BINEXPR_XOR_ASSIGN,
   AST_CALL,
+  AST_CALL_EX,
   AST_CONST,
   AST_DICT_DISPLAY,
   AST_EXPRESSION_LIST,
@@ -62,6 +63,8 @@ enum ast_expression_type {
   AST_UNEXPR_NEGATIVE,
   AST_UNEXPR_NOT,
   AST_UNEXPR_PLUS,
+  AST_UNEXPR_STAR,
+  AST_UNEXPR_STAR_STAR,
 };
 
 enum ast_expression_type ast_expression_type(union ast_expression *expression);

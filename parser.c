@@ -15,6 +15,7 @@
 #include "codegen_statement.h"
 #include "object.h"
 #include "scanner.h"
+#include "symbol_table.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
 #include "util.h"
@@ -23,7 +24,8 @@
 
 /* Keep this in sync with prefix_parsers below */
 #define EXPRESSION_START_CASES                                                \
-  '(' : case '+':                                                             \
+  '(' : case '*':                                                             \
+  case '+':                                                                   \
   case '-':                                                                   \
   case '[':                                                                   \
   case '{':                                                                   \
@@ -32,6 +34,7 @@
   case T_IDENTIFIER:                                                          \
   case T_STRING:                                                              \
   case T_INTEGER:                                                             \
+  case T_ASTERISK_ASTERISK:                                                   \
   case T_True:                                                                \
   case T_False:                                                               \
   case T_None:                                                                \
@@ -40,6 +43,7 @@
 enum precedence {
   PREC_ASSIGN,      /* = */
   PREC_LIST,        /* , */
+  PREC_STAR,        /* *, ** prefix */
   PREC_WALRUS,      /* := */
   PREC_LAMBDA,      /* lambda ... */
   PREC_TEST,        /* postfix 'if' _ 'else' _ */
@@ -56,7 +60,7 @@ enum precedence {
   PREC_TERM,  /* *, @, /, %, // */
 
   PREC_FACTOR, /* prefix +, -, ~ */
-  PREC_POWER,  /* prefix ** */
+  PREC_POWER,  /* ** */
 
   PREC_PRIMARY, /* .attr  [subscript]   (call) */
   PREC_ATOM,    /* name, number, string, ..., None, True, False */
@@ -297,6 +301,7 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 
 static union ast_expression *ast_invalid(struct parser_state *s)
 {
+  assert(s->error);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
   expression->cnst.object
@@ -306,8 +311,8 @@ static union ast_expression *ast_invalid(struct parser_state *s)
 
 static struct symbol *symbol_invalid(struct parser_state *s)
 {
-  (void)s;
-  unimplemented();
+  assert(s->error);
+  return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
 static union ast_expression *parse_expression(struct parser_state *s,
@@ -367,69 +372,138 @@ static union ast_expression *parse_attr(struct parser_state  *s,
   return expression;
 }
 
-static struct argument *parse_argument(struct parser_state *s)
+static struct argument *parse_argument(struct parser_state *s,
+                                       struct argument     *argument)
 {
-  struct argument *argument = arena_allocate_type(&s->ast, struct argument);
-  switch (peek(s)) {
-  case '*':
-    parse_expression(s, PREC_TEST);
-    unimplemented();
-  case T_ASTERISK_ASTERISK:
-    parse_expression(s, PREC_TEST);
-    unimplemented();
-  default: {
-    union ast_expression *expression = parse_expression(s, PREC_TEST);
-    if (accept(s, '=')) {
-      expression = parse_expression(s, PREC_TEST);
-      unimplemented();
+  union ast_expression *expression = parse_expression(s, PREC_STAR);
+  if (accept(s, '=')) {
+    if (expression->type == AST_IDENTIFIER) {
+      argument->name = expression->identifier.symbol;
+    } else {
+      error_begin(s, scanner_location(&s->scanner));
+      error_frag(s, "assignment not allowed, perhaps you meant '=='?");
+      error_end(s);
     }
-
-    if (peek(s) == T_for) {
-      expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION,
-                                              expression);
-    }
-
-    argument->expression = expression;
-    return argument;
+    expression = parse_expression(s, PREC_STAR);
   }
+
+  if (peek(s) == T_for) {
+    expression
+        = parse_generator_expression(s, AST_GENERATOR_EXPRESSION, expression);
   }
+
+  argument->expression = expression;
+  return argument;
 }
 
-static struct argument *parse_arguments(struct parser_state *s)
+static union ast_expression *parse_call_helper(struct parser_state  *s,
+                                               union ast_expression *callee)
 {
   eat(s, '(');
   add_anchor(s, ')');
   add_anchor(s, ',');
 
-  struct argument *first = NULL;
-  struct argument *argument = NULL;
+  struct argument  inline_storage[8];
+  struct idynarray arguments;
+  idynarray_init(&arguments, inline_storage, sizeof(inline_storage));
+  bool have_star_args = false;
+
   if (peek(s) != ')') {
     do {
-      struct argument *new_argument = parse_argument(s);
-      if (argument == NULL) {
-        first = new_argument;
-      } else {
-        argument->next = new_argument;
+      struct argument *argument
+          = idynarray_append(&arguments, struct argument);
+      parse_argument(s, argument);
+      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) {
+        have_star_args = true;
       }
-      argument = new_argument;
     } while (accept(s, ',') && peek(s) != ')');
   }
   remove_anchor(s, ',');
   remove_anchor(s, ')');
   expect(s, ')');
-  return first;
+
+  unsigned num_arguments = idynarray_length(&arguments, struct argument);
+
+  if (!have_star_args) {
+    size_t arguments_size = num_arguments * sizeof(struct argument);
+    union ast_expression *expression = ast_allocate_expression_(
+        s, sizeof(struct ast_call) + arguments_size, AST_CALL);
+    expression->call.callee = callee;
+    expression->call.num_arguments = num_arguments;
+    memcpy(expression->call.arguments, idynarray_data(&arguments),
+           arguments_size);
+    return expression;
+  }
+
+  /* using CALL_EX, count how many args we need */
+  struct argument *arguments_arr = idynarray_data(&arguments);
+  unsigned         num_processed_args = 0;
+  unsigned         idx = 0;
+  while (idx < num_arguments) {
+    struct argument *argument = &arguments_arr[idx];
+    if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) {
+      ++num_processed_args;
+      ++idx;
+      continue;
+    }
+
+    while (++idx < num_arguments) {
+      struct argument *argument = &arguments_arr[idx];
+      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) break;
+    }
+    num_processed_args++;
+  }
+
+  size_t arguments_size = num_processed_args * sizeof(struct argument);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_call) + arguments_size, AST_CALL_EX);
+  expression->call.callee = callee;
+  expression->call.num_arguments = num_processed_args;
+  unsigned processed_args_idx = 0;
+  idx = 0;
+  while (idx < num_arguments) {
+    struct argument *argument = &arguments_arr[idx];
+    struct argument *new_argument
+        = &expression->call.arguments[processed_args_idx++];
+    union ast_expression *argument_expression = argument->expression;
+    if (ast_expression_type(argument_expression) == AST_UNEXPR_STAR) {
+      new_argument->expression = argument_expression->unexpr.op;
+      new_argument->name = NULL;
+      ++idx;
+      continue;
+    }
+
+    unsigned tuple_num_expressions = 1;
+    unsigned tuple_idx_begin = idx;
+    while (++idx < num_arguments) {
+      struct argument *argument = &arguments_arr[idx];
+      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) break;
+      ++tuple_num_expressions;
+    }
+
+    unsigned tuple_expressions_size
+        = tuple_num_expressions * sizeof(union ast_expression *);
+    union ast_expression *tuple = ast_allocate_expression_(
+        s, sizeof(struct ast_expression_list) + tuple_expressions_size,
+        AST_EXPRESSION_LIST);
+    tuple->expression_list.num_expressions = tuple_num_expressions;
+    for (unsigned i = 0; i < tuple_num_expressions; i++) {
+      tuple->expression_list.expressions[i]
+          = arguments_arr[tuple_idx_begin + i].expression;
+    }
+    ast_tuple_compute_constant(&s->cg.objects, &tuple->expression_list);
+    new_argument->name = NULL;
+    new_argument->expression = tuple;
+  }
+  assert(processed_args_idx == num_processed_args);
+
+  return expression;
 }
 
 static union ast_expression *parse_call(struct parser_state  *s,
                                         union ast_expression *left)
 {
-  struct argument *arguments = parse_arguments(s);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_call, AST_CALL);
-  expression->call.callee = left;
-  expression->call.arguments = arguments;
-  return expression;
+  return parse_call_helper(s, /*callee=*/left);
 }
 
 static inline union ast_expression *parse_unexpr(struct parser_state *s,
@@ -631,6 +705,16 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   return expression;
 }
 
+static union ast_expression *parse_asterisk(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_STAR, AST_UNEXPR_STAR);
+}
+
+static union ast_expression *parse_asterisk_asterisk(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_STAR, AST_UNEXPR_STAR_STAR);
+}
+
 static union ast_expression *parse_plus(struct parser_state *s)
 {
   return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_PLUS);
@@ -706,25 +790,26 @@ static union ast_expression *parse_ellipsis(struct parser_state *s)
 typedef union ast_expression *(*prefix_parser_func)(struct parser_state *s);
 struct prefix_expression_parser {
   prefix_parser_func func;
-  enum precedence    precedence;
 };
 
 static const struct prefix_expression_parser prefix_parsers[] = {
   /* clang-format off */
-  ['(']           = { .func = parse_l_paren,    .precedence = PREC_ATOM },
-  ['+']           = { .func = parse_plus,       .precedence = PREC_FACTOR },
-  ['-']           = { .func = parse_negative,   .precedence = PREC_FACTOR },
-  ['[']           = { .func = parse_l_bracket,  .precedence = PREC_ATOM },
-  ['{']           = { .func = parse_l_curly,    .precedence = PREC_ATOM },
-  ['~']           = { .func = parse_invert,     .precedence = PREC_FACTOR },
-  [T_not]         = { .func = parse_not,        .precedence = PREC_LOGICAL_NOT},
-  [T_IDENTIFIER]  = { .func = parse_identifier, .precedence = PREC_ATOM },
-  [T_STRING]      = { .func = parse_string,     .precedence = PREC_ATOM },
-  [T_INTEGER]     = { .func = parse_integer,    .precedence = PREC_ATOM },
-  [T_True]        = { .func = parse_true,       .precedence = PREC_ATOM },
-  [T_False]       = { .func = parse_false,      .precedence = PREC_ATOM },
-  [T_None]        = { .func = parse_none,       .precedence = PREC_ATOM },
-  [T_DOT_DOT_DOT] = { .func = parse_ellipsis,   .precedence = PREC_ATOM },
+  ['(']                 = { .func = parse_l_paren           },
+  ['*']                 = { .func = parse_asterisk          },
+  ['+']                 = { .func = parse_plus              },
+  ['-']                 = { .func = parse_negative          },
+  ['[']                 = { .func = parse_l_bracket         },
+  ['{']                 = { .func = parse_l_curly           },
+  ['~']                 = { .func = parse_invert            },
+  [T_ASTERISK_ASTERISK] = { .func = parse_asterisk_asterisk },
+  [T_DOT_DOT_DOT]       = { .func = parse_ellipsis          },
+  [T_False]             = { .func = parse_false             },
+  [T_IDENTIFIER]        = { .func = parse_identifier        },
+  [T_INTEGER]           = { .func = parse_integer           },
+  [T_None]              = { .func = parse_none              },
+  [T_not]               = { .func = parse_not               },
+  [T_STRING]            = { .func = parse_string            },
+  [T_True]              = { .func = parse_true              },
   /* clang-format on */
 };
 
@@ -1158,7 +1243,7 @@ union ast_expression *parse_expression(struct parser_state *s,
   }
   const struct prefix_expression_parser *prefix_parser
       = &prefix_parsers[token_kind];
-  if (prefix_parser->func == NULL || prefix_parser->precedence < precedence) {
+  if (prefix_parser->func == NULL) {
     error_expected(s, "expression");
     return ast_invalid(s);
   }
@@ -1443,9 +1528,9 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 
   parse_type_parameters(s);
 
-  struct argument *arguments = NULL;
+  union ast_expression *call = NULL;
   if (peek(s) == '(') {
-    arguments = parse_arguments(s);
+    call = parse_call_helper(s, /*callee=*/NULL);
   }
 
   emit_class_begin(&s->cg, name);
@@ -1453,7 +1538,7 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   expect(s, ':');
   parse_suite(s);
 
-  emit_class_end(&s->cg, name, arguments, num_decorators);
+  emit_class_end(&s->cg, name, &call->call, num_decorators);
 }
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)

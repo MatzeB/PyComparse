@@ -24,13 +24,14 @@ struct ast_binexpr {
 
 struct argument {
   union ast_expression *expression;
-  struct argument      *next;
+  struct symbol        *name;
 };
 
 struct ast_call {
   struct ast_node_base  base;
   union ast_expression *callee;
-  struct argument      *arguments;
+  unsigned              num_arguments;
+  struct argument       arguments[];
 };
 
 struct ast_const {

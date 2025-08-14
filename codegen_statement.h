@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 struct argument;
+struct ast_call;
 struct ast_generator_expression;
 struct basic_block;
 struct cg_state;
@@ -45,7 +46,7 @@ void emit_return_statement(struct cg_state      *s,
 
 void emit_class_begin(struct cg_state *s, struct symbol *name);
 void emit_class_end(struct cg_state *s, struct symbol *name,
-                    struct argument *arguments, unsigned num_decorators);
+                    struct ast_call *call, unsigned num_decorators);
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
                    union ast_expression *expression);

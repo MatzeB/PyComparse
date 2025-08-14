@@ -332,23 +332,46 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
-unsigned emit_arguments(struct cg_state *s, struct argument *arguments)
+static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call)
+{
+  unsigned num_arguments = call->num_arguments;
+  for (unsigned i = 0; i < num_arguments; i++) {
+    struct argument *argument = &call->arguments[i];
+    emit_expression(s, argument->expression);
+  }
+  cg_pop(s, num_arguments);
+  cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL, num_arguments);
+
+  cg_pop_op(s, OPCODE_CALL_FUNCTION_EX, 0);
+}
+
+void emit_call_helper(struct cg_state *s, struct ast_call *call,
+                      unsigned extra_args)
 {
   unsigned num_arguments = 0;
-  for (struct argument *argument = arguments; argument != NULL;
-       argument = argument->next) {
-    emit_expression(s, argument->expression);
-    ++num_arguments;
+  if (call != NULL) {
+    if (call->base.type == AST_CALL_EX) {
+      assert(extra_args == 0);
+      emit_call_ex_helper(s, call);
+      return;
+    }
+    assert(call->base.type == AST_CALL);
+
+    num_arguments = call->num_arguments;
+    for (unsigned i = 0; i < num_arguments; i++) {
+      struct argument *argument = &call->arguments[i];
+      emit_expression(s, argument->expression);
+    }
   }
-  return num_arguments;
+  num_arguments += extra_args;
+  cg_op(s, OPCODE_CALL_FUNCTION, num_arguments);
+  cg_pop(s, num_arguments);
 }
 
 static void emit_call(struct cg_state *s, struct ast_call *call)
 {
   emit_expression(s, call->callee);
-  unsigned num_arguments = emit_arguments(s, call->arguments);
-  cg_op(s, OPCODE_CALL_FUNCTION, num_arguments);
-  cg_pop(s, num_arguments);
+  emit_call_helper(s, call, /*extra_args=*/0);
 }
 
 static void emit_generator_expression(
@@ -453,6 +476,7 @@ static void emit_expression_impl(struct cg_state      *s,
     emit_comparison(s, &expression->binexpr, COMPARE_OP_NE);
     break;
   case AST_CALL:
+  case AST_CALL_EX:
     emit_call(s, &expression->call);
     break;
   case AST_CONST:
@@ -495,7 +519,12 @@ static void emit_expression_impl(struct cg_state      *s,
   case AST_UNEXPR_INVERT:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_INVERT);
     break;
+  case AST_UNEXPR_STAR:
+  case AST_UNEXPR_STAR_STAR:
+    /* not allow in generic contexts */
+    abort();
   }
+
   if (drop) {
     cg_pop_op(s, OPCODE_POP_TOP, 0);
   }

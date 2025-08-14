@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-struct argument;
+struct ast_call;
 struct cg_state;
 struct symbol;
 union ast_expression;
@@ -14,7 +14,8 @@ void emit_expression(struct cg_state *cg, union ast_expression *expression);
 void emit_expression_drop_result(struct cg_state      *cg,
                                  union ast_expression *expression);
 
-unsigned emit_arguments(struct cg_state *cg, struct argument *arguments);
+void emit_call_helper(struct cg_state *cg, struct ast_call *call,
+                      unsigned extra_args);
 
 void emit_load(struct cg_state *cg, struct symbol *symbol);
 void emit_store(struct cg_state *cg, struct symbol *symbol);

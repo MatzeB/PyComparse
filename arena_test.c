@@ -42,6 +42,6 @@ int main(int argc, char **argv)
   arena_init(&arena);
   for (int i = 0; i < 2000; ++i) {
     alloc_some(&arena);
-    arena_free_all(&arena);
+    arena_free(&arena);
   }
 }

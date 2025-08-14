@@ -309,6 +309,76 @@ static void emit_slice(struct cg_state *s, struct ast_slice *slice)
   cg_push_op(s, OPCODE_BUILD_SLICE, arg);
 }
 
+static void
+emit_expression_list_helper_unpack(struct cg_state            *s,
+                                   struct ast_expression_list *tuple)
+{
+  unsigned               num_expressions = tuple->num_expressions;
+  unsigned               num_unpack_expressions = 0;
+  unsigned               idx = 0;
+  union ast_expression **expressions = tuple->expressions;
+  while (idx < num_expressions) {
+    union ast_expression *expression = expressions[idx];
+    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+      emit_expression(s, expression->unexpr.op);
+      ++idx;
+      ++num_unpack_expressions;
+      continue;
+    }
+    unsigned tuple_begin_idx = idx;
+    unsigned tuple_end_idx = idx + 1;
+    bool     tuple_const = true;
+    while (tuple_end_idx < num_expressions) {
+      union ast_expression *expression = expressions[tuple_end_idx];
+      if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+        break;
+      }
+      if (ast_expression_as_constant(expression) == NULL) {
+        tuple_const = false;
+      }
+      ++tuple_end_idx;
+    }
+
+    unsigned tuple_length = tuple_end_idx - tuple_begin_idx;
+    if (!tuple_const) {
+      for (unsigned i = tuple_begin_idx; i < tuple_end_idx; i++) {
+        emit_expression(s, expressions[i]);
+      }
+      cg_pop(s, tuple_length);
+      cg_push_op(s, OPCODE_BUILD_TUPLE, tuple_length);
+    } else {
+      struct arena *arena = object_intern_arena(&s->objects);
+      union object *tuple = object_new_tuple_begin(arena, tuple_length);
+      for (unsigned i = 0; i < tuple_length; i++) {
+        union ast_expression *expression = expressions[tuple_begin_idx + i];
+        union object *as_const = ast_expression_as_constant(expression);
+        object_new_tuple_set_at(tuple, i, as_const);
+      }
+      object_new_tuple_end(tuple);
+      cg_load_const(s, tuple);
+    }
+    ++num_unpack_expressions;
+    idx += tuple_length;
+  }
+  cg_pop(s, num_unpack_expressions);
+  cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK, num_unpack_expressions);
+}
+
+static void emit_expression_list_helper(struct cg_state            *s,
+                                        struct ast_expression_list *tuple)
+{
+  unsigned num_expressions = tuple->num_expressions;
+  if (tuple->has_star_expression) {
+    emit_expression_list_helper_unpack(s, tuple);
+  } else {
+    for (unsigned i = 0; i < num_expressions; i++) {
+      emit_expression(s, tuple->expressions[i]);
+    }
+    cg_pop(s, num_expressions);
+    cg_push_op(s, OPCODE_BUILD_TUPLE, num_expressions);
+  }
+}
+
 static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 {
   union object *object = tuple->as_constant;
@@ -317,12 +387,7 @@ static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
     return;
   }
 
-  unsigned num_expressions = tuple->num_expressions;
-  for (unsigned i = 0; i < num_expressions; i++) {
-    emit_expression(s, tuple->expressions[i]);
-  }
-  cg_pop(s, num_expressions);
-  cg_push_op(s, OPCODE_BUILD_TUPLE, num_expressions);
+  emit_expression_list_helper(s, tuple);
 }
 
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)

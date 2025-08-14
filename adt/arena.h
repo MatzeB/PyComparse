@@ -34,11 +34,11 @@ static inline void arena_init(struct arena *arena)
 static __attribute__((noinline)) void
 arena_allocate_block_(struct arena *arena, unsigned size)
 {
-  const unsigned       default_block_size = 16 * 1024;
-  unsigned             block_size = size < default_block_size
-                                        ? default_block_size
-                                        : ceil_po2(size + sizeof(struct block_header));
-  void                *memory = malloc(block_size);
+  const unsigned default_block_size = 16 * 1024;
+  unsigned block_size = size < default_block_size - sizeof(struct block_header)
+                            ? default_block_size
+                            : ceil_po2(size + sizeof(struct block_header));
+  void    *memory = malloc(block_size);
   struct block_header *header = (struct block_header *)memory;
   header->prev = arena->block;
   header->block_size = block_size;
@@ -73,7 +73,7 @@ static inline void *arena_allocate(struct arena *arena, size_t size,
   return result;
 }
 
-static inline void arena_free_all(struct arena *arena)
+static inline void arena_free(struct arena *arena)
 {
   assert(arena->grow == 0);
   for (struct block_header *block = arena->block, *prev; block != NULL;

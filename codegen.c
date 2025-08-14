@@ -224,7 +224,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.name = name_string;
   object->code.lnotab = lnotab;
 
-  arena_free_all(&s->code.opcodes);
+  arena_free(&s->code.opcodes);
   return object;
 }
 
@@ -254,7 +254,7 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
 
 void cg_free(struct cg_state *s)
 {
-  arena_free_all(&s->code.opcodes);
+  arena_free(&s->code.opcodes);
   object_intern_free(&s->objects);
   stack_free(&s->stack);
 }

@@ -21,7 +21,7 @@ void object_intern_init(struct object_intern *s)
 
 void object_intern_free(struct object_intern *s)
 {
-  arena_free_all(&s->arena);
+  arena_free(&s->arena);
 }
 
 struct arena *object_intern_arena(struct object_intern *s)

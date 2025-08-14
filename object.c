@@ -126,7 +126,7 @@ static bool object_type_is_string(enum object_type type)
   }
 }
 
-enum object_type object_type(union object *object)
+enum object_type object_type(const union object *object)
 {
   return object->type;
 }
@@ -163,17 +163,18 @@ union object *object_new_ascii(struct arena *arena, const char *str)
   return object_new_string(arena, OBJECT_ASCII, length, str);
 }
 
-bool object_string_equals(union object *object, uint32_t length,
+bool object_string_equals(const union object *object, uint32_t length,
                           const char *chars)
 {
   assert(object_type_is_string(object->type));
   if (object->string.length != length) {
     return false;
   }
+  if (length == 0) return true;
   return memcmp(object->string.chars, chars, length) == 0;
 }
 
-int64_t object_int_value(union object *object)
+int64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
   return object->int_obj.value;
@@ -196,11 +197,8 @@ bool objects_equal(const union object *object0, const union object *object1)
 
   case OBJECT_STRING:
   case OBJECT_ASCII: {
-    uint32_t length = object0->string.length;
-    if (length != object1->string.length) {
-      return false;
-    }
-    return memcmp(object0->string.chars, object1->string.chars, length) == 0;
+    return object_string_equals(object0, object1->string.length,
+                                object1->string.chars);
   }
 
   default:

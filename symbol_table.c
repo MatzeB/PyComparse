@@ -103,7 +103,7 @@ static void symbol_table_insert_predefined(struct symbol_table *symbol_table,
   symbol_table_insert_new(symbol_table, symbol, hash);
 }
 
-void init_symbol_table(struct symbol_table *symbol_table)
+void symbol_table_init(struct symbol_table *symbol_table)
 {
   arena_init(&symbol_table->arena);
   unsigned num_buckets = 512;
@@ -120,7 +120,8 @@ void init_symbol_table(struct symbol_table *symbol_table)
 #undef TCHAR
 }
 
-void exit_symbol_table(struct symbol_table *symbol_table)
+void symbol_table_free(struct symbol_table *symbol_table)
 {
-  arena_free_all(&symbol_table->arena);
+  arena_free(&symbol_table->arena);
+  free(symbol_table->buckets);
 }

@@ -567,6 +567,7 @@ static union ast_expression *parse_expression_list_helper(
 
   *(idynarray_append(&expressions, union ast_expression *)) = first;
 
+  bool has_star_expression = ast_expression_type(first) == AST_UNEXPR_STAR;
   for (;;) {
     if (!accept(s, ',')) break;
     if (!is_expression_start(peek(s)) && (!allow_slices || peek(s) != ':')) {
@@ -578,6 +579,9 @@ static union ast_expression *parse_expression_list_helper(
     } else {
       expression = parse_expression(s, precedence);
     }
+    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+      has_star_expression = true;
+    }
     *(idynarray_append(&expressions, union ast_expression *)) = expression;
   }
 
@@ -586,6 +590,7 @@ static union ast_expression *parse_expression_list_helper(
   size_t expressions_size = num_expressions * sizeof(union ast_expression *);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_expression_list) + expressions_size, type);
+  expression->expression_list.has_star_expression = has_star_expression;
   expression->expression_list.num_expressions = num_expressions;
   memcpy(expression->expression_list.expressions, idynarray_data(&expressions),
          expressions_size);
@@ -1538,7 +1543,8 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   expect(s, ':');
   parse_suite(s);
 
-  emit_class_end(&s->cg, name, &call->call, num_decorators);
+  emit_class_end(&s->cg, name, call == NULL ? NULL : &call->call,
+                 num_decorators);
 }
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)
@@ -1647,10 +1653,12 @@ union object *parse(struct parser_state *s, const char *filename)
 void parser_init(struct parser_state *s)
 {
   memset(s, 0, sizeof(*s));
+  arena_init(&s->ast);
   memset(s->anchor_set, 0, sizeof(s->anchor_set));
 }
 
 void parser_free(struct parser_state *s)
 {
-  (void)s;
+  cg_free(&s->cg);
+  arena_free(&s->ast);
 }

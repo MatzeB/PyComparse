@@ -63,13 +63,13 @@ void          object_new_tuple_set_at(union object *tuple, uint32_t index,
                                       union object *object);
 void          object_new_tuple_end(union object *tuple);
 
-enum object_type object_type(union object *object);
+enum object_type object_type(const union object *object);
 bool objects_equal(const union object *object0, const union object *object1);
 
-bool object_string_equals(union object *object, uint32_t length,
+bool object_string_equals(const union object *object, uint32_t length,
                           const char *chars);
 
-int64_t object_int_value(union object *object);
+int64_t object_int_value(const union object *object);
 
 void          object_list_append(union object *list, union object *object);
 union object *object_list_at(union object *list, uint32_t index);

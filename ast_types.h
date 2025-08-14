@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 union object;
@@ -52,8 +53,9 @@ struct ast_dict_item_list {
 
 struct ast_expression_list {
   struct ast_node_base  base;
-  union object         *as_constant;
+  bool                  has_star_expression;
   unsigned              num_expressions;
+  union object         *as_constant;
   union ast_expression *expressions[];
 };
 

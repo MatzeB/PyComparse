@@ -20,7 +20,7 @@ int main(int argc, char **argv)
   }
 
   struct symbol_table symbol_table;
-  init_symbol_table(&symbol_table);
+  symbol_table_init(&symbol_table);
   struct arena strings;
   arena_init(&strings);
 
@@ -37,7 +37,8 @@ int main(int argc, char **argv)
   fclose(input);
 
   scanner_free(&parser.scanner);
-  arena_free_all(&strings);
-  exit_symbol_table(&symbol_table);
+  parser_free(&parser);
+  arena_free(&strings);
+  symbol_table_free(&symbol_table);
   return parser.error ? 1 : 0;
 }

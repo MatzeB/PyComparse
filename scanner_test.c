@@ -20,7 +20,7 @@ int main(int argc, char **argv)
   }
 
   struct symbol_table symbol_table;
-  init_symbol_table(&symbol_table);
+  symbol_table_init(&symbol_table);
   struct arena strings;
   arena_init(&strings);
 
@@ -41,7 +41,7 @@ int main(int argc, char **argv)
   }
 
   scanner_free(&s);
-  arena_free_all(&strings);
-  exit_symbol_table(&symbol_table);
+  arena_free(&strings);
+  symbol_table_free(&symbol_table);
   return 0;
 }

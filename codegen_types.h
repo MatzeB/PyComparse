@@ -18,6 +18,12 @@ struct basic_block {
   struct basic_block *next;
 };
 
+struct loop_state {
+  struct basic_block *continue_block;
+  struct basic_block *break_block;
+  bool                pop_on_break;
+};
+
 struct code_state {
   struct arena        opcodes;
   union object       *consts;
@@ -26,6 +32,7 @@ struct code_state {
   struct basic_block *current_block;
   struct basic_block *first_block;
   struct basic_block *last_block;
+  struct loop_state   loop_state;
   unsigned            cg_stack_begin;
   uint16_t            outer_scope_id;
   uint16_t            scope_id;

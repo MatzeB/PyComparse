@@ -12,5 +12,8 @@ struct parser_state {
   struct arena         ast;
   struct cg_state      cg;
   bool                 error;
-  unsigned short       anchor_set[NUM_TOKENS];
+#ifndef NDEBUG
+  bool in_error;
+#endif
+  unsigned short anchor_set[NUM_TOKENS];
 };

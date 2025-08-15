@@ -492,8 +492,10 @@ static void scan_eof(struct scanner_state *s)
     assert(s->indentation_stack_top > 0);
     s->last_line_indent = 0;
     s->pending_dedents = s->indentation_stack_top - 1;
-    s->at_begin_of_line = false; /* force emission of newline */
     s->token.kind = T_DEDENT;
+    if (s->pending_dedents == 0) {
+      s->at_begin_of_line = false;
+    }
     return;
   }
   /* Add artificial newline, for EOF in the middle of a line. */

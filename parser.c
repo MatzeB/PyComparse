@@ -68,24 +68,31 @@ enum precedence {
 
 static void error_begin(struct parser_state *s, struct location location)
 {
+#ifndef NDEBUG
+  assert(!s->in_error);
+  s->in_error = true;
+#endif
   s->error = true;
   fprintf(stderr, "%s:%u error: ", s->cg.filename, location.line);
 }
 
 static void error_frag(struct parser_state *s, const char *message)
 {
+  assert(s->in_error);
   (void)s;
   fputs(message, stderr);
 }
 
 static void error_token(struct parser_state *s, struct token *token)
 {
+  assert(s->in_error);
   (void)s;
   print_token(stderr, token);
 }
 
 static void error_symbol(struct parser_state *s, struct symbol *symbol)
 {
+  assert(s->in_error);
   (void)s;
   fputc('\'', stderr);
   fputs(symbol->string, stderr);
@@ -95,6 +102,7 @@ static void error_symbol(struct parser_state *s, struct symbol *symbol)
 static void error_expression(struct parser_state  *s,
                              union ast_expression *expression)
 {
+  assert(s->in_error);
   const char *name;
   switch (ast_expression_type(expression)) {
   case AST_INVALID:
@@ -118,8 +126,11 @@ static void error_expression(struct parser_state  *s,
 
 static void error_end(struct parser_state *s)
 {
-  (void)s;
+#ifndef NDEBUG
+  assert(s->in_error);
+  s->in_error = false;
   assert(s->error);
+#endif
   fputc('\n', stderr);
   fflush(stderr);
 }
@@ -1231,6 +1242,28 @@ static void parse_expression_statement(struct parser_state *s)
   emit_expression_statement(&s->cg, expression);
 }
 
+static void parse_break(struct parser_state *s)
+{
+  if (!emit_break(&s->cg)) {
+    struct location location = scanner_location(&s->scanner);
+    error_begin(s, location);
+    error_frag(s, "'break' outside loop");
+    error_end(s);
+  }
+  eat(s, T_break);
+}
+
+static void parse_continue(struct parser_state *s)
+{
+  if (!emit_continue(&s->cg)) {
+    struct location location = scanner_location(&s->scanner);
+    error_begin(s, location);
+    error_frag(s, "'continue' outside loop");
+    error_end(s);
+  }
+  eat(s, T_continue);
+}
+
 static struct dotted_name *parse_dotted_name(struct parser_state *s)
 {
   arena_grow_begin(&s->ast, alignof(struct dotted_name));
@@ -1344,6 +1377,12 @@ static void parse_small_statement(struct parser_state *s)
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
     break;
+  case T_continue:
+    parse_continue(s);
+    break;
+  case T_break:
+    parse_break(s);
+    break;
   case T_from:
     parse_from_import_statement(s);
     break;
@@ -1425,10 +1464,16 @@ static void parse_for(struct parser_state *s)
   union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');
 
-  struct for_state state;
+  struct for_while_state state;
   emit_for_begin(&s->cg, &state, target, expression);
 
   parse_suite(s);
+
+  emit_for_else(&s->cg, &state);
+  if (accept(s, T_else)) {
+    expect(s, ':');
+    parse_suite(s);
+  }
 
   emit_for_end(&s->cg, &state);
 }
@@ -1439,10 +1484,16 @@ static void parse_while(struct parser_state *s)
   union ast_expression *expression = parse_expression(s, PREC_TEST);
   expect(s, ':');
 
-  struct while_state state;
+  struct for_while_state state;
   emit_while_begin(&s->cg, &state, expression);
 
   parse_suite(s);
+
+  emit_while_else(&s->cg, &state);
+  if (accept(s, T_else)) {
+    expect(s, ':');
+    parse_suite(s);
+  }
 
   emit_while_end(&s->cg, &state);
 }

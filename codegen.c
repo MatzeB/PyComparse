@@ -98,6 +98,14 @@ static void pop_symbol_infos(struct cg_state *s)
   }
 }
 
+static struct basic_block *skip_empty_blocks(struct basic_block *target)
+{
+  while (target->code_length == 0 && target->jump_opcode == 0) {
+    target = target->default_target;
+  }
+  return target;
+}
+
 union object *cg_code_end(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
@@ -134,58 +142,68 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // Finalize bytecode layout.
   struct arena *arena = object_intern_arena(&s->objects);
   arena_grow_begin(arena, 1);
-  for (struct basic_block *b = first_block; b != NULL; b = b->next) {
+  for (struct basic_block *b = first_block, *next; b != NULL; b = next) {
+    next = b->next;
+    struct basic_block *default_target = b->default_target;
+    enum opcode         jump_opcode = b->jump_opcode;
+    unsigned            code_length = b->code_length;
+    unsigned            offset = b->offset;
+
     unsigned jump_length = 0;
-    if (b->jump_opcode != 0) {
+    if (jump_opcode != 0) {
       jump_length += 2;
     }
-    if (b->default_target != NULL && b->default_target != b->next) {
+    if (default_target != NULL && default_target != next) {
       jump_length += 2;
     }
-    unsigned block_length = b->code_length + jump_length;
-    assert(b->next == NULL || b->next->offset == b->offset + block_length);
+    unsigned block_length = code_length + jump_length;
+    assert(next == NULL || next->offset == offset + block_length);
 
     void *dst = arena_grow(arena, block_length);
-    memcpy(dst, b->code_bytes, b->code_length);
-    uint8_t *j = (uint8_t *)dst + b->code_length;
-    if (b->jump_opcode != 0) {
-      unsigned dest_offset = b->jump_target->offset;
+    memcpy(dst, b->code_bytes, code_length);
+    uint8_t *j = (uint8_t *)dst + code_length;
+    if (jump_opcode != 0) {
+      struct basic_block *jump_target = b->jump_target;
+      unsigned            dest_offset = jump_target->offset;
       assert(
           (dest_offset > 0
            || (first_block->code_length == 0 && first_block->jump_opcode == 0))
           && "target block not processed?");
-      *j++ = b->jump_opcode;
-      if (is_absjump(b->jump_opcode)) {
+      *j++ = jump_opcode;
+      if (is_absjump(jump_opcode)) {
+        jump_target = skip_empty_blocks(jump_target);
         if (dest_offset > 255) {
           abort(); /* TODO */
         }
         *j++ = (uint8_t)dest_offset;
       } else {
+        /* Note: We don't use skip_empty_blocks() here as we cannot encode
+         * possible backward jumps. */
         unsigned delta
-            = dest_offset - b->offset - block_length
-              - ((b->default_target != NULL && b->default_target != b->next)
-                     ? 2
-                     : 0);
+            = dest_offset - offset - block_length
+              - ((default_target != NULL && default_target != next) ? 2 : 0);
         if (delta > 255) {
           abort();
         }
         *j++ = (uint8_t)delta;
       }
+    } else {
+      assert(b->jump_target == NULL);
     }
-    if (b->default_target != NULL && b->default_target != b->next) {
-      unsigned dest_offset = b->default_target->offset;
+    if (default_target != NULL && default_target != next) {
+      unsigned dest_offset = default_target->offset;
       assert(
           (dest_offset > 0
            || (first_block->code_length == 0 && first_block->jump_opcode == 0))
           && "target block not processed?");
-      if (dest_offset <= b->offset) {
+      if (dest_offset <= offset) {
         if (dest_offset > 255) {
           abort(); /* TODO */
         }
         *j++ = OPCODE_JUMP_ABSOLUTE;
         *j++ = (uint8_t)dest_offset;
       } else {
-        unsigned delta = dest_offset - b->offset - block_length;
+        unsigned delta = dest_offset - offset - block_length;
         if (delta > 255) {
           abort();
         }

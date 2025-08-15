@@ -376,9 +376,10 @@ static struct argument *parse_argument(struct parser_state *s,
                                        struct argument     *argument)
 {
   union ast_expression *expression = parse_expression(s, PREC_STAR);
+  struct symbol        *name = NULL;
   if (accept(s, '=')) {
     if (expression->type == AST_IDENTIFIER) {
-      argument->name = expression->identifier.symbol;
+      name = expression->identifier.symbol;
     } else {
       error_begin(s, scanner_location(&s->scanner));
       error_frag(s, "assignment not allowed, perhaps you meant '=='?");
@@ -392,6 +393,7 @@ static struct argument *parse_argument(struct parser_state *s,
         = parse_generator_expression(s, AST_GENERATOR_EXPRESSION, expression);
   }
 
+  argument->name = name;
   argument->expression = expression;
   return argument;
 }
@@ -406,7 +408,8 @@ static union ast_expression *parse_call_helper(struct parser_state  *s,
   struct argument  inline_storage[8];
   struct idynarray arguments;
   idynarray_init(&arguments, inline_storage, sizeof(inline_storage));
-  bool have_star_args = false;
+  bool has_star_argument = false;
+  bool has_kw_argument = false;
 
   if (peek(s) != ')') {
     do {
@@ -414,7 +417,10 @@ static union ast_expression *parse_call_helper(struct parser_state  *s,
           = idynarray_append(&arguments, struct argument);
       parse_argument(s, argument);
       if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) {
-        have_star_args = true;
+        has_star_argument = true;
+      }
+      if (argument->name != NULL) {
+        has_kw_argument = true;
       }
     } while (accept(s, ',') && peek(s) != ')');
   }
@@ -423,80 +429,15 @@ static union ast_expression *parse_call_helper(struct parser_state  *s,
   expect(s, ')');
 
   unsigned num_arguments = idynarray_length(&arguments, struct argument);
-
-  if (!have_star_args) {
-    size_t arguments_size = num_arguments * sizeof(struct argument);
-    union ast_expression *expression = ast_allocate_expression_(
-        s, sizeof(struct ast_call) + arguments_size, AST_CALL);
-    expression->call.callee = callee;
-    expression->call.num_arguments = num_arguments;
-    memcpy(expression->call.arguments, idynarray_data(&arguments),
-           arguments_size);
-    return expression;
-  }
-
-  /* using CALL_EX, count how many args we need */
-  struct argument *arguments_arr = idynarray_data(&arguments);
-  unsigned         num_processed_args = 0;
-  unsigned         idx = 0;
-  while (idx < num_arguments) {
-    struct argument *argument = &arguments_arr[idx];
-    if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) {
-      ++num_processed_args;
-      ++idx;
-      continue;
-    }
-
-    while (++idx < num_arguments) {
-      struct argument *argument = &arguments_arr[idx];
-      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) break;
-    }
-    num_processed_args++;
-  }
-
-  size_t arguments_size = num_processed_args * sizeof(struct argument);
+  size_t   arguments_size = num_arguments * sizeof(struct argument);
   union ast_expression *expression = ast_allocate_expression_(
-      s, sizeof(struct ast_call) + arguments_size, AST_CALL_EX);
+      s, sizeof(struct ast_call) + arguments_size, AST_CALL);
+  expression->call.has_star_argument = has_star_argument;
+  expression->call.has_kw_argument = has_kw_argument;
   expression->call.callee = callee;
-  expression->call.num_arguments = num_processed_args;
-  unsigned processed_args_idx = 0;
-  idx = 0;
-  while (idx < num_arguments) {
-    struct argument *argument = &arguments_arr[idx];
-    struct argument *new_argument
-        = &expression->call.arguments[processed_args_idx++];
-    union ast_expression *argument_expression = argument->expression;
-    if (ast_expression_type(argument_expression) == AST_UNEXPR_STAR) {
-      new_argument->expression = argument_expression->unexpr.op;
-      new_argument->name = NULL;
-      ++idx;
-      continue;
-    }
-
-    unsigned tuple_num_expressions = 1;
-    unsigned tuple_idx_begin = idx;
-    while (++idx < num_arguments) {
-      struct argument *argument = &arguments_arr[idx];
-      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) break;
-      ++tuple_num_expressions;
-    }
-
-    unsigned tuple_expressions_size
-        = tuple_num_expressions * sizeof(union ast_expression *);
-    union ast_expression *tuple = ast_allocate_expression_(
-        s, sizeof(struct ast_expression_list) + tuple_expressions_size,
-        AST_EXPRESSION_LIST);
-    tuple->expression_list.num_expressions = tuple_num_expressions;
-    for (unsigned i = 0; i < tuple_num_expressions; i++) {
-      tuple->expression_list.expressions[i]
-          = arguments_arr[tuple_idx_begin + i].expression;
-    }
-    ast_tuple_compute_constant(&s->cg.objects, &tuple->expression_list);
-    new_argument->name = NULL;
-    new_argument->expression = tuple;
-  }
-  assert(processed_args_idx == num_processed_args);
-
+  expression->call.num_arguments = num_arguments;
+  memcpy(expression->call.arguments, idynarray_data(&arguments),
+         arguments_size);
   return expression;
 }
 
@@ -1533,9 +1474,15 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 
   parse_type_parameters(s);
 
-  union ast_expression *call = NULL;
+  union ast_expression *call;
   if (peek(s) == '(') {
     call = parse_call_helper(s, /*callee=*/NULL);
+  } else {
+    call = ast_allocate_expression_(s, sizeof(struct ast_call), AST_CALL);
+    call->call.has_star_argument = false;
+    call->call.has_kw_argument = false;
+    call->call.callee = NULL;
+    call->call.num_arguments = 0;
   }
 
   emit_class_begin(&s->cg, name);
@@ -1543,8 +1490,7 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   expect(s, ':');
   parse_suite(s);
 
-  emit_class_end(&s->cg, name, call == NULL ? NULL : &call->call,
-                 num_decorators);
+  emit_class_end(&s->cg, name, &call->call, num_decorators);
 }
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)

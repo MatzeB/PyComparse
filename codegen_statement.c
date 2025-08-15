@@ -337,7 +337,7 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol,
   cg_load_const(s, string);
   cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
   cg_load_const(s, string);
-  emit_call_helper(s, call, /*extra_args=*/2);
+  emit_call_helper(s, call, /*num_extra_args=*/2);
   emit_decorator_calls(s, num_decorators);
   emit_store(s, symbol);
 }

@@ -15,7 +15,7 @@ void emit_expression_drop_result(struct cg_state      *cg,
                                  union ast_expression *expression);
 
 void emit_call_helper(struct cg_state *cg, struct ast_call *call,
-                      unsigned extra_args);
+                      unsigned num_extra_args);
 
 void emit_load(struct cg_state *cg, struct symbol *symbol);
 void emit_store(struct cg_state *cg, struct symbol *symbol);

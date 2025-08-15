@@ -30,6 +30,8 @@ struct argument {
 
 struct ast_call {
   struct ast_node_base  base;
+  bool                  has_star_argument;
+  bool                  has_kw_argument;
   union ast_expression *callee;
   unsigned              num_arguments;
   struct argument       arguments[];

@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 
+#include "opcodes.h"
+
 struct argument;
 struct ast_call;
 struct ast_generator_expression;
@@ -13,7 +15,7 @@ struct symbol;
 union ast_expression;
 
 struct if_state {
-  struct basic_block *false_or_footer;
+  struct basic_block *else_or_footer;
 };
 
 struct for_state {
@@ -70,5 +72,10 @@ void emit_def_begin(struct cg_state *s);
 bool emit_parameter(struct cg_state *s, struct symbol *symbol);
 void emit_def_end(struct cg_state *s, struct symbol *symbol,
                   unsigned num_decorators);
+
+void emit_condjump(struct cg_state *s, enum opcode opcode,
+                   struct basic_block *target,
+                   struct basic_block *fallthrough);
+void emit_jump(struct cg_state *s, struct basic_block *target);
 
 void emit_code_end(struct cg_state *s);

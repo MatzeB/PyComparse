@@ -64,6 +64,24 @@ static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr)
   cg_pop_op(s, opcode, 0);
 }
 
+static void emit_binexpr_logical(struct cg_state    *s,
+                                 struct ast_binexpr *binexpr,
+                                 enum opcode         opcode)
+{
+  emit_expression(s, binexpr->left);
+  struct basic_block *target = cg_allocate_block(s);
+  struct basic_block *fallthrough = cg_allocate_block(s);
+  cg_pop(s, 1);
+  assert(opcode == OPCODE_JUMP_IF_TRUE_OR_POP
+         || opcode == OPCODE_JUMP_IF_FALSE_OR_POP);
+  emit_condjump(s, opcode, /*target=*/target,
+                /*fallthrough=*/fallthrough);
+  cg_block_begin(s, fallthrough);
+  emit_expression(s, binexpr->right);
+  emit_jump(s, target);
+  cg_block_begin(s, target);
+}
+
 void emit_assignment(struct cg_state *s, union ast_expression *target)
 {
   switch (ast_expression_type(target)) {
@@ -624,9 +642,11 @@ static void emit_expression_impl(struct cg_state      *s,
     emit_comparison(s, &expression->binexpr, COMPARE_OP_LE);
     break;
   case AST_BINEXPR_LOGICAL_AND:
-    unimplemented();
+    emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_FALSE_OR_POP);
+    break;
   case AST_BINEXPR_LOGICAL_OR:
-    unimplemented();
+    emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_TRUE_OR_POP);
+    break;
   case AST_BINEXPR_NOT_IN:
     emit_comparison(s, &expression->binexpr, COMPARE_OP_NOT_IN);
     break;

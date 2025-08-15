@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 enum opcode {
   OPCODE_POP_TOP = 1,
   OPCODE_ROT_TWO = 2,

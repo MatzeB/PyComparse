@@ -931,6 +931,18 @@ static union ast_expression *parse_less_equal(struct parser_state  *s,
   return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
 }
 
+static union ast_expression *parse_logical_and(struct parser_state  *s,
+                                               union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_LOGICAL_AND + 1, AST_BINEXPR_LOGICAL_AND, left);
+}
+
+static union ast_expression *parse_logical_or(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  return parse_binexpr(s, PREC_LOGICAL_OR + 1, AST_BINEXPR_LOGICAL_OR, left);
+}
+
 static union ast_expression *parse_matmul(struct parser_state  *s,
                                           union ast_expression *left)
 {
@@ -1115,25 +1127,27 @@ struct postfix_expression_parser {
 
 static const struct postfix_expression_parser postfix_parsers[] = {
   /* clang-format off */
-  ['%']    = { .func = parse_mod,        .precedence = PREC_TERM       },
-  ['&']    = { .func = parse_and,        .precedence = PREC_AND        },
-  ['(']    = { .func = parse_call,       .precedence = PREC_PRIMARY    },
-  ['*']    = { .func = parse_mul,        .precedence = PREC_TERM       },
-  ['+']    = { .func = parse_add,        .precedence = PREC_ARITH      },
-  [',']    = { .func = parse_expr_list,  .precedence = PREC_LIST       },
-  ['-']    = { .func = parse_sub,        .precedence = PREC_ARITH      },
-  ['.']    = { .func = parse_attr,       .precedence = PREC_PRIMARY    },
-  ['/']    = { .func = parse_true_div,   .precedence = PREC_TERM       },
-  ['<']    = { .func = parse_less,       .precedence = PREC_COMPARISON },
-  ['=']    = { .func = parse_assignment, .precedence = PREC_ASSIGN     },
-  ['>']    = { .func = parse_greater,    .precedence = PREC_COMPARISON },
-  ['@']    = { .func = parse_matmul,     .precedence = PREC_TERM       },
-  ['[']    = { .func = parse_subscript,  .precedence = PREC_PRIMARY    },
-  ['^']    = { .func = parse_xor,        .precedence = PREC_XOR        },
-  ['|']    = { .func = parse_or,         .precedence = PREC_OR         },
-  [T_not]  = { .func = parse_not_in,     .precedence = PREC_COMPARISON },
-  [T_in]   = { .func = parse_in,         .precedence = PREC_COMPARISON },
-  [T_is]   = { .func = parse_is,         .precedence = PREC_COMPARISON },
+  ['%']    = { .func = parse_mod,         .precedence = PREC_TERM        },
+  ['&']    = { .func = parse_and,         .precedence = PREC_AND         },
+  ['(']    = { .func = parse_call,        .precedence = PREC_PRIMARY     },
+  ['*']    = { .func = parse_mul,         .precedence = PREC_TERM        },
+  ['+']    = { .func = parse_add,         .precedence = PREC_ARITH       },
+  [',']    = { .func = parse_expr_list,   .precedence = PREC_LIST        },
+  ['-']    = { .func = parse_sub,         .precedence = PREC_ARITH       },
+  ['.']    = { .func = parse_attr,        .precedence = PREC_PRIMARY     },
+  ['/']    = { .func = parse_true_div,    .precedence = PREC_TERM        },
+  ['<']    = { .func = parse_less,        .precedence = PREC_COMPARISON  },
+  ['=']    = { .func = parse_assignment,  .precedence = PREC_ASSIGN      },
+  ['>']    = { .func = parse_greater,     .precedence = PREC_COMPARISON  },
+  ['@']    = { .func = parse_matmul,      .precedence = PREC_TERM        },
+  ['[']    = { .func = parse_subscript,   .precedence = PREC_PRIMARY     },
+  ['^']    = { .func = parse_xor,         .precedence = PREC_XOR         },
+  ['|']    = { .func = parse_or,          .precedence = PREC_OR          },
+  [T_and]  = { .func = parse_logical_and, .precedence = PREC_LOGICAL_AND },
+  [T_in]   = { .func = parse_in,          .precedence = PREC_COMPARISON  },
+  [T_is]   = { .func = parse_is,          .precedence = PREC_COMPARISON  },
+  [T_not]  = { .func = parse_not_in,      .precedence = PREC_COMPARISON  },
+  [T_or]   = { .func = parse_logical_or,  .precedence = PREC_LOGICAL_OR  },
   [T_AMPERSAND_EQUALS]
     = { .func = parse_and_assign,         .precedence = PREC_ASSIGN     },
   [T_ASTERISK_ASTERISK_EQUALS]

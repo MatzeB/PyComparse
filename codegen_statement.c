@@ -164,9 +164,8 @@ void emit_return_statement(struct cg_state      *s,
   cg_block_end(s);
 }
 
-static void emit_condjump(struct cg_state *s, uint8_t opcode,
-                          struct basic_block *target,
-                          struct basic_block *fallthrough)
+void emit_condjump(struct cg_state *s, enum opcode opcode,
+                   struct basic_block *target, struct basic_block *fallthrough)
 {
   struct basic_block *block = cg_block_end(s);
   assert(block->jump_opcode == 0 && block->jump_target == NULL);
@@ -175,11 +174,66 @@ static void emit_condjump(struct cg_state *s, uint8_t opcode,
   block->default_target = fallthrough;
 }
 
-static void emit_jump(struct cg_state *s, struct basic_block *target)
+void emit_jump(struct cg_state *s, struct basic_block *target)
 {
   struct basic_block *block = cg_block_end(s);
   assert(block->jump_opcode == 0 && block->jump_target == NULL);
   block->default_target = target;
+}
+
+static void emit_condjump_expr(struct cg_state      *s,
+                               union ast_expression *expression,
+                               struct basic_block   *true_block,
+                               struct basic_block   *false_block,
+                               struct basic_block   *next)
+{
+  switch (ast_expression_type(expression)) {
+  case AST_UNEXPR_NOT:
+    emit_condjump_expr(s, expression->unexpr.op,
+                       /*true_block=*/false_block, /*false_block=*/true_block,
+                       /*next=*/next);
+    return;
+  case AST_BINEXPR_LOGICAL_AND: {
+    struct basic_block *middle_block = cg_allocate_block(s);
+    emit_condjump_expr(s, expression->binexpr.left,
+                       /*true_block=*/middle_block,
+                       /*false_block=*/false_block,
+                       /*next=*/middle_block);
+    cg_block_begin(s, middle_block);
+    emit_condjump_expr(s, expression->binexpr.right,
+                       /*true_block=*/true_block, /*false_block=*/false_block,
+                       /*next=*/next);
+    return;
+  }
+  case AST_BINEXPR_LOGICAL_OR: {
+    struct basic_block *middle_block = cg_allocate_block(s);
+    emit_condjump_expr(s, expression->binexpr.left,
+                       /*true_block=*/true_block, /*false_block=*/middle_block,
+                       /*next=*/middle_block);
+    cg_block_begin(s, middle_block);
+    emit_condjump_expr(s, expression->binexpr.right,
+                       /*true_block=*/true_block, /*false_block=*/false_block,
+                       /*next=*/next);
+    return;
+  }
+  default:
+    emit_expression(s, expression);
+    enum opcode         opcode;
+    struct basic_block *target;
+    struct basic_block *fallthrough;
+    if (next == true_block) {
+      opcode = OPCODE_POP_JUMP_IF_FALSE;
+      target = false_block;
+      fallthrough = true_block;
+    } else {
+      opcode = OPCODE_POP_JUMP_IF_TRUE;
+      target = true_block;
+      fallthrough = false_block;
+    }
+    cg_pop(s, 1);
+    emit_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
+    return;
+  }
 }
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
@@ -190,32 +244,33 @@ void emit_if_begin(struct cg_state *s, struct if_state *state,
     return;
   }
 
-  struct basic_block *true_block = cg_allocate_block(s);
-  struct basic_block *false_block = cg_allocate_block(s);
-  emit_expression(s, expression);
-  emit_condjump(s, OPCODE_POP_JUMP_IF_FALSE, false_block, true_block);
-  cg_pop(s, 1);
+  struct basic_block *then_block = cg_allocate_block(s);
+  struct basic_block *else_or_footer = cg_allocate_block(s);
+  emit_condjump_expr(s, expression,
+                     /*true_block=*/then_block,
+                     /*false_block=*/else_or_footer,
+                     /*next=*/then_block);
 
-  cg_block_begin(s, true_block);
-  state->false_or_footer = false_block;
+  cg_block_begin(s, then_block);
+  state->else_or_footer = else_or_footer;
 }
 
 void emit_else_begin(struct cg_state *s, struct if_state *state)
 {
-  struct basic_block *false_block = state->false_or_footer;
-  if (false_block == NULL) return;
+  struct basic_block *else_block = state->else_or_footer;
+  if (else_block == NULL) return;
   struct basic_block *footer = cg_allocate_block(s);
-  state->false_or_footer = footer;
+  state->else_or_footer = footer;
   if (!unreachable(s)) {
     emit_jump(s, footer);
   }
 
-  cg_block_begin(s, false_block);
+  cg_block_begin(s, else_block);
 }
 
 void emit_if_end(struct cg_state *s, struct if_state *state)
 {
-  struct basic_block *footer = state->false_or_footer;
+  struct basic_block *footer = state->else_or_footer;
   if (footer == NULL) return;
   if (!unreachable(s)) {
     emit_jump(s, footer);

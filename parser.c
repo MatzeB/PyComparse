@@ -1601,6 +1601,41 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
   }
 }
 
+static void parse_with(struct parser_state *s)
+{
+  eat(s, T_with);
+
+  /* Parse comma-separated with items using idynarray */
+  struct with_item inline_storage[4];
+  struct idynarray with_items;
+  idynarray_init(&with_items, inline_storage, sizeof(inline_storage));
+
+  do {
+    struct with_item *item = idynarray_append(&with_items, struct with_item);
+
+    /* Parse context manager expression */
+    item->expression = parse_expression(s, PREC_TEST);
+
+    /* Parse optional 'as' clause */
+    union ast_expression *target = NULL;
+    if (accept(s, T_as)) {
+      target = parse_expression(s, PREC_OR);
+    }
+    item->target = target;
+  } while (accept(s, ','));
+
+  expect(s, ':');
+
+  struct with_state state;
+  unsigned num_items = idynarray_length(&with_items, struct with_item);
+  emit_with_begin(&s->cg, &state, num_items, idynarray_data(&with_items));
+
+  parse_suite(s);
+
+  emit_with_end(&s->cg, &state);
+  idynarray_free(&with_items);
+}
+
 static void parse_statement(struct parser_state *s)
 {
   add_anchor(s, T_NEWLINE);
@@ -1622,6 +1657,9 @@ static void parse_statement(struct parser_state *s)
     break;
   case T_while:
     parse_while(s);
+    break;
+  case T_with:
+    parse_with(s);
     break;
   case T_EOF:
     break;

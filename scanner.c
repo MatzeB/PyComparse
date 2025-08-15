@@ -488,6 +488,13 @@ finish_string:;
 
 static void scan_eof(struct scanner_state *s)
 {
+  /* Add artificial newline, for EOF in the middle of a line. */
+  if (!s->at_begin_of_line) {
+    s->at_begin_of_line = true;
+    s->token.kind = T_NEWLINE;
+    return;
+  }
+
   if (s->last_line_indent > 0) {
     assert(s->indentation_stack_top > 0);
     s->last_line_indent = 0;
@@ -498,12 +505,7 @@ static void scan_eof(struct scanner_state *s)
     }
     return;
   }
-  /* Add artificial newline, for EOF in the middle of a line. */
-  if (!s->at_begin_of_line) {
-    s->at_begin_of_line = true;
-    s->token.kind = T_NEWLINE;
-    return;
-  }
+
   s->token.kind = T_EOF;
 }
 

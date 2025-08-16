@@ -1,0 +1,8 @@
+test/errors/def_parameters.py:1 error: parameter without default follows parameter with default
+test/errors/def_parameters.py:4 error: '*' argument may appear only once
+test/errors/def_parameters.py:7 error: '*' argument may appear only once
+test/errors/def_parameters.py:10 error: duplicate argument 'a'
+test/errors/def_parameters.py:25 error: '**' argument may appear only once
+test/errors/def_parameters.py:28 error: '/' must be ahead of '**'
+test/errors/def_parameters.py:28 error: expected :, got ;
+test/errors/def_parameters.py:31 error: '/' must be ahead of '*'

@@ -30,7 +30,8 @@ int main(int argc, char **argv)
                &parser.cg.objects, &strings);
 
   union object *code = parse(&parser, filename);
-  if (!parser.error) {
+  bool          had_errors = parser_had_errors(&parser);
+  if (!had_errors) {
     write_module(stdout, code);
   }
 
@@ -40,5 +41,5 @@ int main(int argc, char **argv)
   parser_free(&parser);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
-  return parser.error ? 1 : 0;
+  return had_errors ? 1 : 0;
 }

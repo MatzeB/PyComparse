@@ -3,21 +3,23 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-union object;
-struct cg_state;
 struct basic_block;
+struct cg_state;
+struct diagnostics_state;
 struct name_info;
 struct symbol;
 struct symbol_table;
+union object;
 
 unsigned cg_register_code(struct cg_state *s, union object *code);
 unsigned cg_register_object(struct cg_state *s, union object *object);
 unsigned cg_register_unique_object(struct cg_state *s, union object *object);
 
-unsigned cg_register_name(struct cg_state *s, const char *name);
-
-unsigned cg_append_name(struct cg_state *s, const char *name);
-unsigned cg_append_varname(struct cg_state *s, const char *name);
+unsigned cg_register_name_from_cstring(struct cg_state *s,
+                                       const char      *cstring);
+unsigned cg_register_name(struct cg_state *s, struct symbol *symbol);
+unsigned cg_append_name(struct cg_state *s, struct symbol *symbol);
+unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol);
 
 bool cg_use_locals(struct cg_state *s);
 

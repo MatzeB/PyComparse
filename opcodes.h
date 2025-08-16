@@ -128,6 +128,13 @@ enum opcode {
   OPCODE_POP_FINALLY = 163,  /* added in 3.8 */
 };
 
+enum make_function_arg_flags {
+  MAKE_FUNCTION_DEFAULTS = 1 << 0,
+  MAKE_FUNCTION_KWDEFAULTS = 1 << 1,
+  MAKE_FUNCTION_ANNOTATIONS = 1 << 2,
+  MAKE_FUNCTION_CLOSURE = 1 << 3,
+};
+
 enum compare_op_arg {
   COMPARE_OP_LT = 0,
   COMPARE_OP_LE = 1,

@@ -227,8 +227,8 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
-  object->code.posonlyargcount = 0;
-  object->code.kwonlyargcount = 0;
+  object->code.posonlyargcount = s->code.positional_only_argcount;
+  object->code.kwonlyargcount = s->code.keyword_only_argcount;
   object->code.nlocals = s->code.varnames->list.length;
   object->code.stacksize = s->code.max_stacksize;
   object->code.flags = s->code.flags;
@@ -342,33 +342,46 @@ void cg_load_const(struct cg_state *s, union object *object)
   cg_push_op(s, OPCODE_LOAD_CONST, index);
 }
 
-unsigned cg_register_name(struct cg_state *s, const char *name)
+static unsigned cg_append_name_from_cstring(struct cg_state *s,
+                                            const char      *cstring)
 {
   union object *names = s->code.names;
-  unsigned      length = strlen(name);
-  for (unsigned i = 0; i < names->list.length; ++i) {
-    const union object *object = names->list.items[i];
-    if (object->type != OBJECT_ASCII) continue;
-    const struct object_string *string = &object->string;
-    if (string->length == length && memcmp(string->chars, name, length) == 0) {
-      return i;
-    }
-  }
-  return cg_append_name(s, name);
-}
-
-unsigned cg_append_name(struct cg_state *s, const char *name)
-{
-  union object *names = s->code.names;
-  union object *string = object_intern_cstring(&s->objects, name);
+  union object *string = object_intern_cstring(&s->objects, cstring);
   object_list_append(names, string);
   return names->list.length - 1;
 }
 
-unsigned cg_append_varname(struct cg_state *s, const char *name)
+unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
 {
+  union object *names = s->code.names;
+  unsigned      length = strlen(cstring);
+  for (unsigned i = 0; i < names->list.length; ++i) {
+    const union object *object = names->list.items[i];
+    if (object->type != OBJECT_ASCII) continue;
+    const struct object_string *string = &object->string;
+    if (string->length == length
+        && memcmp(string->chars, cstring, length) == 0) {
+      return i;
+    }
+  }
+  return cg_append_name_from_cstring(s, cstring);
+}
+
+unsigned cg_register_name(struct cg_state *s, struct symbol *symbol)
+{
+  return cg_register_name_from_cstring(s, symbol->string);
+}
+
+unsigned cg_append_name(struct cg_state *s, struct symbol *symbol)
+{
+  return cg_append_name_from_cstring(s, symbol->string);
+}
+
+unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol)
+{
+  const char   *cstring = symbol->string;
   union object *varnames = s->code.varnames;
-  union object *string = object_intern_cstring(&s->objects, name);
+  union object *string = object_intern_cstring(&s->objects, cstring);
   object_list_append(varnames, string);
   return varnames->list.length - 1;
 }

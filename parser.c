@@ -13,6 +13,7 @@
 #include "codegen.h"
 #include "codegen_expression.h"
 #include "codegen_statement.h"
+#include "diagnostics.h"
 #include "object.h"
 #include "scanner.h"
 #include "symbol_table.h"
@@ -66,83 +67,14 @@ enum precedence {
   PREC_ATOM,    /* name, number, string, ..., None, True, False */
 };
 
-static void error_begin(struct parser_state *s, struct location location)
-{
-#ifndef NDEBUG
-  assert(!s->in_error);
-  s->in_error = true;
-#endif
-  s->error = true;
-  fprintf(stderr, "%s:%u error: ", s->cg.filename, location.line);
-}
-
-static void error_frag(struct parser_state *s, const char *message)
-{
-  assert(s->in_error);
-  (void)s;
-  fputs(message, stderr);
-}
-
-static void error_token(struct parser_state *s, struct token *token)
-{
-  assert(s->in_error);
-  (void)s;
-  print_token(stderr, token);
-}
-
-static void error_symbol(struct parser_state *s, struct symbol *symbol)
-{
-  assert(s->in_error);
-  (void)s;
-  fputc('\'', stderr);
-  fputs(symbol->string, stderr);
-  fputc('\'', stderr);
-}
-
-static void error_expression(struct parser_state  *s,
-                             union ast_expression *expression)
-{
-  assert(s->in_error);
-  const char *name;
-  switch (ast_expression_type(expression)) {
-  case AST_INVALID:
-    name = "<invalid>";
-    break;
-  case AST_CONST:
-    name = "literal";
-    break;
-  case AST_DICT_DISPLAY:
-    name = "dict literal";
-    break;
-  case AST_SET_DISPLAY:
-    name = "set literal";
-    break;
-  default:
-    name = "expression";
-    break;
-  }
-  error_frag(s, name);
-}
-
-static void error_end(struct parser_state *s)
-{
-#ifndef NDEBUG
-  assert(s->in_error);
-  s->in_error = false;
-  assert(s->error);
-#endif
-  fputc('\n', stderr);
-  fflush(stderr);
-}
-
 static void error_expected(struct parser_state *s, const char *what)
 {
-  error_begin(s, scanner_location(&s->scanner));
-  error_frag(s, "expected ");
-  error_frag(s, what);
-  error_frag(s, ", got ");
-  error_token(s, &s->scanner.token);
-  error_end(s);
+  diag_begin_error(&s->d, scanner_location(&s->scanner));
+  diag_frag(&s->d, "expected ");
+  diag_frag(&s->d, what);
+  diag_frag(&s->d, ", got ");
+  diag_token(&s->d, &s->scanner.token);
+  diag_end(&s->d);
 }
 
 static inline enum token_kind peek(const struct parser_state *s)
@@ -312,7 +244,7 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 
 static union ast_expression *ast_invalid(struct parser_state *s)
 {
-  assert(s->error);
+  assert(s->d.had_error);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
   expression->cnst.object
@@ -322,7 +254,7 @@ static union ast_expression *ast_invalid(struct parser_state *s)
 
 static struct symbol *symbol_invalid(struct parser_state *s)
 {
-  assert(s->error);
+  assert(s->d.had_error);
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
@@ -392,9 +324,9 @@ static struct argument *parse_argument(struct parser_state *s,
     if (expression->type == AST_IDENTIFIER) {
       name = expression->identifier.symbol;
     } else {
-      error_begin(s, scanner_location(&s->scanner));
-      error_frag(s, "assignment not allowed, perhaps you meant '=='?");
-      error_end(s);
+      diag_begin_error(&s->d, scanner_location(&s->scanner));
+      diag_frag(&s->d, "assignment not allowed, perhaps you meant '=='?");
+      diag_end(&s->d);
     }
     expression = parse_expression(s, PREC_STAR);
   }
@@ -409,8 +341,8 @@ static struct argument *parse_argument(struct parser_state *s,
   return argument;
 }
 
-static union ast_expression *parse_call_helper(struct parser_state  *s,
-                                               union ast_expression *callee)
+static union ast_expression *parse_argument_list(struct parser_state  *s,
+                                                 union ast_expression *callee)
 {
   eat(s, '(');
   add_anchor(s, ')');
@@ -455,7 +387,7 @@ static union ast_expression *parse_call_helper(struct parser_state  *s,
 static union ast_expression *parse_call(struct parser_state  *s,
                                         union ast_expression *left)
 {
-  return parse_call_helper(s, /*callee=*/left);
+  return parse_argument_list(s, /*callee=*/left);
 }
 
 static inline union ast_expression *parse_unexpr(struct parser_state *s,
@@ -792,14 +724,14 @@ static bool check_binexpr_assign_target(struct parser_state  *s,
   if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
       || type == AST_ATTR)
     return false;
-  error_begin(s, location);
-  error_frag(s, "cannot assign to ");
-  error_expression(s, target);
+  diag_begin_error(&s->d, location);
+  diag_frag(&s->d, "cannot assign to ");
+  diag_expression(&s->d, target);
   if (type == AST_EXPRESSION_LIST) {
-    error_frag(s, " for agumented assignment");
+    diag_frag(&s->d, " for agumented assignment");
   }
-  error_frag(s, ".");
-  error_end(s);
+  diag_frag(&s->d, ".");
+  diag_end(&s->d);
   return true;
 }
 
@@ -856,12 +788,12 @@ static bool check_assignment_target(struct parser_state  *s,
     }
     return false;
   }
-  error_begin(s, location);
-  error_frag(s, "cannot assign to ");
-  error_expression(s, expression);
+  diag_begin_error(&s->d, location);
+  diag_frag(&s->d, "cannot assign to ");
+  diag_expression(&s->d, expression);
   /* TODO: only show ':=' suggestion where it makes sense like python... */
-  error_frag(s, ". Maybe you meant '==', or ':=' instead of '='?");
-  error_end(s);
+  diag_frag(&s->d, ". Maybe you meant '==', or ':=' instead of '='?");
+  diag_end(&s->d);
   return true;
 }
 
@@ -1246,9 +1178,9 @@ static void parse_break(struct parser_state *s)
 {
   if (!emit_break(&s->cg)) {
     struct location location = scanner_location(&s->scanner);
-    error_begin(s, location);
-    error_frag(s, "'break' outside loop");
-    error_end(s);
+    diag_begin_error(&s->d, location);
+    diag_frag(&s->d, "'break' outside loop");
+    diag_end(&s->d);
   }
   eat(s, T_break);
 }
@@ -1257,9 +1189,9 @@ static void parse_continue(struct parser_state *s)
 {
   if (!emit_continue(&s->cg)) {
     struct location location = scanner_location(&s->scanner);
-    error_begin(s, location);
-    error_frag(s, "'continue' outside loop");
-    error_end(s);
+    diag_begin_error(&s->d, location);
+    diag_frag(&s->d, "'continue' outside loop");
+    diag_end(&s->d);
   }
   eat(s, T_continue);
 }
@@ -1395,8 +1327,6 @@ static void parse_small_statement(struct parser_state *s)
   case T_return:
     parse_return_statement(s);
     break;
-  /* TODO: del, break, continue, return, raise, yield,
-   * import, global, nonlocal, assert */
   default:
     error_expected(s, "statement");
     eat_until_anchor(s);
@@ -1478,57 +1408,11 @@ static void parse_for(struct parser_state *s)
   emit_for_end(&s->cg, &state);
 }
 
-static void parse_while(struct parser_state *s)
-{
-  eat(s, T_while);
-  union ast_expression *expression = parse_expression(s, PREC_TEST);
-  expect(s, ':');
-
-  struct for_while_state state;
-  emit_while_begin(&s->cg, &state, expression);
-
-  parse_suite(s);
-
-  emit_while_else(&s->cg, &state);
-  if (accept(s, T_else)) {
-    expect(s, ':');
-    parse_suite(s);
-  }
-
-  emit_while_end(&s->cg, &state);
-}
-
 static void parse_type_parameters(struct parser_state *s)
 {
   if (accept(s, '[')) {
     unimplemented();
   }
-}
-
-static void parse_parameters(struct parser_state *s)
-{
-  expect(s, '(');
-
-  unsigned num_parameters = 0;
-  while (peek(s) == T_IDENTIFIER) {
-    struct symbol *symbol = eat_identifier(s);
-
-    if (!emit_parameter(&s->cg, symbol)) {
-      error_begin(s, scanner_location(&s->scanner));
-      error_frag(s, "duplicate parameter ");
-      error_symbol(s, symbol);
-      error_end(s);
-    } else {
-      num_parameters++;
-    }
-
-    if (!accept(s, ',')) {
-      break;
-    }
-  }
-
-  expect(s, ')');
-  s->cg.code.argcount = num_parameters;
 }
 
 static void parse_class(struct parser_state *s, unsigned num_decorators)
@@ -1541,7 +1425,7 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 
   union ast_expression *call;
   if (peek(s) == '(') {
-    call = parse_call_helper(s, /*callee=*/NULL);
+    call = parse_argument_list(s, /*callee=*/NULL);
   } else {
     call = ast_allocate_expression_(s, sizeof(struct ast_call), AST_CALL);
     call->call.has_star_argument = false;
@@ -1558,15 +1442,152 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   emit_class_end(&s->cg, name, &call->call, num_decorators);
 }
 
+static void parse_def_parameters(struct parser_state *s,
+                                 struct def_state    *state)
+{
+  expect(s, '(');
+  add_anchor(s, ')');
+
+  struct parameter inline_storage[16];
+  struct idynarray parameters;
+  idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
+
+  unsigned positional_only_argcount = 0;
+  bool     had_default = false;
+  bool     had_variable_args = false;
+  bool     had_variable_keyword_args = false;
+
+  for (;;) {
+    enum parameter_type type = PARAMETER_NORMAL;
+    switch (peek(s)) {
+    case ')':
+      break;
+    case '/':
+      if (positional_only_argcount != 0) {
+        diag_begin_error(&s->d, scanner_location(&s->scanner));
+        diag_token_kind(&s->d, '/');
+        diag_frag(&s->d, " may appear only once");
+        diag_end(&s->d);
+      } else if (had_variable_args || had_variable_keyword_args) {
+        diag_begin_error(&s->d, scanner_location(&s->scanner));
+        diag_token_kind(&s->d, '/');
+        diag_frag(&s->d, " must be ahead of ");
+        diag_token_kind(&s->d, had_variable_args ? '*' : T_ASTERISK_ASTERISK);
+        diag_end(&s->d);
+      } else {
+        positional_only_argcount
+            = idynarray_length(&parameters, struct parameter);
+        if (positional_only_argcount == 0) {
+          diag_begin_error(&s->d, scanner_location(&s->scanner));
+          diag_frag(&s->d, "at least one argument must precede ");
+          diag_token_kind(&s->d, '/');
+          diag_end(&s->d);
+        }
+      }
+      eat(s, '/');
+      break;
+    case '*':
+      if (had_variable_args) {
+        diag_begin_error(&s->d, scanner_location(&s->scanner));
+        diag_token_kind(&s->d, '*');
+        diag_frag(&s->d, " argument may appear only once");
+        diag_end(&s->d);
+      } else {
+        type = PARAMETER_STAR;
+        had_variable_args = true;
+      }
+      eat(s, '*');
+      if (peek(s) != T_IDENTIFIER) {
+        /* TODO: report error if there isn't at least one more
+         * parameter (that is not **kwargs) following. */
+        break;
+      }
+      goto parameter;
+    case T_ASTERISK_ASTERISK:
+      if (had_variable_keyword_args) {
+        diag_begin_error(&s->d, scanner_location(&s->scanner));
+        diag_token_kind(&s->d, T_ASTERISK_ASTERISK);
+        diag_frag(&s->d, " argument may appear only once");
+        diag_end(&s->d);
+      } else {
+        type = PARAMETER_STAR_STAR;
+        had_variable_keyword_args = true;
+      }
+      /* TODO: report error when any other parameters follow ** */
+      eat(s, T_ASTERISK_ASTERISK);
+      goto parameter;
+    case T_EOF:
+      break;
+    default:
+    parameter:
+      if (!skip_till(s, T_IDENTIFIER)) break;
+      struct location location = scanner_location(&s->scanner);
+      struct symbol  *name = eat_identifier(s);
+
+      union ast_expression *initializer = NULL;
+      if (accept(s, '=')) {
+        struct location location = scanner_location(&s->scanner);
+        initializer = parse_expression(s, PREC_LIST + 1);
+        had_default = true;
+        if (type != PARAMETER_NORMAL) {
+          diag_begin_error(&s->d, location);
+          diag_frag(&s->d,
+                    "variable argument parameter cannot have a default value");
+          diag_end(&s->d);
+          initializer = NULL;
+        }
+      } else if (had_default && !had_variable_args) {
+        diag_begin_error(&s->d, location);
+        diag_frag(&s->d,
+                  "parameter without default follows parameter with default");
+        diag_end(&s->d);
+      }
+
+      bool              error_duplicate = false;
+      struct parameter *parr = idynarray_data(&parameters);
+      for (unsigned p = 0, e = idynarray_length(&parameters, struct parameter);
+           p < e; p++) {
+        if (parr[p].name == name) {
+          diag_begin_error(&s->d, location);
+          diag_frag(&s->d, "duplicate argument ");
+          diag_symbol(&s->d, name);
+          diag_end(&s->d);
+          error_duplicate = true;
+        }
+      }
+
+      if (!error_duplicate) {
+        struct parameter *parameter
+            = idynarray_append(&parameters, struct parameter);
+        parameter->name = name;
+        parameter->initializer = initializer;
+        parameter->type = type;
+      }
+      break;
+    }
+    if (peek(s) == ')' || peek(s) == T_EOF) break;
+    expect(s, ',');
+  }
+
+  remove_anchor(s, ')');
+  expect(s, ')');
+
+  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
+  emit_def_begin(&s->cg, state, num_parameters, idynarray_data(&parameters),
+                 positional_only_argcount);
+
+  idynarray_free(&parameters);
+}
+
 static void parse_def(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_def);
   if (!skip_till(s, T_IDENTIFIER)) return;
   struct symbol *name = eat_identifier(s);
 
-  emit_def_begin(&s->cg);
+  struct def_state state;
 
-  parse_parameters(s);
+  parse_def_parameters(s, &state);
   if (accept(s, T_MINUS_GREATER_THAN)) {
     parse_expression(s, PREC_TEST);
     unimplemented();
@@ -1575,7 +1596,7 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
 
   parse_suite(s);
 
-  emit_def_end(&s->cg, name, num_decorators);
+  emit_def_end(&s->cg, &state, name, num_decorators);
 }
 
 static void parse_decorator(struct parser_state *s, unsigned num_decorators)
@@ -1634,6 +1655,26 @@ static void parse_with(struct parser_state *s)
   idynarray_free(&cleanup_blocks);
 }
 
+static void parse_while(struct parser_state *s)
+{
+  eat(s, T_while);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
+  expect(s, ':');
+
+  struct for_while_state state;
+  emit_while_begin(&s->cg, &state, expression);
+
+  parse_suite(s);
+
+  emit_while_else(&s->cg, &state);
+  if (accept(s, T_else)) {
+    expect(s, ':');
+    parse_suite(s);
+  }
+
+  emit_while_end(&s->cg, &state);
+}
+
 static void parse_statement(struct parser_state *s)
 {
   add_anchor(s, T_NEWLINE);
@@ -1670,6 +1711,7 @@ static void parse_statement(struct parser_state *s)
 
 union object *parse(struct parser_state *s, const char *filename)
 {
+  diag_init(&s->d, stderr, filename);
   cg_init(&s->cg, s->scanner.symbol_table, filename);
   emit_module_begin(&s->cg);
 
@@ -1695,6 +1737,11 @@ union object *parse(struct parser_state *s, const char *filename)
 #endif
 
   return emit_module_end(&s->cg);
+}
+
+bool parser_had_errors(struct parser_state *s)
+{
+  return s->d.had_error;
 }
 
 void parser_init(struct parser_state *s)

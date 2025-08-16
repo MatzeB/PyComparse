@@ -9,6 +9,7 @@
 #include "codegen.h"
 #include "codegen_expression.h"
 #include "codegen_types.h"
+#include "diagnostics.h"
 #include "object.h"
 #include "object_intern.h"
 #include "opcodes.h"
@@ -69,7 +70,7 @@ static unsigned register_dotted_name(struct cg_state    *s,
   }
   *c++ = '\0';
   assert(c - chars == length);
-  return cg_register_name(s, chars);
+  return cg_register_name_from_cstring(s, chars);
 }
 
 void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
@@ -78,7 +79,7 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
 {
   if (unreachable(s)) return;
   unsigned module_name = module != NULL ? register_dotted_name(s, module)
-                                        : cg_register_name(s, "");
+                                        : cg_register_name_from_cstring(s, "");
   bool     import_star = (num_pairs == 0);
 
   struct arena *arena = object_intern_arena(&s->objects);
@@ -108,7 +109,7 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
       struct from_import_pair *pair = &pairs[i];
       struct symbol           *name = pair->name;
       struct symbol           *as = pair->as != NULL ? pair->as : name;
-      cg_push_op(s, OPCODE_IMPORT_FROM, cg_register_name(s, name->string));
+      cg_push_op(s, OPCODE_IMPORT_FROM, cg_register_name(s, name));
       emit_store(s, as);
     }
     cg_pop_op(s, OPCODE_POP_TOP, 0);
@@ -142,7 +143,7 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
         cg_pop_op(s, OPCODE_POP_TOP, 0);
       }
       cg_push_op(s, OPCODE_IMPORT_FROM,
-                 cg_register_name(s, module->symbols[i]->string));
+                 cg_register_name(s, module->symbols[i]));
     }
     emit_store(s, as);
     if (num_symbols > 1) {
@@ -456,33 +457,165 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol,
   emit_store(s, symbol);
 }
 
-void emit_def_begin(struct cg_state *s)
+static void emit_parameter_variable(struct cg_state *s, struct symbol *name)
 {
+  assert(cg_symbol_info(s, name) == NULL);
+  struct symbol_info *info = cg_new_symbol_info(s, name);
+  info->type = SYMBOL_LOCAL;
+  info->index = cg_append_varname(s, name);
+}
+
+static void emit_parameter_defaults(struct cg_state  *s,
+                                    struct def_state *state,
+                                    unsigned          num_parameters,
+                                    struct parameter *parameters)
+{
+  /* create tuple with default values */
+  bool     all_positional_const = true;
+  unsigned num_positional_defaults = 0;
+  unsigned num_keyword_defaults = 0;
+  unsigned keyword_parameters_begin = num_parameters;
+  for (unsigned i = 0; i < num_parameters; i++) {
+    struct parameter     *parameter = &parameters[i];
+    union ast_expression *initializer = parameter->initializer;
+    if (parameter->type == PARAMETER_STAR) {
+      keyword_parameters_begin = i + 1;
+      assert(initializer == NULL);
+      continue;
+    }
+    if (initializer == NULL) continue;
+
+    if (i < keyword_parameters_begin) {
+      ++num_positional_defaults;
+      if (ast_expression_as_constant(initializer) == NULL) {
+        all_positional_const = false;
+      }
+    } else {
+      ++num_keyword_defaults;
+    }
+  }
+
+  if (num_positional_defaults > 0) {
+    if (all_positional_const) {
+      struct arena *arena = object_intern_arena(&s->objects);
+      union object *tuple
+          = object_new_tuple_begin(arena, num_positional_defaults);
+      unsigned tuple_idx = 0;
+      for (unsigned i = 0; i < keyword_parameters_begin; i++) {
+        struct parameter     *parameter = &parameters[i];
+        union ast_expression *initializer = parameter->initializer;
+        if (initializer == NULL) continue;
+        union object *constant = ast_expression_as_constant(initializer);
+        object_new_tuple_set_at(tuple, tuple_idx++, constant);
+      }
+      object_new_tuple_end(tuple);
+      cg_load_const(s, tuple);
+    } else {
+      for (unsigned i = 0; i < keyword_parameters_begin; i++) {
+        struct parameter     *parameter = &parameters[i];
+        union ast_expression *initializer = parameter->initializer;
+        if (initializer == NULL) continue;
+        emit_expression(s, initializer);
+      }
+      cg_pop(s, num_positional_defaults);
+      cg_push_op(s, OPCODE_BUILD_TUPLE, num_positional_defaults);
+    }
+    state->defaults = true;
+  }
+  if (num_keyword_defaults > 0) {
+    struct arena *arena = object_intern_arena(&s->objects);
+    union object *names = object_new_tuple_begin(arena, num_keyword_defaults);
+    unsigned      name_idx = 0;
+    for (unsigned i = keyword_parameters_begin; i < num_parameters; i++) {
+      struct parameter     *parameter = &parameters[i];
+      union ast_expression *initializer = parameter->initializer;
+      if (initializer == NULL) continue;
+      emit_expression(s, initializer);
+      union object *name
+          = object_intern_cstring(&s->objects, parameter->name->string);
+      object_new_tuple_set_at(names, name_idx++, name);
+    }
+    assert(name_idx == num_keyword_defaults);
+    object_new_tuple_end(names);
+    cg_load_const(s, names);
+    cg_pop(s, num_keyword_defaults + 1);
+    cg_push_op(s, OPCODE_BUILD_CONST_KEY_MAP, num_keyword_defaults);
+    state->keyword_defaults = true;
+  }
+}
+
+void emit_def_begin(struct cg_state *s, struct def_state *state,
+                    unsigned num_parameters, struct parameter *parameters,
+                    unsigned positional_only_argcount)
+{
+  memset(state, 0, sizeof(*state));
+  if (unreachable(s)) {
+    abort(); /* TODO: unreachable def-statement... */
+  }
+
+  emit_parameter_defaults(s, state, num_parameters, parameters);
+
   cg_push_code(s);
   cg_code_begin(s, /*use_locals=*/true);
-}
 
-bool emit_parameter(struct cg_state *s, struct symbol *symbol)
-{
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info != NULL) {
-    return false;
+  unsigned       keyword_only_idx = num_parameters;
+  struct symbol *variable_arguments_name = NULL;
+  struct symbol *variable_keyword_arguments_name = NULL;
+  for (unsigned i = 0; i < num_parameters; i++) {
+    struct parameter *parameter = &parameters[i];
+
+    struct symbol *name = parameter->name;
+    if (parameter->type == PARAMETER_STAR) {
+      assert(variable_arguments_name == NULL);
+      keyword_only_idx = i + 1;
+      variable_arguments_name = name;
+      continue;
+    }
+    if (parameter->type == PARAMETER_STAR_STAR) {
+      assert(variable_keyword_arguments_name == NULL);
+      s->code.flags |= CO_VARKEYWORDS;
+      variable_keyword_arguments_name = name;
+      continue;
+    }
+
+    emit_parameter_variable(s, name);
+    if (i < keyword_only_idx) {
+      ++s->code.argcount;
+    } else {
+      ++s->code.keyword_only_argcount;
+    }
   }
-  info = cg_new_symbol_info(s, symbol);
-  info->type = SYMBOL_LOCAL;
-  info->index = cg_append_varname(s, symbol->string);
-  return true;
+  if (variable_arguments_name) {
+    emit_parameter_variable(s, variable_arguments_name);
+    s->code.flags |= CO_VARARGS;
+  }
+  if (variable_keyword_arguments_name != NULL) {
+    emit_parameter_variable(s, variable_keyword_arguments_name);
+    s->code.flags |= CO_VARKEYWORDS;
+  }
+  s->code.positional_only_argcount = positional_only_argcount;
 }
 
-void emit_def_end(struct cg_state *s, struct symbol *symbol,
-                  unsigned num_decorators)
+void emit_def_end(struct cg_state *s, struct def_state *state,
+                  struct symbol *symbol, unsigned num_decorators)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
   unsigned      code_index = cg_register_unique_object(s, code);
   cg_push_op(s, OPCODE_LOAD_CONST, code_index);
   cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
-  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+  uint32_t flags = 0;
+  unsigned operands = 2;
+  if (state->defaults) {
+    flags |= MAKE_FUNCTION_DEFAULTS;
+    operands++;
+  }
+  if (state->keyword_defaults) {
+    flags |= MAKE_FUNCTION_KWDEFAULTS;
+    operands++;
+  }
+  cg_pop(s, operands);
+  cg_push_op(s, OPCODE_MAKE_FUNCTION, flags);
   emit_decorator_calls(s, num_decorators);
   emit_store(s, symbol);
 }
@@ -539,7 +672,8 @@ static void emit_generator_expression_part(
 void emit_generator_expression_code(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  emit_parameter(s, symbol_table_get_or_insert(s->symbol_table, ".0"));
+  emit_parameter_variable(s,
+                          symbol_table_get_or_insert(s->symbol_table, ".0"));
   s->code.argcount = 1;
 
   enum ast_expression_type type = generator_expression->base.type;

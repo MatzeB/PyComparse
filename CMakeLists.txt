@@ -43,6 +43,9 @@ add_executable(parser_test
   codegen_statement.c
   codegen_statement.h
   codegen_types.h
+  diagnostics.h
+  diagnostics.c
+  diagnostics_types.h
   object.c
   object.h
   object_intern.c

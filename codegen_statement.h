@@ -29,6 +29,23 @@ struct with_state {
   struct basic_block *cleanup;
 };
 
+enum parameter_type {
+  PARAMETER_NORMAL,
+  PARAMETER_STAR,
+  PARAMETER_STAR_STAR,
+};
+
+struct parameter {
+  struct symbol        *name;
+  union ast_expression *initializer;
+  enum parameter_type   type;
+};
+
+struct def_state {
+  bool defaults;
+  bool keyword_defaults;
+};
+
 void          emit_module_begin(struct cg_state *s);
 union object *emit_module_end(struct cg_state *s);
 
@@ -76,10 +93,11 @@ void emit_with_begin(struct cg_state *s, struct with_state *state,
                      union ast_expression *target);
 void emit_with_end(struct cg_state *s, struct with_state *state);
 
-void emit_def_begin(struct cg_state *s);
-bool emit_parameter(struct cg_state *s, struct symbol *symbol);
-void emit_def_end(struct cg_state *s, struct symbol *symbol,
-                  unsigned num_decorators);
+void emit_def_begin(struct cg_state *s, struct def_state *state,
+                    unsigned num_parameters, struct parameter *parameters,
+                    unsigned positional_only_argcount);
+void emit_def_end(struct cg_state *s, struct def_state *state,
+                  struct symbol *symbol, unsigned num_decorators);
 
 void emit_condjump(struct cg_state *s, enum opcode opcode,
                    struct basic_block *target,

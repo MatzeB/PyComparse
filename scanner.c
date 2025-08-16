@@ -1006,7 +1006,7 @@ static const char *const token_names[] = {
 #undef TCHAR
 };
 
-const char *token_kind_name(uint16_t token_kind)
+const char *token_kind_name(enum token_kind token_kind)
 {
   assert(token_kind < sizeof(token_names) / sizeof(token_names[0]));
   assert(token_names[token_kind] != NULL);

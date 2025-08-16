@@ -7,6 +7,7 @@
 #include "object_intern_types.h"
 
 union object;
+struct diagnostics_state;
 
 struct basic_block {
   uint8_t            *code_bytes;
@@ -37,6 +38,8 @@ struct code_state {
   uint16_t            outer_scope_id;
   uint16_t            scope_id;
   unsigned            argcount;
+  unsigned            positional_only_argcount;
+  unsigned            keyword_only_argcount;
   unsigned            nlocals;
   unsigned            stacksize;
   unsigned            max_stacksize;

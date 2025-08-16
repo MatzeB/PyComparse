@@ -565,78 +565,40 @@ void emit_generator_expression_code(
 }
 
 void emit_with_begin(struct cg_state *s, struct with_state *state,
-                     unsigned num_items, struct with_item *items)
+                     union ast_expression *expression,
+                     union ast_expression *target)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
     return;
   }
 
-  /* Allocate cleanup block */
   struct basic_block *cleanup = cg_allocate_block(s);
+  struct basic_block *body = cg_allocate_block(s);
   state->cleanup = cleanup;
-  state->num_items = num_items;
 
-  /* Process each with item, creating nested structure */
-  for (unsigned i = 0; i < num_items; i++) {
-    /* Emit the context manager expression */
-    emit_expression(s, items[i].expression);
+  emit_expression(s, expression);
+  emit_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
 
-    /* Allocate body block for this item */
-    struct basic_block *body = cg_allocate_block(s);
-
-    /* SETUP_WITH calls __enter__ and pushes its result */
-    emit_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
-    cg_pop(s, 1); /* SETUP_WITH consumes the context manager */
-
-    /* Begin code generation into this item's body block */
-    cg_block_begin(s, body);
-    cg_push(s, 1); /* __enter__ result is on stack */
-
-    /* If there's an 'as' clause, store the context manager value */
-    if (items[i].target != NULL) {
-      emit_assignment(s, items[i].target);
-    } else {
-      /* Pop the __enter__ result if not assigned */
-      cg_pop_op(s, OPCODE_POP_TOP, 0);
-    }
+  cg_block_begin(s, body);
+  if (target != NULL) {
+    emit_assignment(s, target);
+  } else {
+    cg_pop_op(s, OPCODE_POP_TOP, 0);
   }
 }
 
 void emit_with_end(struct cg_state *s, struct with_state *state)
 {
   if (state->cleanup == NULL) return;
-
   if (!unreachable(s)) {
-    /* Pop the with blocks (one for each item) */
-    for (unsigned i = 0; i < state->num_items; i++) {
-      cg_op(s, OPCODE_POP_BLOCK, 0);
-    }
-
-    /* Jump to cleanup block */
+    cg_op(s, OPCODE_POP_BLOCK, 0);
+    cg_op(s, OPCODE_BEGIN_FINALLY, 0);
     emit_jump(s, state->cleanup);
   }
 
-  /* Start cleanup block */
   cg_block_begin(s, state->cleanup);
-
-  /* Handle cleanup for each with item (in reverse order) */
-  for (unsigned i = 0; i < state->num_items; i++) {
-    /* BEGIN_FINALLY for exception handling */
-    cg_op(s, OPCODE_BEGIN_FINALLY, 0);
-
-    /* WITH_CLEANUP_START processes exception/normal exit */
-    cg_push_op(s, OPCODE_WITH_CLEANUP_START, 0);
-
-    /* WITH_CLEANUP_FINISH handles the exit */
-    cg_pop_op(s, OPCODE_WITH_CLEANUP_FINISH, 0);
-
-    cg_op(s, OPCODE_END_FINALLY, 0);
-  }
-
-  cg_block_end(s);
-
-  /* Continue execution in footer block */
-  struct basic_block *footer = cg_allocate_block(s);
-  cg_block_begin(s, footer);
+  cg_push_op(s, OPCODE_WITH_CLEANUP_START, 0);
+  cg_pop_op(s, OPCODE_WITH_CLEANUP_FINISH, 0);
+  cg_op(s, OPCODE_END_FINALLY, 0);
 }

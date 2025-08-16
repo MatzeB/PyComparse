@@ -27,7 +27,6 @@ struct for_while_state {
 
 struct with_state {
   struct basic_block *cleanup;
-  unsigned            num_items;
 };
 
 void          emit_module_begin(struct cg_state *s);
@@ -72,13 +71,9 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
 void emit_while_else(struct cg_state *s, struct for_while_state *state);
 void emit_while_end(struct cg_state *s, struct for_while_state *state);
 
-struct with_item {
-  union ast_expression *expression;
-  union ast_expression *target;
-};
-
 void emit_with_begin(struct cg_state *s, struct with_state *state,
-                     unsigned num_items, struct with_item *items);
+                     union ast_expression *expression,
+                     union ast_expression *target);
 void emit_with_end(struct cg_state *s, struct with_state *state);
 
 void emit_def_begin(struct cg_state *s);

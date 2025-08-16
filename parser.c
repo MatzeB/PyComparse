@@ -1605,35 +1605,33 @@ static void parse_with(struct parser_state *s)
 {
   eat(s, T_with);
 
-  /* Parse comma-separated with items using idynarray */
-  struct with_item inline_storage[4];
-  struct idynarray with_items;
-  idynarray_init(&with_items, inline_storage, sizeof(inline_storage));
+  struct with_state inline_storage[4];
+  struct idynarray  cleanup_blocks;
+  idynarray_init(&cleanup_blocks, inline_storage, sizeof(inline_storage));
 
   do {
-    struct with_item *item = idynarray_append(&with_items, struct with_item);
-
-    /* Parse context manager expression */
-    item->expression = parse_expression(s, PREC_TEST);
-
-    /* Parse optional 'as' clause */
+    union ast_expression *expression = parse_expression(s, PREC_TEST);
     union ast_expression *target = NULL;
     if (accept(s, T_as)) {
-      target = parse_expression(s, PREC_OR);
+      target = parse_expression(s, PREC_LIST + 1);
     }
-    item->target = target;
-  } while (accept(s, ','));
 
+    struct with_state *state
+        = idynarray_append(&cleanup_blocks, struct with_state);
+    emit_with_begin(&s->cg, state, expression, target);
+  } while (accept(s, ','));
   expect(s, ':');
 
-  struct with_state state;
-  unsigned num_items = idynarray_length(&with_items, struct with_item);
-  emit_with_begin(&s->cg, &state, num_items, idynarray_data(&with_items));
+  unsigned num_cleanup_blocks
+      = idynarray_length(&cleanup_blocks, struct with_state);
+  struct with_state *cleanup_blocks_arr = idynarray_data(&cleanup_blocks);
 
   parse_suite(s);
 
-  emit_with_end(&s->cg, &state);
-  idynarray_free(&with_items);
+  for (unsigned i = num_cleanup_blocks; i-- > 0;) {
+    emit_with_end(&s->cg, &cleanup_blocks_arr[i]);
+  }
+  idynarray_free(&cleanup_blocks);
 }
 
 static void parse_statement(struct parser_state *s)

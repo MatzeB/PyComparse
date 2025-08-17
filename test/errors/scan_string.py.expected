@@ -1,0 +1,3 @@
+test/errors/scan_string.py:1 error: expected new line, got "no space after prefix"
+test/errors/scan_string.py:2 error: expected new line, got "no space after prefix"
+test/errors/scan_string.py:3 error: expected new line, got "no space after prefix"

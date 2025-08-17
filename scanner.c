@@ -166,11 +166,13 @@ static void scan_line_comment(struct scanner_state *s)
   }
 }
 
-static void scan_identifier(struct scanner_state *s, char first_char)
+static void scan_identifier(struct scanner_state *s, char first_char,
+                            char second_char)
 {
   struct arena *arena = &s->symbol_table->arena;
   arena_grow_begin(arena, string_alignment);
   arena_grow_char(arena, first_char);
+  if (second_char != 0) arena_grow_char(arena, second_char);
   for (;;) {
     switch (s->c) {
     case IDENTIFIER_CASES:
@@ -366,9 +368,35 @@ static void scan_escape_sequence(struct scanner_state *s,
     arena_grow_char(strings, (char)num);
     return;
   }
-  case 'x':
-    /* TODO */
-    abort();
+  case 'x': {
+    next_char(s);
+    int number = 0;
+    int num_digits = 0;
+    do {
+      int digit;
+      if ('0' <= s->c && s->c <= '9') {
+        digit = s->c - '0';
+      } else if ('a' <= s->c && s->c <= 'f') {
+        digit = 10 + (s->c - 'a');
+      } else if ('A' <= s->c && s->c <= 'F') {
+        digit = 10 + (s->c - 'A');
+      } else {
+        abort();
+        /* TODO: report invalid hex digit */
+        break;
+      }
+      next_char(s);
+      number *= 16;
+      number += digit;
+      ++num_digits;
+    } while (num_digits < 2);
+    if (is_unicode && number > 127) {
+      abort(); /* TODO: encode */
+    } else {
+      arena_grow_char(strings, (char)number);
+    }
+    return;
+  }
   case 'N':
     /* TODO */
     abort();
@@ -403,7 +431,7 @@ static void scan_escape_sequence(struct scanner_state *s,
 }
 
 static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
-                                bool is_unicode)
+                                bool is_unicode, bool is_raw)
 {
   assert(s->c == '"' || s->c == '\'');
   int quote = s->c;
@@ -446,6 +474,7 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
       goto finish_string;
     }
     case '\\':
+      if (is_raw) break;
       scan_escape_sequence(s, strings, is_unicode);
       continue;
     case '\r':
@@ -475,10 +504,10 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
   }
 
 finish_string:;
-  size_t        length = arena_grow_current_size(strings);
-  char         *chars = (char *)arena_grow_finish(strings);
-  union object *object
-      = object_intern_string(s->objects, OBJECT_ASCII, length, chars);
+  size_t           length = arena_grow_current_size(strings);
+  char            *chars = (char *)arena_grow_finish(strings);
+  enum object_type type = is_unicode ? OBJECT_ASCII : OBJECT_BYTES;
+  union object *object = object_intern_string(s->objects, type, length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);
   }
@@ -646,7 +675,7 @@ restart:
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
       char first_char = (char)s->c;
       next_char(s);
-      scan_identifier(s, first_char);
+      scan_identifier(s, first_char, /*second_char=*/0);
       return;
     }
 
@@ -659,11 +688,20 @@ restart:
     case 'B': {
       char first_char = (char)s->c;
       next_char(s);
+      bool is_raw = false;
+      char second_char = (char)s->c;
+      if (second_char == 'r' || second_char == 'R') {
+        next_char(s);
+        is_raw = true;
+      } else {
+        second_char = 0;
+      }
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_BYTE_STRING, /*is_unicode=*/false);
+        scan_string_literal(s, T_BYTE_STRING, /*is_unicode=*/false,
+                            /*is_raw=*/is_raw);
         return;
       } else {
-        scan_identifier(s, first_char);
+        scan_identifier(s, first_char, second_char);
       }
       return;
     }
@@ -673,10 +711,11 @@ restart:
       char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_FORMAT_STRING, /*is_unicode=*/true);
+        scan_string_literal(s, T_FORMAT_STRING, /*is_unicode=*/true,
+                            /*is_raw=*/false);
         return;
       } else {
-        scan_identifier(s, first_char);
+        scan_identifier(s, first_char, /*second_char=*/0);
       }
       return;
     }
@@ -685,12 +724,20 @@ restart:
     case 'R': {
       char first_char = (char)s->c;
       next_char(s);
+      bool is_unicode = true;
+      char second_char = (char)s->c;
+      if (second_char == 'b' || second_char == 'B') {
+        next_char(s);
+        is_unicode = false;
+      } else {
+        second_char = 0;
+      }
       if (s->c == '"' || s->c == '\'') {
-        abort(); // TODO
-        scan_string_literal(s, T_RAW_STRING, /*is_unicode=*/true);
+        scan_string_literal(s, T_RAW_STRING, /*is_unicode=*/is_unicode,
+                            /*is_raw=*/true);
         return;
       } else {
-        scan_identifier(s, first_char);
+        scan_identifier(s, first_char, second_char);
       }
       return;
     }
@@ -700,17 +747,18 @@ restart:
       char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_UNICODE_STRING, /*is_unicode=*/true);
+        scan_string_literal(s, T_UNICODE_STRING, /*is_unicode=*/true,
+                            /*is_raw=*/false);
         return;
       } else {
-        scan_identifier(s, first_char);
+        scan_identifier(s, first_char, /*second_char=*/0);
       }
       return;
     }
 
     case '\'':
     case '"':
-      scan_string_literal(s, T_STRING, /*is_unicode=*/true);
+      scan_string_literal(s, T_STRING, /*is_unicode=*/true, /*is_raw=*/false);
       return;
 
     case '=':

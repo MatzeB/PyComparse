@@ -281,14 +281,43 @@ void emit_if_begin(struct cg_state *s, struct if_state *state,
 
   cg_block_begin(s, then_block);
   state->else_or_footer = else_or_footer;
+  state->footer = NULL;
 }
 
-void emit_else_begin(struct cg_state *s, struct if_state *state)
+void emit_if_elif(struct cg_state *s, struct if_state *state,
+                  union ast_expression *expression)
 {
   struct basic_block *else_block = state->else_or_footer;
   if (else_block == NULL) return;
-  struct basic_block *footer = cg_allocate_block(s);
-  state->else_or_footer = footer;
+  struct basic_block *footer = state->footer;
+  if (footer == NULL) {
+    footer = cg_allocate_block(s);
+    state->footer = footer;
+  }
+  if (!unreachable(s)) {
+    emit_jump(s, footer);
+  }
+
+  struct basic_block *new_else = cg_allocate_block(s);
+  struct basic_block *then_block = cg_allocate_block(s);
+  state->else_or_footer = new_else;
+  cg_block_begin(s, else_block);
+  emit_condjump_expr(s, expression, /*true_block=*/then_block,
+                     /*false_block=*/new_else, /*next=*/then_block);
+
+  cg_block_begin(s, then_block);
+}
+
+void emit_if_else(struct cg_state *s, struct if_state *state)
+{
+  struct basic_block *else_block = state->else_or_footer;
+  if (else_block == NULL) return;
+  struct basic_block *footer = state->footer;
+  if (footer == NULL) {
+    footer = cg_allocate_block(s);
+    state->footer = footer;
+  }
+  state->else_or_footer = NULL;
   if (!unreachable(s)) {
     emit_jump(s, footer);
   }
@@ -298,7 +327,8 @@ void emit_else_begin(struct cg_state *s, struct if_state *state)
 
 void emit_if_end(struct cg_state *s, struct if_state *state)
 {
-  struct basic_block *footer = state->else_or_footer;
+  struct basic_block *footer = state->footer;
+  if (footer == NULL) footer = state->else_or_footer;
   if (footer == NULL) return;
   if (!unreachable(s)) {
     emit_jump(s, footer);

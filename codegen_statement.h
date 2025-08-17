@@ -18,6 +18,7 @@ union ast_expression;
 
 struct if_state {
   struct basic_block *else_or_footer;
+  struct basic_block *footer;
 };
 
 struct for_while_state {
@@ -71,7 +72,9 @@ void emit_class_end(struct cg_state *s, struct symbol *name,
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
                    union ast_expression *expression);
-void emit_else_begin(struct cg_state *s, struct if_state *state);
+void emit_if_elif(struct cg_state *s, struct if_state *state,
+                  union ast_expression *expression);
+void emit_if_else(struct cg_state *s, struct if_state *state);
 void emit_if_end(struct cg_state *s, struct if_state *state);
 
 void emit_for_begin(struct cg_state *s, struct for_while_state *state,

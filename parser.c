@@ -1401,10 +1401,18 @@ static void parse_if(struct parser_state *s)
 
   parse_suite(s);
 
+  while (accept(s, T_elif)) {
+    union ast_expression *expression = parse_expression(s, PREC_TEST);
+    expect(s, ':');
+
+    emit_if_elif(&s->cg, &state, expression);
+    parse_suite(s);
+  }
+
   if (accept(s, T_else)) {
     expect(s, ':');
 
-    emit_else_begin(&s->cg, &state);
+    emit_if_else(&s->cg, &state);
     parse_suite(s);
   }
   emit_if_end(&s->cg, &state);

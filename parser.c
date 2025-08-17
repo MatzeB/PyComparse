@@ -15,6 +15,7 @@
 #include "codegen_statement.h"
 #include "diagnostics.h"
 #include "object.h"
+#include "object_types.h"
 #include "scanner.h"
 #include "symbol_table.h"
 #include "symbol_types.h"
@@ -650,6 +651,57 @@ static union ast_expression *parse_string(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_STRING);
   eat(s, T_STRING);
+
+  if (peek(s) == T_STRING) {
+    enum object_type type = object_type(object);
+    union object   **inline_storage[8];
+    struct idynarray strings;
+    idynarray_init(&strings, inline_storage, sizeof(inline_storage));
+    *((union object **)idynarray_append(&strings, union object *)) = object;
+    size_t combined_length = object->string.length;
+
+    bool            mixed_types = false;
+    struct location location;
+    do {
+      object = peek_get_object(s, T_STRING);
+      if (object_type(object) != type && !mixed_types) {
+        location = scanner_location(&s->scanner);
+        mixed_types = true;
+      }
+      eat(s, T_STRING);
+      *((union object **)idynarray_append(&strings, union object *)) = object;
+
+      combined_length += object->string.length;
+    } while (peek(s) == T_STRING);
+
+    if (mixed_types) {
+      diag_begin_error(&s->d, location);
+      diag_frag(&s->d, "cannot mix bytes and str literals");
+      diag_end(&s->d);
+    }
+
+    unsigned num_strings = idynarray_length(&strings, union object *);
+    if (combined_length > UINT32_MAX) abort();
+
+    char *combined = arena_allocate(s->scanner.strings, combined_length, 1);
+    char *dest = combined;
+    union object **strings_arr = idynarray_data(&strings);
+    for (unsigned i = 0; i < num_strings; i++) {
+      union object *string = strings_arr[i];
+      unsigned      string_length = string->string.length;
+      memcpy(dest, string->string.chars, string_length);
+      dest += string_length;
+    }
+    assert(dest - combined == (ptrdiff_t)combined_length);
+
+    object = object_intern_string(&s->cg.objects, type, combined_length,
+                                  combined);
+    if (object->string.chars != combined) {
+      arena_free_to(s->scanner.strings, combined);
+    }
+    idynarray_free(&strings);
+  }
+
   return ast_const_new(s, object);
 }
 

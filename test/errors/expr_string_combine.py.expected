@@ -1,0 +1,4 @@
+test/errors/expr_string_combine.py:1 error: cannot mix bytes and str literals
+test/errors/expr_string_combine.py:2 error: cannot mix bytes and str literals
+test/errors/expr_string_combine.py:3 error: cannot mix bytes and str literals
+test/errors/expr_string_combine.py:4 error: cannot mix bytes and str literals

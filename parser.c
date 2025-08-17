@@ -261,6 +261,85 @@ static struct symbol *symbol_invalid(struct parser_state *s)
 static union ast_expression *parse_expression(struct parser_state *s,
                                               enum precedence      precedence);
 
+static bool is_expression_start(enum token_kind token_kind)
+{
+  switch (token_kind) {
+  case EXPRESSION_START_CASES:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static union ast_expression *parse_expression_or_slice(struct parser_state *s)
+{
+  union ast_expression *expression = NULL;
+  if (peek(s) != ':') {
+    expression = parse_expression(s, PREC_LIST + 1);
+    if (peek(s) != ':') {
+      return expression;
+    }
+  }
+  eat(s, ':');
+
+  union ast_expression *start = expression;
+  union ast_expression *stop = NULL;
+  union ast_expression *step = NULL;
+  if (is_expression_start(peek(s))) {
+    stop = parse_expression(s, PREC_LIST + 1);
+  }
+  if (accept(s, ':') && is_expression_start(peek(s))) {
+    step = parse_expression(s, PREC_LIST + 1);
+  }
+
+  expression = ast_allocate_expression(s, struct ast_slice, AST_SLICE);
+  expression->slice.start = start;
+  expression->slice.stop = stop;
+  expression->slice.step = step;
+  return expression;
+}
+
+static union ast_expression *parse_expression_list_helper(
+    struct parser_state *s, enum ast_expression_type type,
+    union ast_expression *first, enum precedence precedence, bool allow_slices)
+{
+  union ast_expression *inline_storage[16];
+  struct idynarray      expressions;
+  idynarray_init(&expressions, inline_storage, sizeof(inline_storage));
+
+  *(idynarray_append(&expressions, union ast_expression *)) = first;
+
+  bool has_star_expression = ast_expression_type(first) == AST_UNEXPR_STAR;
+  for (;;) {
+    if (!accept(s, ',')) break;
+    if (!is_expression_start(peek(s)) && (!allow_slices || peek(s) != ':')) {
+      break;
+    }
+    union ast_expression *expression;
+    if (allow_slices) {
+      expression = parse_expression_or_slice(s);
+    } else {
+      expression = parse_expression(s, precedence);
+    }
+    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+      has_star_expression = true;
+    }
+    *(idynarray_append(&expressions, union ast_expression *)) = expression;
+  }
+
+  unsigned num_expressions
+      = idynarray_length(&expressions, union ast_expression *);
+  size_t expressions_size = num_expressions * sizeof(union ast_expression *);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_expression_list) + expressions_size, type);
+  expression->expression_list.has_star_expression = has_star_expression;
+  expression->expression_list.num_expressions = num_expressions;
+  memcpy(expression->expression_list.expressions, idynarray_data(&expressions),
+         expressions_size);
+  idynarray_free(&expressions);
+  return expression;
+}
+
 static union ast_expression *
 parse_generator_expression(struct parser_state     *s,
                            enum ast_expression_type type,
@@ -276,15 +355,24 @@ parse_generator_expression(struct parser_state     *s,
         = idynarray_append(&parts, struct generator_expression_part);
     if (peek(s) == T_for) {
       eat(s, T_for);
-      part->type = GENERATOR_EXPRESSION_PART_FOR;
-      part->target = parse_expression(s, PREC_OR);
+      union ast_expression *target = parse_expression(s, PREC_OR);
+      if (peek(s) == ',') {
+        target = parse_expression_list_helper(s, AST_EXPRESSION_LIST, target,
+                                              PREC_OR, /*allow_slices=*/false);
+      }
       expect(s, T_in);
-      part->expression = parse_expression(s, PREC_OR);
+      union ast_expression *expression = parse_expression(s, PREC_OR);
+
+      part->type = GENERATOR_EXPRESSION_PART_FOR;
+      part->target = target;
+      part->expression = expression;
     } else {
       eat(s, T_if);
+      union ast_expression *expression = parse_expression(s, PREC_LOGICAL_OR);
+
       part->type = GENERATOR_EXPRESSION_PART_IF;
       part->target = NULL;
-      part->expression = parse_expression(s, PREC_COMPARISON);
+      part->expression = expression;
     }
   }
 
@@ -403,85 +491,6 @@ static inline union ast_expression *parse_unexpr(struct parser_state *s,
   return expression;
 }
 
-static bool is_expression_start(enum token_kind token_kind)
-{
-  switch (token_kind) {
-  case EXPRESSION_START_CASES:
-    return true;
-  default:
-    return false;
-  }
-}
-
-static union ast_expression *parse_expression_or_slice(struct parser_state *s)
-{
-  union ast_expression *expression = NULL;
-  if (peek(s) != ':') {
-    expression = parse_expression(s, PREC_LIST + 1);
-    if (peek(s) != ':') {
-      return expression;
-    }
-  }
-  eat(s, ':');
-
-  union ast_expression *start = expression;
-  union ast_expression *stop = NULL;
-  union ast_expression *step = NULL;
-  if (is_expression_start(peek(s))) {
-    stop = parse_expression(s, PREC_LIST + 1);
-  }
-  if (accept(s, ':') && is_expression_start(peek(s))) {
-    step = parse_expression(s, PREC_LIST + 1);
-  }
-
-  expression = ast_allocate_expression(s, struct ast_slice, AST_SLICE);
-  expression->slice.start = start;
-  expression->slice.stop = stop;
-  expression->slice.step = step;
-  return expression;
-}
-
-static union ast_expression *parse_expression_list_helper(
-    struct parser_state *s, enum ast_expression_type type,
-    union ast_expression *first, enum precedence precedence, bool allow_slices)
-{
-  union ast_expression *inline_storage[16];
-  struct idynarray      expressions;
-  idynarray_init(&expressions, inline_storage, sizeof(inline_storage));
-
-  *(idynarray_append(&expressions, union ast_expression *)) = first;
-
-  bool has_star_expression = ast_expression_type(first) == AST_UNEXPR_STAR;
-  for (;;) {
-    if (!accept(s, ',')) break;
-    if (!is_expression_start(peek(s)) && (!allow_slices || peek(s) != ':')) {
-      break;
-    }
-    union ast_expression *expression;
-    if (allow_slices) {
-      expression = parse_expression_or_slice(s);
-    } else {
-      expression = parse_expression(s, precedence);
-    }
-    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
-      has_star_expression = true;
-    }
-    *(idynarray_append(&expressions, union ast_expression *)) = expression;
-  }
-
-  unsigned num_expressions
-      = idynarray_length(&expressions, union ast_expression *);
-  size_t expressions_size = num_expressions * sizeof(union ast_expression *);
-  union ast_expression *expression = ast_allocate_expression_(
-      s, sizeof(struct ast_expression_list) + expressions_size, type);
-  expression->expression_list.has_star_expression = has_star_expression;
-  expression->expression_list.num_expressions = num_expressions;
-  memcpy(expression->expression_list.expressions, idynarray_data(&expressions),
-         expressions_size);
-  idynarray_free(&expressions);
-  return expression;
-}
-
 static union ast_expression *parse_l_bracket(struct parser_state *s)
 {
   eat(s, '[');
@@ -545,10 +554,13 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   for (;;) {
     expect(s, ':');
     union ast_expression *value = parse_expression(s, PREC_LIST + 1);
-    struct dict_item     *item = idynarray_append(&items, struct dict_item);
+
+    struct dict_item *item = idynarray_append(&items, struct dict_item);
     item->key = key;
     item->value = value;
 
+    if (peek(s) == '}' || peek(s) == T_EOF) break;
+    expect(s, ',');
     if (peek(s) == '}' || peek(s) == T_EOF) break;
     key = parse_expression(s, PREC_LIST + 1);
   }

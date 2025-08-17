@@ -17,6 +17,78 @@
 #include "symbol_table.h"
 #include "symbol_types.h"
 
+void emit_condjump(struct cg_state *s, enum opcode opcode,
+                   struct basic_block *target, struct basic_block *fallthrough)
+{
+  struct basic_block *block = cg_block_end(s);
+  assert(block->jump_opcode == 0 && block->jump_target == NULL);
+  block->jump_opcode = opcode;
+  block->jump_target = target;
+  block->default_target = fallthrough;
+}
+
+void emit_jump(struct cg_state *s, struct basic_block *target)
+{
+  struct basic_block *block = cg_block_end(s);
+  assert(block->jump_opcode == 0 && block->jump_target == NULL);
+  block->default_target = target;
+}
+
+static void emit_condjump_expr(struct cg_state      *s,
+                               union ast_expression *expression,
+                               struct basic_block   *true_block,
+                               struct basic_block   *false_block,
+                               struct basic_block   *next)
+{
+  switch (ast_expression_type(expression)) {
+  case AST_UNEXPR_NOT:
+    emit_condjump_expr(s, expression->unexpr.op,
+                       /*true_block=*/false_block, /*false_block=*/true_block,
+                       /*next=*/next);
+    return;
+  case AST_BINEXPR_LOGICAL_AND: {
+    struct basic_block *middle_block = cg_allocate_block(s);
+    emit_condjump_expr(s, expression->binexpr.left,
+                       /*true_block=*/middle_block,
+                       /*false_block=*/false_block,
+                       /*next=*/middle_block);
+    cg_block_begin(s, middle_block);
+    emit_condjump_expr(s, expression->binexpr.right,
+                       /*true_block=*/true_block, /*false_block=*/false_block,
+                       /*next=*/next);
+    return;
+  }
+  case AST_BINEXPR_LOGICAL_OR: {
+    struct basic_block *middle_block = cg_allocate_block(s);
+    emit_condjump_expr(s, expression->binexpr.left,
+                       /*true_block=*/true_block, /*false_block=*/middle_block,
+                       /*next=*/middle_block);
+    cg_block_begin(s, middle_block);
+    emit_condjump_expr(s, expression->binexpr.right,
+                       /*true_block=*/true_block, /*false_block=*/false_block,
+                       /*next=*/next);
+    return;
+  }
+  default:
+    emit_expression(s, expression);
+    enum opcode         opcode;
+    struct basic_block *target;
+    struct basic_block *fallthrough;
+    if (next == true_block) {
+      opcode = OPCODE_POP_JUMP_IF_FALSE;
+      target = false_block;
+      fallthrough = true_block;
+    } else {
+      opcode = OPCODE_POP_JUMP_IF_TRUE;
+      target = true_block;
+      fallthrough = false_block;
+    }
+    cg_pop(s, 1);
+    emit_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
+    return;
+  }
+}
+
 static bool unreachable(struct cg_state *s)
 {
   return !cg_in_block(s);
@@ -39,6 +111,33 @@ union object *emit_module_end(struct cg_state *s)
 {
   emit_code_end(s);
   return cg_code_end(s, "<module>");
+}
+
+void emit_assert(struct cg_state *s, union ast_expression *expression,
+                 union ast_expression *message)
+{
+  if (unreachable(s)) return;
+
+  struct basic_block *fail = cg_allocate_block(s);
+  struct basic_block *continue_block = cg_allocate_block(s);
+
+  emit_condjump_expr(s, expression, /*true_block=*/continue_block,
+                     /*false_block=*/fail, /*next=*/fail);
+
+  cg_block_begin(s, fail);
+  struct symbol *assertion_error
+      = symbol_table_get_or_insert(s->symbol_table, "AssertionError");
+  unsigned index = cg_register_name(s, assertion_error);
+  cg_push_op(s, OPCODE_LOAD_GLOBAL, index);
+  if (message != NULL) {
+    emit_expression(s, message);
+    cg_pop(s, 2);
+    cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
+  }
+  cg_pop_op(s, OPCODE_RAISE_VARARGS, 1);
+  cg_block_end(s);
+
+  cg_block_begin(s, continue_block);
 }
 
 void emit_expression_statement(struct cg_state      *s,
@@ -110,7 +209,7 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
       struct symbol           *name = pair->name;
       struct symbol           *as = pair->as != NULL ? pair->as : name;
       cg_push_op(s, OPCODE_IMPORT_FROM, cg_register_name(s, name));
-      emit_store(s, as);
+      cg_store(s, as);
     }
     cg_pop_op(s, OPCODE_POP_TOP, 0);
   }
@@ -134,7 +233,7 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
   cg_pop_op(s, OPCODE_IMPORT_NAME, module_name);
 
   if (as == NULL) {
-    emit_store(s, module->symbols[0]);
+    cg_store(s, module->symbols[0]);
   } else {
     unsigned num_symbols = module->num_symbols;
     for (unsigned i = 1; i < num_symbols; i++) {
@@ -145,7 +244,7 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
       cg_push_op(s, OPCODE_IMPORT_FROM,
                  cg_register_name(s, module->symbols[i]));
     }
-    emit_store(s, as);
+    cg_store(s, as);
     if (num_symbols > 1) {
       cg_pop_op(s, OPCODE_POP_TOP, 0);
     }
@@ -163,78 +262,6 @@ void emit_return_statement(struct cg_state      *s,
   }
   cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
-}
-
-void emit_condjump(struct cg_state *s, enum opcode opcode,
-                   struct basic_block *target, struct basic_block *fallthrough)
-{
-  struct basic_block *block = cg_block_end(s);
-  assert(block->jump_opcode == 0 && block->jump_target == NULL);
-  block->jump_opcode = opcode;
-  block->jump_target = target;
-  block->default_target = fallthrough;
-}
-
-void emit_jump(struct cg_state *s, struct basic_block *target)
-{
-  struct basic_block *block = cg_block_end(s);
-  assert(block->jump_opcode == 0 && block->jump_target == NULL);
-  block->default_target = target;
-}
-
-static void emit_condjump_expr(struct cg_state      *s,
-                               union ast_expression *expression,
-                               struct basic_block   *true_block,
-                               struct basic_block   *false_block,
-                               struct basic_block   *next)
-{
-  switch (ast_expression_type(expression)) {
-  case AST_UNEXPR_NOT:
-    emit_condjump_expr(s, expression->unexpr.op,
-                       /*true_block=*/false_block, /*false_block=*/true_block,
-                       /*next=*/next);
-    return;
-  case AST_BINEXPR_LOGICAL_AND: {
-    struct basic_block *middle_block = cg_allocate_block(s);
-    emit_condjump_expr(s, expression->binexpr.left,
-                       /*true_block=*/middle_block,
-                       /*false_block=*/false_block,
-                       /*next=*/middle_block);
-    cg_block_begin(s, middle_block);
-    emit_condjump_expr(s, expression->binexpr.right,
-                       /*true_block=*/true_block, /*false_block=*/false_block,
-                       /*next=*/next);
-    return;
-  }
-  case AST_BINEXPR_LOGICAL_OR: {
-    struct basic_block *middle_block = cg_allocate_block(s);
-    emit_condjump_expr(s, expression->binexpr.left,
-                       /*true_block=*/true_block, /*false_block=*/middle_block,
-                       /*next=*/middle_block);
-    cg_block_begin(s, middle_block);
-    emit_condjump_expr(s, expression->binexpr.right,
-                       /*true_block=*/true_block, /*false_block=*/false_block,
-                       /*next=*/next);
-    return;
-  }
-  default:
-    emit_expression(s, expression);
-    enum opcode         opcode;
-    struct basic_block *target;
-    struct basic_block *fallthrough;
-    if (next == true_block) {
-      opcode = OPCODE_POP_JUMP_IF_FALSE;
-      target = false_block;
-      fallthrough = true_block;
-    } else {
-      opcode = OPCODE_POP_JUMP_IF_TRUE;
-      target = true_block;
-      fallthrough = false_block;
-    }
-    cg_pop(s, 1);
-    emit_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
-    return;
-  }
 }
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
@@ -427,10 +454,10 @@ void emit_class_begin(struct cg_state *s, struct symbol *symbol)
   cg_push_code(s);
   cg_code_begin(s, /*use_locals=*/false);
 
-  emit_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
-  emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
+  cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
+  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
   cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
-  emit_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
+  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 }
 
 static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
@@ -454,7 +481,7 @@ void emit_class_end(struct cg_state *s, struct symbol *symbol,
   cg_load_const(s, string);
   emit_call_helper(s, call, /*num_extra_args=*/2);
   emit_decorator_calls(s, num_decorators);
-  emit_store(s, symbol);
+  cg_store(s, symbol);
 }
 
 static void emit_parameter_variable(struct cg_state *s, struct symbol *name)
@@ -617,7 +644,7 @@ void emit_def_end(struct cg_state *s, struct def_state *state,
   cg_pop(s, operands);
   cg_push_op(s, OPCODE_MAKE_FUNCTION, flags);
   emit_decorator_calls(s, num_decorators);
-  emit_store(s, symbol);
+  cg_store(s, symbol);
 }
 
 static void emit_generator_expression_part(

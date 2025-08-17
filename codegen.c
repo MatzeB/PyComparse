@@ -372,11 +372,6 @@ unsigned cg_register_name(struct cg_state *s, struct symbol *symbol)
   return cg_register_name_from_cstring(s, symbol->string);
 }
 
-unsigned cg_append_name(struct cg_state *s, struct symbol *symbol)
-{
-  return cg_append_name_from_cstring(s, symbol->string);
-}
-
 unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol)
 {
   const char   *cstring = symbol->string;
@@ -409,4 +404,61 @@ struct symbol_info *cg_new_symbol_info(struct cg_state *s,
   memset(&symbol->info, 0, sizeof(symbol->info));
   symbol->info.scope_id = s->code.scope_id;
   return &symbol->info;
+}
+
+void cg_load(struct cg_state *s, struct symbol *symbol)
+{
+  struct symbol_info *info = cg_symbol_info(s, symbol);
+  if (info == NULL) {
+    info = cg_new_symbol_info(s, symbol);
+    if (cg_use_locals(s)) {
+      info->type = SYMBOL_GLOBAL;
+    } else {
+      info->type = SYMBOL_NAME;
+    }
+    info->index = cg_register_name(s, symbol);
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_NAME:
+    cg_push_op(s, OPCODE_LOAD_NAME, info->index);
+    return;
+  case SYMBOL_GLOBAL:
+    cg_push_op(s, OPCODE_LOAD_GLOBAL, info->index);
+    return;
+  case SYMBOL_LOCAL:
+    cg_push_op(s, OPCODE_LOAD_FAST, info->index);
+    return;
+  }
+  fprintf(stderr, "invalid symbol_info type\n");
+  abort();
+}
+
+void cg_store(struct cg_state *s, struct symbol *symbol)
+{
+  struct symbol_info *info = cg_symbol_info(s, symbol);
+  if (info == NULL) {
+    info = cg_new_symbol_info(s, symbol);
+    if (cg_use_locals(s)) {
+      info->type = SYMBOL_LOCAL;
+      info->index = cg_append_varname(s, symbol);
+    } else {
+      info->type = SYMBOL_NAME;
+      info->index = cg_register_name(s, symbol);
+    }
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_NAME:
+    cg_pop_op(s, OPCODE_STORE_NAME, info->index);
+    return;
+  case SYMBOL_GLOBAL:
+    cg_pop_op(s, OPCODE_STORE_GLOBAL, info->index);
+    return;
+  case SYMBOL_LOCAL:
+    cg_pop_op(s, OPCODE_STORE_FAST, info->index);
+    return;
+  }
+  fprintf(stderr, "invalid symbol_info type\n");
+  abort();
 }

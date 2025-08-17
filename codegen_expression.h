@@ -1,10 +1,7 @@
 #pragma once
 
-#include <stdbool.h>
-
 struct ast_call;
 struct cg_state;
-struct symbol;
 union ast_expression;
 
 void emit_assignment(struct cg_state *cg, union ast_expression *target);
@@ -16,6 +13,3 @@ void emit_expression_drop_result(struct cg_state      *cg,
 
 void emit_call_helper(struct cg_state *cg, struct ast_call *call,
                       unsigned num_extra_args);
-
-void emit_load(struct cg_state *cg, struct symbol *symbol);
-void emit_store(struct cg_state *cg, struct symbol *symbol);

@@ -18,7 +18,6 @@ unsigned cg_register_unique_object(struct cg_state *s, union object *object);
 unsigned cg_register_name_from_cstring(struct cg_state *s,
                                        const char      *cstring);
 unsigned cg_register_name(struct cg_state *s, struct symbol *symbol);
-unsigned cg_append_name(struct cg_state *s, struct symbol *symbol);
 unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol);
 
 bool cg_use_locals(struct cg_state *s);
@@ -51,3 +50,6 @@ void cg_load_const(struct cg_state *s, union object *object);
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
              const char *filename);
 void cg_free(struct cg_state *s);
+
+void cg_load(struct cg_state *s, struct symbol *symbol);
+void cg_store(struct cg_state *s, struct symbol *symbol);

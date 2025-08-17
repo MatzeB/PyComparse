@@ -1174,6 +1174,19 @@ static void parse_expression_statement(struct parser_state *s)
   emit_expression_statement(&s->cg, expression);
 }
 
+static void parse_assert(struct parser_state *s)
+{
+  eat(s, T_assert);
+
+  union ast_expression *expression = parse_expression(s, PREC_LIST + 1);
+  union ast_expression *message = NULL;
+  if (accept(s, ',')) {
+    message = parse_expression(s, PREC_LIST + 1);
+  }
+
+  emit_assert(&s->cg, expression, message);
+}
+
 static void parse_break(struct parser_state *s)
 {
   if (!emit_break(&s->cg)) {
@@ -1309,11 +1322,14 @@ static void parse_small_statement(struct parser_state *s)
   case EXPRESSION_START_CASES:
     parse_expression_statement(s);
     break;
-  case T_continue:
-    parse_continue(s);
+  case T_assert:
+    parse_assert(s);
     break;
   case T_break:
     parse_break(s);
+    break;
+  case T_continue:
+    parse_continue(s);
     break;
   case T_from:
     parse_from_import_statement(s);

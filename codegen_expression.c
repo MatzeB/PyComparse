@@ -86,12 +86,12 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
 {
   switch (ast_expression_type(target)) {
   case AST_IDENTIFIER:
-    emit_store(s, target->identifier.symbol);
+    cg_store(s, target->identifier.symbol);
     return;
   case AST_ATTR: {
     struct ast_attr *attr = &target->attr;
     emit_expression(s, attr->expression);
-    unsigned index = cg_append_name(s, attr->symbol);
+    unsigned index = cg_register_name(s, attr->symbol);
     cg_op(s, OPCODE_STORE_ATTR, index);
     cg_pop(s, 2);
     return;
@@ -135,16 +135,16 @@ static void emit_binexpr_assign(struct cg_state    *s,
   switch (ast_expression_type(target)) {
   case AST_IDENTIFIER: {
     struct symbol *symbol = target->identifier.symbol;
-    emit_load(s, symbol);
+    cg_load(s, symbol);
     emit_binexpr_assign_inner(s, binexpr);
-    emit_store(s, symbol);
+    cg_store(s, symbol);
     return;
   }
   case AST_ATTR: {
     struct ast_attr *attr = &target->attr;
     emit_expression(s, attr->expression);
     cg_push_op(s, OPCODE_DUP_TOP, 0);
-    unsigned index = cg_append_name(s, attr->symbol);
+    unsigned index = cg_register_name(s, attr->symbol);
     cg_op(s, OPCODE_LOAD_ATTR, index);
     emit_binexpr_assign_inner(s, binexpr);
     cg_op(s, OPCODE_ROT_TWO, 0);
@@ -183,63 +183,6 @@ static void emit_unexpr(struct cg_state *s, struct ast_unexpr *unexpr,
 {
   emit_expression(s, unexpr->op);
   cg_op(s, opcode, 0);
-}
-
-void emit_store(struct cg_state *s, struct symbol *symbol)
-{
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info == NULL) {
-    info = cg_new_symbol_info(s, symbol);
-    if (cg_use_locals(s)) {
-      info->type = SYMBOL_LOCAL;
-      info->index = cg_append_varname(s, symbol);
-    } else {
-      info->type = SYMBOL_NAME;
-      info->index = cg_register_name(s, symbol);
-    }
-  }
-
-  switch ((enum symbol_info_type)info->type) {
-  case SYMBOL_NAME:
-    cg_pop_op(s, OPCODE_STORE_NAME, info->index);
-    return;
-  case SYMBOL_GLOBAL:
-    cg_pop_op(s, OPCODE_STORE_GLOBAL, info->index);
-    return;
-  case SYMBOL_LOCAL:
-    cg_pop_op(s, OPCODE_STORE_FAST, info->index);
-    return;
-  }
-  fprintf(stderr, "invalid symbol_info type\n");
-  abort();
-}
-
-void emit_load(struct cg_state *s, struct symbol *symbol)
-{
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info == NULL) {
-    info = cg_new_symbol_info(s, symbol);
-    if (cg_use_locals(s)) {
-      info->type = SYMBOL_GLOBAL;
-    } else {
-      info->type = SYMBOL_NAME;
-    }
-    info->index = cg_append_name(s, symbol);
-  }
-
-  switch ((enum symbol_info_type)info->type) {
-  case SYMBOL_NAME:
-    cg_push_op(s, OPCODE_LOAD_NAME, info->index);
-    return;
-  case SYMBOL_GLOBAL:
-    cg_push_op(s, OPCODE_LOAD_GLOBAL, info->index);
-    return;
-  case SYMBOL_LOCAL:
-    cg_push_op(s, OPCODE_LOAD_FAST, info->index);
-    return;
-  }
-  fprintf(stderr, "invalid symbol_info type\n");
-  abort();
 }
 
 static void emit_dictionary_display(struct cg_state           *s,
@@ -411,7 +354,7 @@ static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)
 {
   emit_expression(s, attr->expression);
-  unsigned index = cg_append_name(s, attr->symbol);
+  unsigned index = cg_register_name(s, attr->symbol);
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
@@ -670,7 +613,7 @@ static void emit_expression_impl(struct cg_state      *s,
     emit_generator_expression(s, &expression->generator_expression);
     break;
   case AST_IDENTIFIER:
-    emit_load(s, expression->identifier.symbol);
+    cg_load(s, expression->identifier.symbol);
     break;
   case AST_LIST_COMPREHENSION:
     emit_list_comprehension(s, &expression->generator_expression);

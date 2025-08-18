@@ -78,6 +78,23 @@ union object *object_intern_cstring(struct object_intern *s,
   return object_intern_string(s, OBJECT_ASCII, (uint32_t)length, cstring);
 }
 
+union object *object_intern_float(struct object_intern *s, double value)
+{
+  // TODO: hashmap
+  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
+    union object *object = object_list_at(s->objects, i);
+    if (object_type(object) != OBJECT_FLOAT) continue;
+    double object_value = object_float_value(object);
+    if (memcmp(&object_value, &value, sizeof(value)) == 0) {
+      return object;
+    }
+  }
+
+  union object *result = object_new_float(&s->arena, value);
+  object_list_append(s->objects, result);
+  return result;
+}
+
 union object *object_intern_int(struct object_intern *s, int64_t value)
 {
   // TODO: hashmap

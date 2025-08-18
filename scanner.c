@@ -256,6 +256,60 @@ static void scan_decinteger(struct scanner_state *s, struct arena *arena)
   }
 }
 
+static void scan_float_fraction(struct scanner_state *s)
+{
+  struct arena *strings = s->strings;
+
+  /* decimal beginning already on growing arena */
+  while ('0' <= s->c && s->c <= '9') {
+    arena_grow_char(strings, s->c);
+    next_char(s);
+  }
+
+  if (s->c == 'e' || s->c == 'E') {
+    arena_grow_char(strings, s->c);
+    next_char(s);
+    if (s->c == '+' || s->c == '-') {
+      arena_grow_char(strings, s->c);
+      next_char(s);
+    }
+    if (s->c < '0' || s->c > '9') {
+      // TODO: show error
+      abort();
+    }
+    do {
+      arena_grow_char(strings, s->c);
+      next_char(s);
+    } while ('0' <= s->c && s->c <= '9');
+  }
+  arena_grow_char(strings, '\0');
+  char *chars = (char *)arena_grow_finish(strings);
+
+  char *endptr;
+  errno = 0;
+  double value = strtod(chars, &endptr);
+  if (endptr == chars || *endptr != '\0') {
+    abort(); // TODO: error handling
+  }
+  if (errno != 0) {
+    abort(); // TODO: error handling
+  }
+  arena_free_to(strings, chars);
+
+  s->token.u.object = object_intern_float(s->objects, value);
+  s->token.kind = T_FLOAT;
+}
+
+static void scan_float_dot(struct scanner_state *s)
+{
+  assert('0' <= s->c && s->c <= '9');
+  struct arena *strings = s->strings;
+  arena_grow_begin(strings, alignof(char));
+  arena_grow_char(strings, '.');
+
+  scan_float_fraction(s);
+}
+
 static void scan_number(struct scanner_state *s)
 {
   struct arena *strings = s->strings;
@@ -282,8 +336,14 @@ static void scan_number(struct scanner_state *s)
     scan_decinteger(s, strings);
   }
 
-  if (s->c == '.' || s->c == 'e') {
-    abort();
+  if (s->c == '.') {
+    arena_grow_char(strings, s->c);
+    next_char(s);
+    scan_float_fraction(s);
+    return;
+  } else if (s->c == 'e' || s->c == 'E') {
+    scan_float_fraction(s);
+    return;
   }
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);
@@ -949,6 +1009,9 @@ restart:
     case '.':
       next_char(s);
       switch (s->c) {
+      case DIGIT_CASES:
+        scan_float_dot(s);
+        return;
       case '.':
         next_char(s);
         if (s->c == '.') {
@@ -1089,6 +1152,9 @@ void print_token(FILE *out, const struct token *token)
       }
     }
     fputc('"', out);
+    break;
+  case T_FLOAT:
+    fprintf(out, "float %f", token->u.object->float_obj.value);
     break;
   case T_INTEGER:
     fprintf(out, "integer %" PRId64, token->u.object->int_obj.value);

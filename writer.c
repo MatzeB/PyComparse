@@ -25,6 +25,18 @@ static void write_uint8(struct writer_state *s, uint8_t value)
   fputc(value, s->out);
 }
 
+static void write_uint64(struct writer_state *s, uint64_t value)
+{
+  write_uint8(s, (uint8_t)(value >> 0));
+  write_uint8(s, (uint8_t)(value >> 8));
+  write_uint8(s, (uint8_t)(value >> 16));
+  write_uint8(s, (uint8_t)(value >> 24));
+  write_uint8(s, (uint8_t)(value >> 32));
+  write_uint8(s, (uint8_t)(value >> 40));
+  write_uint8(s, (uint8_t)(value >> 48));
+  write_uint8(s, (uint8_t)(value >> 56));
+}
+
 static void write_uint32(struct writer_state *s, uint32_t value)
 {
   write_uint8(s, (uint8_t)(value >> 0));
@@ -110,10 +122,21 @@ static void write_string(struct writer_state        *s,
   }
 }
 
-static void write_int(struct writer_state *s, const struct object_int *obj_int)
+static void write_float(struct writer_state       *s,
+                        const struct object_float *float_obj)
+{
+  uint64_t bits;
+  assert(sizeof(bits) == sizeof(float_obj->value));
+  memcpy(&bits, &float_obj->value, sizeof(bits));
+
+  write_char(s, OBJECT_FLOAT);
+  write_uint64(s, bits);
+}
+
+static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
   write_char(s, OBJECT_INT);
-  write_uint32(s, (uint32_t)obj_int->value);
+  write_uint32(s, (uint32_t)int_obj->value);
 }
 
 static void write_code(struct writer_state *s, const struct object_code *code)
@@ -162,6 +185,9 @@ static void write_object(struct writer_state *s, const union object *object)
   case OBJECT_ASCII:
   case OBJECT_STRING:
     write_string(s, &object->string);
+    break;
+  case OBJECT_FLOAT:
+    write_float(s, &object->float_obj);
     break;
   case OBJECT_INT:
     write_int(s, &object->int_obj);

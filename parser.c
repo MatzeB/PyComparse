@@ -34,6 +34,7 @@
   case '~':                                                                   \
   case T_not:                                                                 \
   case T_IDENTIFIER:                                                          \
+  case T_FLOAT:                                                               \
   case T_STRING:                                                              \
   case T_INTEGER:                                                             \
   case T_ASTERISK_ASTERISK:                                                   \
@@ -106,7 +107,8 @@ static inline struct symbol *eat_identifier(struct parser_state *s)
 static inline union object *peek_get_object(struct parser_state *s,
                                             enum token_kind      token_kind)
 {
-  assert(token_kind == T_STRING || token_kind == T_INTEGER);
+  assert(token_kind == T_STRING || token_kind == T_INTEGER
+         || token_kind == T_FLOAT);
   assert(peek(s) == token_kind);
   return s->scanner.token.u.object;
 }
@@ -647,6 +649,28 @@ static union ast_expression *parse_identifier(struct parser_state *s)
   return node;
 }
 
+static union ast_expression *parse_float(struct parser_state *s)
+{
+  union object *object = peek_get_object(s, T_FLOAT);
+  eat(s, T_FLOAT);
+  return ast_const_new(s, object);
+}
+
+static union ast_expression *parse_integer(struct parser_state *s)
+{
+  union object *object = peek_get_object(s, T_INTEGER);
+  eat(s, T_INTEGER);
+  return ast_const_new(s, object);
+}
+
+static union ast_expression *parse_singleton(struct parser_state *s,
+                                             enum object_type     type)
+{
+  next_token(s);
+  union object *object = object_intern_singleton(&s->cg.objects, type);
+  return ast_const_new(s, object);
+}
+
 static union ast_expression *parse_string(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_STRING);
@@ -705,21 +729,6 @@ static union ast_expression *parse_string(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
-static union ast_expression *parse_integer(struct parser_state *s)
-{
-  union object *object = peek_get_object(s, T_INTEGER);
-  eat(s, T_INTEGER);
-  return ast_const_new(s, object);
-}
-
-static union ast_expression *parse_singleton(struct parser_state *s,
-                                             enum object_type     type)
-{
-  next_token(s);
-  union object *object = object_intern_singleton(&s->cg.objects, type);
-  return ast_const_new(s, object);
-}
-
 static union ast_expression *parse_true(struct parser_state *s)
 {
   return parse_singleton(s, OBJECT_TRUE);
@@ -756,6 +765,7 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   ['~']                 = { .func = parse_invert            },
   [T_ASTERISK_ASTERISK] = { .func = parse_asterisk_asterisk },
   [T_DOT_DOT_DOT]       = { .func = parse_ellipsis          },
+  [T_FLOAT]             = { .func = parse_float             },
   [T_False]             = { .func = parse_false             },
   [T_IDENTIFIER]        = { .func = parse_identifier        },
   [T_INTEGER]           = { .func = parse_integer           },

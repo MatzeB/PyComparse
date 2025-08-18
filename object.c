@@ -149,6 +149,14 @@ union object *object_new_string(struct arena *arena, enum object_type type,
   return object;
 }
 
+union object *object_new_float(struct arena *arena, double value)
+{
+  union object *object
+      = object_allocate_zero(arena, struct object_float, OBJECT_FLOAT);
+  object->float_obj.value = value;
+  return object;
+}
+
 union object *object_new_int(struct arena *arena, int32_t value)
 {
   union object *object
@@ -172,6 +180,12 @@ bool object_string_equals(const union object *object, uint32_t length,
   }
   if (length == 0) return true;
   return memcmp(object->string.chars, chars, length) == 0;
+}
+
+double object_float_value(const union object *object)
+{
+  assert(object->type == OBJECT_FLOAT);
+  return object->float_obj.value;
 }
 
 int64_t object_int_value(const union object *object)

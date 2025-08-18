@@ -328,10 +328,16 @@ void emit_if_else(struct cg_state *s, struct if_state *state)
 void emit_if_end(struct cg_state *s, struct if_state *state)
 {
   struct basic_block *footer = state->footer;
-  if (footer == NULL) footer = state->else_or_footer;
+  struct basic_block *else_or_footer = state->else_or_footer;
+  if (footer == NULL) footer = else_or_footer;
   if (footer == NULL) return;
   if (!unreachable(s)) {
     emit_jump(s, footer);
+  }
+
+  if (else_or_footer != NULL && else_or_footer != footer) {
+    cg_block_begin(s, else_or_footer);
+    emit_jump(s, state->footer);
   }
 
   cg_block_begin(s, footer);

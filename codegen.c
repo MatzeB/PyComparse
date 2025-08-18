@@ -154,7 +154,9 @@ static void pop_symbol_infos(struct cg_state *s)
 static struct basic_block *skip_empty_blocks(struct basic_block *target)
 {
   while (target->code_length == 0 && target->jump_opcode == 0) {
-    target = target->default_target;
+    struct basic_block *default_target = target->default_target;
+    if (default_target == NULL) break;
+    target = default_target;
   }
   return target;
 }

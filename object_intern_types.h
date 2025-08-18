@@ -3,6 +3,10 @@
 #include "adt/arena.h"
 #include "object_intern.h"
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct object_intern {
   struct arena  arena;
   union object *objects;
@@ -12,3 +16,5 @@ struct object_intern {
   union object *singleton_ellipsis;
   union object *empty_tuple;
 };
+
+ASSUME_NONNULL_END

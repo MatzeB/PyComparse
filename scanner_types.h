@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 #define MAXINDENT 100
 
 struct arena;
@@ -48,3 +52,5 @@ struct scanner_state {
   char  *read_buffer;
   size_t read_buffer_size;
 };
+
+ASSUME_NONNULL_END

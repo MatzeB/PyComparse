@@ -1,5 +1,9 @@
 #pragma once
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 enum symbol_info_type {
   SYMBOL_GLOBAL,
   SYMBOL_LOCAL,
@@ -11,3 +15,5 @@ struct symbol_info {
   uint16_t scope_id;
   unsigned index;
 };
+
+ASSUME_NONNULL_END

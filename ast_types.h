@@ -3,6 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 union object;
 struct argument;
 struct parameter;
@@ -24,17 +28,17 @@ struct ast_binexpr {
 };
 
 struct argument {
-  union ast_expression *expression;
-  struct symbol        *name;
+  union ast_expression   *expression;
+  struct symbol *nullable name;
 };
 
 struct ast_call {
-  struct ast_node_base  base;
-  bool                  has_star_argument;
-  bool                  has_kw_argument;
-  union ast_expression *callee;
-  unsigned              num_arguments;
-  struct argument       arguments[];
+  struct ast_node_base           base;
+  bool                           has_star_argument;
+  bool                           has_kw_argument;
+  union ast_expression *nullable callee;
+  unsigned                       num_arguments;
+  struct argument                arguments[];
 };
 
 struct ast_const {
@@ -54,11 +58,11 @@ struct ast_dict_item_list {
 };
 
 struct ast_expression_list {
-  struct ast_node_base  base;
-  bool                  has_star_expression;
-  unsigned              num_expressions;
-  union object         *as_constant;
-  union ast_expression *expressions[];
+  struct ast_node_base          base;
+  bool                          has_star_expression;
+  unsigned                      num_expressions;
+  union object *nullable        as_constant;
+  union ast_expression *nonnull expressions[];
 };
 
 enum generator_expression_part_type {
@@ -68,7 +72,7 @@ enum generator_expression_part_type {
 
 struct generator_expression_part {
   enum generator_expression_part_type type;
-  union ast_expression               *target;
+  union ast_expression *nullable      target;
   union ast_expression               *expression;
 };
 
@@ -85,10 +89,10 @@ struct ast_identifier {
 };
 
 struct ast_slice {
-  struct ast_node_base  base;
-  union ast_expression *start;
-  union ast_expression *stop;
-  union ast_expression *step;
+  struct ast_node_base           base;
+  union ast_expression *nullable start;
+  union ast_expression *nullable stop;
+  union ast_expression *nullable step;
 };
 
 struct ast_unexpr {
@@ -113,11 +117,13 @@ union ast_expression {
 };
 
 struct dotted_name {
-  unsigned       num_symbols;
-  struct symbol *symbols[];
+  unsigned               num_symbols;
+  struct symbol *nonnull symbols[];
 };
 
 struct from_import_pair {
-  struct symbol *name;
-  struct symbol *as;
+  struct symbol          *name;
+  struct symbol *nullable as;
 };
+
+ASSUME_NONNULL_END

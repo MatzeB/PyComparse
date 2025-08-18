@@ -3,6 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct arena;
 
 #define CO_OPTIMIZED          0x0001
@@ -56,7 +60,7 @@ union object *object_new_singleton(struct arena *arena, enum object_type type);
 union object *object_new_code(struct arena *arena);
 union object *object_new_list(struct arena *arena);
 union object *object_new_string(struct arena *arena, enum object_type type,
-                                uint32_t length, const char *chars);
+                                uint32_t length, const char *nullable chars);
 union object *object_new_float(struct arena *arena, double value);
 union object *object_new_int(struct arena *arena, int32_t value);
 
@@ -69,7 +73,7 @@ enum object_type object_type(const union object *object);
 bool objects_equal(const union object *object0, const union object *object1);
 
 bool object_string_equals(const union object *object, uint32_t length,
-                          const char *chars);
+                          const char *nullable chars);
 
 double  object_float_value(const union object *object);
 int64_t object_int_value(const union object *object);
@@ -77,3 +81,5 @@ int64_t object_int_value(const union object *object);
 void          object_list_append(union object *list, union object *object);
 union object *object_list_at(union object *list, uint32_t index);
 uint32_t      object_list_length(union object *list);
+
+ASSUME_NONNULL_END

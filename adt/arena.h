@@ -13,17 +13,19 @@
 #define UNLIKELY(x) __builtin_expect((x), 0)
 #endif
 
+#pragma clang assume_nonnull begin
+
 struct block_header {
-  struct block_header *prev;
-  unsigned             block_size;
+  struct block_header *_Nullable prev;
+  unsigned block_size;
 };
 
 struct arena {
-  struct block_header *block;
-  unsigned             allocated;
-  unsigned             limit;
-  unsigned             grow;
-  unsigned             grow_alignment;
+  struct block_header *_Nullable block;
+  unsigned allocated;
+  unsigned limit;
+  unsigned grow;
+  unsigned grow_alignment;
 };
 
 static inline void arena_init(struct arena *arena)
@@ -39,6 +41,7 @@ arena_allocate_block_(struct arena *arena, unsigned size)
                             ? default_block_size
                             : ceil_po2(size + sizeof(struct block_header));
   void    *memory = malloc(block_size);
+  if (memory == NULL) abort();
   struct block_header *header = (struct block_header *)memory;
   header->prev = arena->block;
   header->block_size = block_size;
@@ -169,3 +172,5 @@ static inline void *arena_grow_finish(struct arena *arena)
 
 #define arena_allocate_type(arena, type)                                      \
   ((type *)arena_allocate((arena), sizeof(type), alignof(type)))
+
+#pragma clang assume_nonnull end

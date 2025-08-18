@@ -3,6 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct object_base {
   char type;
 };
@@ -45,15 +49,15 @@ struct object_list {
 };
 
 struct object_string {
-  struct object_base base;
-  uint32_t           length;
-  const char        *chars;
+  struct object_base   base;
+  uint32_t             length;
+  const char *nullable chars;
 };
 
 struct object_tuple {
-  struct object_base base;
-  uint32_t           length;
-  union object      *items[];
+  struct object_base    base;
+  uint32_t              length;
+  union object *nonnull items[];
 };
 
 union object {
@@ -67,3 +71,5 @@ union object {
   struct object_string string;
   struct object_tuple  tuple;
 };
+
+ASSUME_NONNULL_END

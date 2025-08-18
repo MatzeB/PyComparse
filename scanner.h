@@ -3,8 +3,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "nullable.h"
 #include "scanner_location.h"
 #include "token_kinds.h"
+
+ASSUME_NONNULL_BEGIN
 
 struct arena;
 struct object_intern;
@@ -25,3 +28,5 @@ const char *token_kind_name(enum token_kind token_kind);
 void print_token(FILE *out, const struct token *token);
 
 struct location scanner_location(struct scanner_state *s);
+
+ASSUME_NONNULL_END

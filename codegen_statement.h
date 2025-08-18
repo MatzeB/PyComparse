@@ -2,9 +2,11 @@
 
 #include <stdbool.h>
 
+#include "codegen_types.h"
+#include "nullable.h"
 #include "opcodes.h"
 
-#include "codegen_types.h"
+ASSUME_NONNULL_BEGIN
 
 struct argument;
 struct ast_call;
@@ -17,8 +19,8 @@ struct symbol;
 union ast_expression;
 
 struct if_state {
-  struct basic_block *else_or_footer;
-  struct basic_block *footer;
+  struct basic_block *nullable else_or_footer;
+  struct basic_block *nullable footer;
 };
 
 struct for_while_state {
@@ -37,9 +39,9 @@ enum parameter_type {
 };
 
 struct parameter {
-  struct symbol        *name;
-  union ast_expression *initializer;
-  enum parameter_type   type;
+  struct symbol                 *name;
+  union ast_expression *nullable initializer;
+  enum parameter_type            type;
 };
 
 struct def_state {
@@ -59,7 +61,7 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as);
 void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
                                 struct dotted_name *module, unsigned num_pairs,
-                                struct from_import_pair *pairs);
+                                struct from_import_pair *nullable pairs);
 void emit_from_import_star_statement(struct cg_state    *s,
                                      unsigned            num_prefix_dots,
                                      struct dotted_name *module);
@@ -111,3 +113,5 @@ void emit_condjump(struct cg_state *s, enum opcode opcode,
 void emit_jump(struct cg_state *s, struct basic_block *target);
 
 void emit_code_end(struct cg_state *s);
+
+ASSUME_NONNULL_END

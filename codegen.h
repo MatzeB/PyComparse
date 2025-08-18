@@ -3,7 +3,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "nullable.h"
 #include "opcodes.h"
+
+ASSUME_NONNULL_BEGIN
 
 struct basic_block;
 struct cg_state;
@@ -24,9 +27,10 @@ unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol);
 
 bool cg_use_locals(struct cg_state *s);
 
-struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol *symbol);
-struct symbol_info *cg_new_symbol_info(struct cg_state *s,
-                                       struct symbol   *symbol);
+struct symbol_info *nullable cg_symbol_info(struct cg_state *s,
+                                            struct symbol   *symbol);
+struct symbol_info          *cg_new_symbol_info(struct cg_state *s,
+                                                struct symbol   *symbol);
 
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
@@ -55,3 +59,5 @@ void cg_free(struct cg_state *s);
 
 void cg_load(struct cg_state *s, struct symbol *symbol);
 void cg_store(struct cg_state *s, struct symbol *symbol);
+
+ASSUME_NONNULL_END

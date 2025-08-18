@@ -249,19 +249,22 @@ static void emit_none(struct cg_state *s)
 
 static void emit_slice(struct cg_state *s, struct ast_slice *slice)
 {
-  if (slice->start) {
-    emit_expression(s, slice->start);
+  union ast_expression *start = slice->start;
+  if (start != NULL) {
+    emit_expression(s, start);
   } else {
     emit_none(s);
   }
-  if (slice->stop) {
-    emit_expression(s, slice->stop);
+  union ast_expression *stop = slice->stop;
+  if (stop != NULL) {
+    emit_expression(s, stop);
   } else {
     emit_none(s);
   }
-  unsigned arg;
-  if (slice->step) {
-    emit_expression(s, slice->step);
+  unsigned              arg;
+  union ast_expression *step = slice->step;
+  if (step != NULL) {
+    emit_expression(s, step);
     arg = 3;
   } else {
     arg = 2;
@@ -489,7 +492,9 @@ void emit_call_helper(struct cg_state *s, struct ast_call *call,
 
 static void emit_call(struct cg_state *s, struct ast_call *call)
 {
-  emit_expression(s, call->callee);
+  union ast_expression *callee = call->callee;
+  assert(callee != NULL);
+  emit_expression(s, callee);
   emit_call_helper(s, call, /*num_extra_args=*/0);
 }
 

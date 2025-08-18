@@ -5,6 +5,10 @@
 #include "scanner_location.h"
 #include "token_kinds.h"
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct diagnostics_state;
 struct symbol;
 struct token;
@@ -21,3 +25,5 @@ void diag_end(struct diagnostics_state *s);
 
 void diag_init(struct diagnostics_state *s, FILE *out,
                const char *default_filename);
+
+ASSUME_NONNULL_END

@@ -337,7 +337,7 @@ void emit_if_end(struct cg_state *s, struct if_state *state)
 
   if (else_or_footer != NULL && else_or_footer != footer) {
     cg_block_begin(s, else_or_footer);
-    emit_jump(s, state->footer);
+    emit_jump(s, footer);
   }
 
   cg_block_begin(s, footer);
@@ -712,7 +712,9 @@ static void emit_generator_expression_part(
       = &generator_expression->parts[part_index];
   if (part->type == GENERATOR_EXPRESSION_PART_FOR) {
     struct for_while_state state;
-    emit_for_begin(s, &state, part->target, part->expression);
+    union ast_expression  *target = part->target;
+    assert(target != NULL);
+    emit_for_begin(s, &state, target, part->expression);
 
     emit_generator_expression_part(s, generator_expression, part_index + 1);
 

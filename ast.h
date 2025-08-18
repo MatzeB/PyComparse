@@ -1,5 +1,9 @@
 #pragma once
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct ast_expression_list;
 struct object_intern;
 union ast_expression;
@@ -68,7 +72,10 @@ enum ast_expression_type {
 
 enum ast_expression_type ast_expression_type(union ast_expression *expression);
 
-union object *ast_expression_as_constant(union ast_expression *expression);
+union object *nullable
+ast_expression_as_constant(union ast_expression *expression);
 
-union object *ast_tuple_compute_constant(struct object_intern       *intern,
-                                         struct ast_expression_list *tuple);
+union object *nullable ast_tuple_compute_constant(
+    struct object_intern *intern, struct ast_expression_list *tuple);
+
+ASSUME_NONNULL_END

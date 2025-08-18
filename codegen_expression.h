@@ -1,5 +1,9 @@
 #pragma once
 
+#include "nullable.h"
+
+ASSUME_NONNULL_BEGIN
+
 struct ast_call;
 struct cg_state;
 union ast_expression;
@@ -13,3 +17,5 @@ void emit_expression_drop_result(struct cg_state      *cg,
 
 void emit_call_helper(struct cg_state *cg, struct ast_call *call,
                       unsigned num_extra_args);
+
+ASSUME_NONNULL_END

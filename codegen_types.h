@@ -4,27 +4,30 @@
 
 #include "adt/arena.h"
 #include "adt/stack.h"
+#include "nullable.h"
 #include "object_intern_types.h"
+
+ASSUME_NONNULL_BEGIN
 
 union object;
 struct diagnostics_state;
 
 struct basic_block {
-  uint8_t            *code_bytes;
-  unsigned            code_length;
-  unsigned            offset;
-  uint8_t             jump_opcode;
-  uint8_t             jump_size;
-  uint8_t             default_jump_size;
-  struct basic_block *jump_target;
-  struct basic_block *default_target;
-  struct basic_block *next;
+  uint8_t                     *code_bytes;
+  unsigned                     code_length;
+  unsigned                     offset;
+  uint8_t                      jump_opcode;
+  uint8_t                      jump_size;
+  uint8_t                      default_jump_size;
+  struct basic_block *nullable jump_target;
+  struct basic_block *nullable default_target;
+  struct basic_block *nullable next;
 };
 
 struct loop_state {
-  struct basic_block *continue_block;
-  struct basic_block *break_block;
-  bool                pop_on_break;
+  struct basic_block *nullable continue_block;
+  struct basic_block *nullable break_block;
+  bool                         pop_on_break;
 };
 
 struct code_state {
@@ -58,3 +61,5 @@ struct cg_state {
 
   uint16_t next_scope_id;
 };
+
+ASSUME_NONNULL_END

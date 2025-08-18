@@ -5,8 +5,11 @@
 #include "adt/arena.h"
 #include "codegen_types.h"
 #include "diagnostics_types.h"
+#include "nullable.h"
 #include "scanner_types.h"
 #include "token_kinds.h"
+
+ASSUME_NONNULL_BEGIN
 
 struct parser_state {
   struct scanner_state     scanner;
@@ -16,3 +19,5 @@ struct parser_state {
 
   unsigned short anchor_set[NUM_TOKENS];
 };
+
+ASSUME_NONNULL_END

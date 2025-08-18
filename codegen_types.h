@@ -14,6 +14,8 @@ struct basic_block {
   unsigned            code_length;
   unsigned            offset;
   uint8_t             jump_opcode;
+  uint8_t             jump_size;
+  uint8_t             default_jump_size;
   struct basic_block *jump_target;
   struct basic_block *default_target;
   struct basic_block *next;

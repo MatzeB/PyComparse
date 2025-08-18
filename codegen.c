@@ -12,6 +12,8 @@
 #include "opcodes.h"
 #include "symbol_types.h"
 
+#define INVALID_BLOCK_OFFSET (~0u)
+
 struct saved_symbol_info {
   struct symbol     *symbol;
   struct symbol_info info;
@@ -22,11 +24,62 @@ static inline void arena_grow_u8(struct arena *arena, uint8_t value)
   arena_grow_char(arena, (char)value);
 }
 
+static void cg_op_with_arena(struct arena *arena, enum opcode opcode,
+                             uint32_t arg)
+{
+  if (arg > 0xff) {
+    if (arg > 0xffffff) {
+      arena_grow_char(arena, (char)OPCODE_EXTENDED_ARG);
+      arena_grow_u8(arena, (uint8_t)(arg >> 24));
+    }
+    if (arg > 0xffff) {
+      arena_grow_char(arena, (char)OPCODE_EXTENDED_ARG);
+      arena_grow_u8(arena, (uint8_t)(arg >> 16));
+    }
+    arena_grow_char(arena, (char)OPCODE_EXTENDED_ARG);
+    arena_grow_u8(arena, (uint8_t)(arg >> 8));
+  }
+  arena_grow_u8(arena, opcode);
+  arena_grow_u8(arena, (uint8_t)arg);
+}
+
+void cg_op(struct cg_state *s, enum opcode opcode, uint32_t arg)
+{
+  assert(!is_jump(opcode));
+  cg_op_with_arena(&s->code.opcodes, opcode, arg);
+}
+
+void cg_push(struct cg_state *s, unsigned n)
+{
+  s->code.stacksize += n;
+  if (s->code.stacksize > s->code.max_stacksize)
+    s->code.max_stacksize = s->code.stacksize;
+}
+
+void cg_pop(struct cg_state *s, unsigned n)
+{
+  assert(s->code.stacksize >= n);
+  s->code.stacksize -= n;
+}
+
+void cg_push_op(struct cg_state *s, enum opcode opcode, uint32_t arg)
+{
+  cg_op(s, opcode, arg);
+  cg_push(s, 1);
+}
+
+void cg_pop_op(struct cg_state *s, enum opcode opcode, uint32_t arg)
+{
+  cg_op(s, opcode, arg);
+  cg_pop(s, 1);
+}
+
 struct basic_block *cg_allocate_block(struct cg_state *s)
 {
   struct arena       *arena = object_intern_arena(&s->objects);
   struct basic_block *block = arena_allocate_type(arena, struct basic_block);
   memset(block, 0, sizeof(*block));
+  block->offset = INVALID_BLOCK_OFFSET;
   return block;
 }
 
@@ -41,7 +94,7 @@ void cg_block_begin(struct cg_state *s, struct basic_block *block)
   assert(block->code_length == 0 && block->code_bytes == NULL);
   assert(s->code.current_block == NULL);
   s->code.current_block = block;
-  arena_grow_begin(&s->code.opcodes, 1);
+  arena_grow_begin(&s->code.opcodes, /*alignment=*/1);
 }
 
 struct basic_block *cg_block_end(struct cg_state *s)
@@ -106,6 +159,77 @@ static struct basic_block *skip_empty_blocks(struct basic_block *target)
   return target;
 }
 
+static uint8_t opcode_with_parameter_size(uint32_t parameter)
+{
+  if (parameter <= 0xff) return 2;
+  if (parameter <= 0xffff) return 4;
+  if (parameter <= 0xffffff) return 6;
+  return 8;
+}
+
+static bool relax_jumps_in_block(struct basic_block *block)
+{
+  unsigned offset = block->offset + block->code_length;
+
+  bool                jump_size_increased = false;
+  struct basic_block *jump_target = block->jump_target;
+  if (jump_target != NULL) {
+    enum opcode jump_opcode = block->jump_opcode;
+    unsigned    dest_offset = jump_target->offset;
+    if (dest_offset == INVALID_BLOCK_OFFSET) dest_offset = offset + 8;
+
+    uint8_t old_jump_size = block->jump_size;
+
+    uint32_t parameter;
+    if (is_absjump(jump_opcode)) {
+      parameter = dest_offset;
+    } else {
+      assert(dest_offset > offset);
+      parameter
+          = dest_offset - offset - (old_jump_size > 0 ? old_jump_size : 2);
+    }
+
+    uint8_t jump_size = opcode_with_parameter_size(parameter);
+    assert(jump_size >= old_jump_size);
+    if (jump_size != old_jump_size) {
+      block->jump_size = jump_size;
+      jump_size_increased = true;
+    }
+    offset += jump_size;
+  }
+
+  struct basic_block *default_target = block->default_target;
+  if (default_target != NULL && default_target != block->next) {
+    unsigned dest_offset = default_target->offset;
+    if (dest_offset == INVALID_BLOCK_OFFSET) dest_offset = offset + 8;
+
+    uint8_t old_default_jump_size = block->default_jump_size;
+
+    /* There is JUMP_ABSOLUTE and JUMP_FORWARD. We should pick whatever is
+     * shorter to encode; JUMP_FORWARD does not work for backward jumps. */
+    uint32_t parameter_abs = dest_offset;
+    uint8_t  default_jump_size = opcode_with_parameter_size(parameter_abs);
+    if (dest_offset > offset) {
+      uint32_t parameter_rel
+          = dest_offset - offset
+            - (old_default_jump_size > 0 ? old_default_jump_size : 2);
+      uint8_t rel_jump_size = opcode_with_parameter_size(parameter_rel);
+      if (rel_jump_size < default_jump_size) {
+        default_jump_size = rel_jump_size;
+      }
+    }
+    assert(default_jump_size >= old_default_jump_size);
+
+    if (default_jump_size != old_default_jump_size) {
+      block->default_jump_size = default_jump_size;
+      jump_size_increased = true;
+    }
+  } else {
+    assert(block->default_jump_size == 0);
+  }
+  return jump_size_increased;
+}
+
 union object *cg_code_end(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
@@ -116,99 +240,117 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // TODO: compute NOFREE...
   s->code.flags |= CO_NOFREE;
 
-  // Finalize block layout: First assign minimum offsets necessary,
-  // then expand as necessary.
+  // Jump relaxation: First assign minimum offsets necessary, then expand as
+  // necessary.
   unsigned            offset = 0;
   struct basic_block *first_block = s->code.first_block;
-  for (struct basic_block *b = first_block; b != NULL; b = b->next) {
-    b->offset = offset;
-    offset += b->code_length;
+  for (struct basic_block *block = first_block, *next; block != NULL;
+       block = next) {
+    next = block->next;
+    assert(block->code_bytes != NULL);
+    block->offset = offset;
 
-    unsigned jump_length = 0;
-    if (b->jump_opcode != 0) {
-      assert(is_jump(b->jump_opcode));
-      jump_length += 2;
-    } else {
-      assert(b->jump_target == NULL);
+    struct basic_block *jump_target = block->jump_target;
+    if (jump_target != NULL) {
+      enum opcode jump_opcode = block->jump_opcode;
+      assert(is_jump(jump_opcode));
+      struct basic_block *skipped_target = skip_empty_blocks(jump_target);
+      /* Note: relative jumps can only go forward */
+      if (is_absjump(jump_opcode)
+          || (skipped_target->offset != INVALID_BLOCK_OFFSET
+              && skipped_target->offset > offset)) {
+        jump_target = skipped_target;
+        block->jump_target = jump_target;
+      }
     }
-    if (b->default_target != NULL && b->default_target != b->next) {
-      jump_length += 2;
+
+    struct basic_block *default_target = block->default_target;
+    if (default_target != NULL && default_target != next) {
+      default_target = skip_empty_blocks(default_target);
+      block->default_target = default_target;
     }
-    offset += jump_length;
+
+    relax_jumps_in_block(block);
+    offset += block->code_length + block->jump_size + block->default_jump_size;
   }
 
-  // TODO: expand blocks/offsets as necessary.
+  /* Keep relaxing jumps until fix point.
+   * TODO: What's the complexity here? Can we do better? */
+  bool changed;
+  do {
+    changed = false;
 
-  // Finalize bytecode layout.
-  struct arena *arena = object_intern_arena(&s->objects);
-  arena_grow_begin(arena, 1);
-  for (struct basic_block *b = first_block, *next; b != NULL; b = next) {
-    next = b->next;
-    struct basic_block *default_target = b->default_target;
-    enum opcode         jump_opcode = b->jump_opcode;
-    unsigned            code_length = b->code_length;
-    unsigned            offset = b->offset;
-
-    unsigned jump_length = 0;
-    if (jump_opcode != 0) {
-      jump_length += 2;
-    }
-    if (default_target != NULL && default_target != next) {
-      jump_length += 2;
-    }
-    unsigned block_length = code_length + jump_length;
-    assert(next == NULL || next->offset == offset + block_length);
-
-    void *dst = arena_grow(arena, block_length);
-    memcpy(dst, b->code_bytes, code_length);
-    uint8_t *j = (uint8_t *)dst + code_length;
-    if (jump_opcode != 0) {
-      struct basic_block *jump_target = b->jump_target;
-      unsigned            dest_offset = jump_target->offset;
-      assert(
-          (dest_offset > 0
-           || (first_block->code_length == 0 && first_block->jump_opcode == 0))
-          && "target block not processed?");
-      *j++ = jump_opcode;
-      if (is_absjump(jump_opcode)) {
-        jump_target = skip_empty_blocks(jump_target);
-        if (dest_offset > 255) {
-          abort(); /* TODO */
-        }
-        *j++ = (uint8_t)dest_offset;
-      } else {
-        /* Note: We don't use skip_empty_blocks() here as we cannot encode
-         * possible backward jumps. */
-        unsigned delta
-            = dest_offset - offset - block_length
-              - ((default_target != NULL && default_target != next) ? 2 : 0);
-        if (delta > 255) {
-          abort();
-        }
-        *j++ = (uint8_t)delta;
+    unsigned offset = 0;
+    for (struct basic_block *block = first_block; block != NULL;
+         block = block->next) {
+      if (block->offset != offset) {
+        assert(offset > block->offset);
+        block->offset = offset;
+        changed = true;
       }
-    } else {
-      assert(b->jump_target == NULL);
+      changed |= relax_jumps_in_block(block);
+      offset
+          += block->code_length + block->jump_size + block->default_jump_size;
     }
+  } while (changed);
+
+  // Emit code.
+  struct arena *arena = object_intern_arena(&s->objects);
+  arena_grow_begin(arena, /*alignment=*/1);
+  for (struct basic_block *block = first_block, *next; block != NULL;
+       block = next) {
+    next = block->next;
+    unsigned offset = block->offset;
+    assert(offset == arena_grow_current_size(arena));
+
+    unsigned code_length = block->code_length;
+    void    *dst = arena_grow(arena, code_length);
+    memcpy(dst, block->code_bytes, code_length);
+    offset += block->code_length;
+
+    struct basic_block *jump_target = block->jump_target;
+    if (jump_target != NULL) {
+      enum opcode jump_opcode = block->jump_opcode;
+      unsigned    dest_offset = jump_target->offset;
+      assert(dest_offset != INVALID_BLOCK_OFFSET);
+
+      uint8_t  jump_size = block->jump_size;
+      uint32_t parameter;
+      if (is_absjump(jump_opcode)) {
+        parameter = dest_offset;
+      } else {
+        assert(dest_offset > offset);
+        parameter = dest_offset - offset - jump_size;
+      }
+      assert(opcode_with_parameter_size(parameter) == jump_size);
+      cg_op_with_arena(arena, jump_opcode, parameter);
+      offset += jump_size;
+    }
+    struct basic_block *default_target = block->default_target;
     if (default_target != NULL && default_target != next) {
       unsigned dest_offset = default_target->offset;
-      assert(
-          (dest_offset > 0
-           || (first_block->code_length == 0 && first_block->jump_opcode == 0))
-          && "target block not processed?");
-      if (dest_offset <= offset) {
-        if (dest_offset > 255) {
-          abort(); /* TODO */
+      assert(dest_offset != INVALID_BLOCK_OFFSET);
+
+      uint8_t default_jump_size = block->default_jump_size;
+      /* There is JUMP_ABSOLUTE and JUMP_FORWARD. We should pick whatever is
+       * shorter to encode; JUMP_FORWARD does not work for backward jumps. */
+      bool     jump_abs = true;
+      uint32_t parameter_abs = dest_offset;
+      uint32_t parameter_rel = 0;
+      uint8_t  jump_size_abs = opcode_with_parameter_size(parameter_abs);
+      if (dest_offset > offset) {
+        parameter_rel = dest_offset - offset - default_jump_size;
+        uint8_t jump_size_rel = opcode_with_parameter_size(parameter_rel);
+        if (jump_size_rel < jump_size_abs) {
+          assert(default_jump_size == jump_size_rel);
+          jump_abs = false;
         }
-        *j++ = OPCODE_JUMP_ABSOLUTE;
-        *j++ = (uint8_t)dest_offset;
+      }
+      if (jump_abs) {
+        assert(default_jump_size == jump_size_abs);
+        cg_op_with_arena(arena, OPCODE_JUMP_ABSOLUTE, parameter_abs);
       } else {
-        unsigned delta = dest_offset - offset - block_length;
-        if (delta > 255) {
-          abort();
-        }
-        *j++ = OPCODE_JUMP_FORWARD;
-        *j++ = (uint8_t)delta;
+        cg_op_with_arena(arena, OPCODE_JUMP_FORWARD, parameter_rel);
       }
     }
   }
@@ -280,44 +422,6 @@ void cg_free(struct cg_state *s)
 bool cg_use_locals(struct cg_state *s)
 {
   return s->code.use_locals;
-}
-
-void cg_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
-{
-  assert(!is_jump(opcode));
-  if (arg >= 256) {
-    assert(arg <= 0xffff);
-    arena_grow_char(&s->code.opcodes, (char)OPCODE_EXTENDED_ARG);
-    arena_grow_u8(&s->code.opcodes, (uint8_t)(arg >> 8));
-    arg &= 0xff;
-  }
-  arena_grow_u8(&s->code.opcodes, opcode);
-  arena_grow_u8(&s->code.opcodes, (uint8_t)arg);
-}
-
-void cg_push(struct cg_state *s, unsigned n)
-{
-  s->code.stacksize += n;
-  if (s->code.stacksize > s->code.max_stacksize)
-    s->code.max_stacksize = s->code.stacksize;
-}
-
-void cg_pop(struct cg_state *s, unsigned n)
-{
-  assert(s->code.stacksize >= n);
-  s->code.stacksize -= n;
-}
-
-void cg_push_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
-{
-  cg_op(s, opcode, arg);
-  cg_push(s, 1);
-}
-
-void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg)
-{
-  cg_op(s, opcode, arg);
-  cg_pop(s, 1);
 }
 
 unsigned cg_register_unique_object(struct cg_state *s, union object *object)

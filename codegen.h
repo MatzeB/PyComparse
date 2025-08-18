@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "opcodes.h"
+
 struct basic_block;
 struct cg_state;
 struct diagnostics_state;
@@ -29,9 +31,9 @@ struct symbol_info *cg_new_symbol_info(struct cg_state *s,
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
 
-void cg_op(struct cg_state *s, uint8_t opcoode, uint32_t arg);
-void cg_push_op(struct cg_state *s, uint8_t opcode, uint32_t arg);
-void cg_pop_op(struct cg_state *s, uint8_t opcode, uint32_t arg);
+void cg_op(struct cg_state *s, enum opcode opcoode, uint32_t arg);
+void cg_push_op(struct cg_state *s, enum opcode opcode, uint32_t arg);
+void cg_pop_op(struct cg_state *s, enum opcode opcode, uint32_t arg);
 
 struct basic_block *cg_allocate_block(struct cg_state *s);
 

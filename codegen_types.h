@@ -19,9 +19,13 @@ struct basic_block {
   uint8_t                      jump_opcode;
   uint8_t                      jump_size;
   uint8_t                      default_jump_size;
+  bool                         jump_backwards : 1;
+  bool                         default_jump_backwards : 1;
   struct basic_block *nullable jump_target;
   struct basic_block *nullable default_target;
   struct basic_block *nullable next;
+  /* offset, jump_size, default_jump_size, default_jump_backwards
+   * only valid during layout / jump relaxation. */
 };
 
 struct loop_state {

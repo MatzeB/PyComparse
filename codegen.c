@@ -169,7 +169,8 @@ static uint8_t opcode_with_parameter_size(uint32_t parameter)
   return 8;
 }
 
-static bool relax_jumps_in_block(struct basic_block *block)
+static bool relax_jumps_in_block(struct basic_block *block,
+                                 unsigned            offset_adjust_forward)
 {
   unsigned offset = block->offset + block->code_length;
 
@@ -179,6 +180,7 @@ static bool relax_jumps_in_block(struct basic_block *block)
     enum opcode jump_opcode = block->jump_opcode;
     unsigned    dest_offset = jump_target->offset;
     if (dest_offset == INVALID_BLOCK_OFFSET) dest_offset = offset + 8;
+    if (!block->jump_backwards) dest_offset += offset_adjust_forward;
 
     uint8_t old_jump_size = block->jump_size;
 
@@ -201,9 +203,10 @@ static bool relax_jumps_in_block(struct basic_block *block)
   }
 
   struct basic_block *default_target = block->default_target;
-  if (default_target != NULL && default_target != block->next) {
+  if (default_target != NULL) {
     unsigned dest_offset = default_target->offset;
     if (dest_offset == INVALID_BLOCK_OFFSET) dest_offset = offset + 8;
+    if (!block->default_jump_backwards) dest_offset += offset_adjust_forward;
 
     uint8_t old_default_jump_size = block->default_jump_size;
 
@@ -211,7 +214,7 @@ static bool relax_jumps_in_block(struct basic_block *block)
      * shorter to encode; JUMP_FORWARD does not work for backward jumps. */
     uint32_t parameter_abs = dest_offset;
     uint8_t  default_jump_size = opcode_with_parameter_size(parameter_abs);
-    if (dest_offset > offset) {
+    if (!block->default_jump_backwards) {
       uint32_t parameter_rel
           = dest_offset - offset
             - (old_default_jump_size > 0 ? old_default_jump_size : 2);
@@ -264,15 +267,32 @@ union object *cg_code_end(struct cg_state *s, const char *name)
         jump_target = skipped_target;
         block->jump_target = jump_target;
       }
+      /* we iterate forward and assign offsets, to if target alread has an
+       * offset assigned, it must be a backwards jump. */
+      if (jump_target->offset != INVALID_BLOCK_OFFSET) {
+        block->jump_backwards = true;
+      }
     }
 
     struct basic_block *default_target = block->default_target;
-    if (default_target != NULL && default_target != next) {
+
+    if (default_target != NULL) {
       default_target = skip_empty_blocks(default_target);
       block->default_target = default_target;
+      if (default_target == next) {
+        default_target = NULL;
+        block->default_target = NULL;
+      }
+
+      /* we iterate forward and assign offsets, to if target alread has an
+       * offset assigned, it must be a backwards jump. */
+      if (default_target != NULL
+          && default_target->offset != INVALID_BLOCK_OFFSET) {
+        block->default_jump_backwards = true;
+      }
     }
 
-    relax_jumps_in_block(block);
+    relax_jumps_in_block(block, /*offset_adjust_forward=*/0);
     offset += block->code_length + block->jump_size + block->default_jump_size;
   }
 
@@ -285,12 +305,14 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     unsigned offset = 0;
     for (struct basic_block *block = first_block; block != NULL;
          block = block->next) {
+      unsigned offset_adjust_forward = 0;
       if (block->offset != offset) {
         assert(offset > block->offset);
+        offset_adjust_forward = offset - block->offset;
         block->offset = offset;
         changed = true;
       }
-      changed |= relax_jumps_in_block(block);
+      changed |= relax_jumps_in_block(block, offset_adjust_forward);
       offset
           += block->code_length + block->jump_size + block->default_jump_size;
     }
@@ -329,7 +351,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
       offset += jump_size;
     }
     struct basic_block *default_target = block->default_target;
-    if (default_target != NULL && default_target != next) {
+    if (default_target != NULL) {
       unsigned dest_offset = default_target->offset;
       assert(dest_offset != INVALID_BLOCK_OFFSET);
 
@@ -340,7 +362,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
       uint32_t parameter_abs = dest_offset;
       uint32_t parameter_rel = 0;
       uint8_t  jump_size_abs = opcode_with_parameter_size(parameter_abs);
-      if (dest_offset > offset) {
+      if (!block->default_jump_backwards) {
         parameter_rel = dest_offset - offset - default_jump_size;
         uint8_t jump_size_rel = opcode_with_parameter_size(parameter_rel);
         if (jump_size_rel < jump_size_abs) {

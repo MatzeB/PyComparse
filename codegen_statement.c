@@ -16,6 +16,7 @@
 #include "symbol_info_types.h"
 #include "symbol_table.h"
 #include "symbol_types.h"
+#include "util.h"
 
 static void emit_condjump_expr(struct cg_state      *s,
                                union ast_expression *expression,
@@ -157,7 +158,7 @@ static unsigned register_dotted_name(struct cg_state    *s,
 
 void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
                                 struct dotted_name *module, unsigned num_pairs,
-                                struct from_import_pair *pairs)
+                                struct from_import_item *items)
 {
   if (unreachable(s)) return;
   unsigned module_name = module != NULL ? register_dotted_name(s, module)
@@ -173,9 +174,9 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
   } else {
     name_tuple = object_new_tuple_begin(arena, num_pairs);
     for (unsigned i = 0; i < num_pairs; i++) {
-      struct from_import_pair *pair = &pairs[i];
+      struct from_import_item *item = &items[i];
       union object            *name
-          = object_intern_cstring(&s->objects, pair->name->string);
+          = object_intern_cstring(&s->objects, item->name->string);
       object_new_tuple_set_at(name_tuple, i, name);
     }
   }
@@ -188,9 +189,9 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
     cg_pop_op(s, OPCODE_IMPORT_STAR, 0);
   } else {
     for (unsigned i = 0; i < num_pairs; i++) {
-      struct from_import_pair *pair = &pairs[i];
-      struct symbol           *name = pair->name;
-      struct symbol           *as = pair->as != NULL ? pair->as : name;
+      struct from_import_item *item = &items[i];
+      struct symbol           *name = item->name;
+      struct symbol           *as = item->as != NULL ? item->as : name;
       cg_push_op(s, OPCODE_IMPORT_FROM, cg_register_name(s, name));
       cg_store(s, as);
     }
@@ -245,6 +246,278 @@ void emit_return_statement(struct cg_state      *s,
   }
   cg_pop_op(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
+}
+
+void emit_try_body_begin(struct cg_state *s, struct try_state *state)
+{
+  memset(state, 0, sizeof(*state));
+  if (unreachable(s)) return;
+  state->try_reachable = true;
+
+  struct basic_block *setup_finally = cg_allocate_block(s);
+  struct basic_block *setup_except = cg_allocate_block(s);
+  state->setup_finally = setup_finally;
+  state->setup_except = setup_except;
+
+  cg_jump(s, setup_finally);
+  cg_block_insert_delayed(s, setup_finally);
+  cg_block_insert_delayed(s, setup_except);
+
+  struct basic_block *body = cg_allocate_block(s);
+  cg_block_begin(s, body);
+}
+
+void emit_try_body_end(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+  if (unreachable(s)) return;
+
+  /* if there was an except, then we need to insert a POP_BLOCK here */
+  struct basic_block *body_exit = cg_allocate_block(s);
+  state->body_exit = body_exit;
+
+  cg_jump(s, body_exit);
+  cg_block_insert_delayed(s, body_exit);
+}
+
+void emit_try_except_begin(struct cg_state *s, struct try_state *state,
+                           union ast_expression *match, struct symbol *as)
+{
+  if (!state->try_reachable) return;
+
+  struct basic_block *excepts;
+  if (!state->had_except) {
+    excepts = cg_allocate_block(s);
+
+    struct basic_block *setup_except = state->setup_except;
+    cg_block_begin_delayed(s, setup_except);
+    cg_condjump(s, OPCODE_SETUP_FINALLY,
+                /*target=*/excepts, /*fallthrough=*/setup_except->next);
+    state->setup_except = NULL;
+
+    state->had_except = true;
+  } else {
+    excepts = state->excepts;
+    assert(excepts != NULL);
+  }
+
+  cg_block_begin(s, excepts);
+  cg_push(s, 3); /* runtime pushes traceback, value, type when entering */
+
+  if (match != NULL) {
+    struct basic_block *excepts_next = cg_allocate_block(s);
+    struct basic_block *except_match = cg_allocate_block(s);
+    cg_push_op(s, OPCODE_DUP_TOP, 0);
+    emit_expression(s, match);
+    cg_pop_op(s, OPCODE_COMPARE_OP, COMPARE_OP_EXC_MATCH);
+    cg_pop(s, 1);
+    cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE,
+                /*target=*/excepts_next, /*fallthrough=*/except_match);
+    state->excepts = excepts_next;
+    cg_block_begin(s, except_match);
+  } else {
+    state->excepts = NULL;
+  }
+
+  cg_pop_op(s, OPCODE_POP_TOP, 0);
+  if (as != NULL) {
+    cg_store(s, as);
+  } else {
+    cg_pop_op(s, OPCODE_POP_TOP, 0);
+  }
+  cg_pop_op(s, OPCODE_POP_TOP, 0);
+  if (as != NULL) {
+    struct basic_block *except_unassign_as = cg_allocate_block(s);
+    struct basic_block *except_body = cg_allocate_block(s);
+    assert(state->except_unassign_as == NULL);
+    state->except_unassign_as = except_unassign_as;
+    cg_condjump(s, OPCODE_SETUP_FINALLY,
+                /*then=*/except_unassign_as,
+                /*fallthrough=*/except_body);
+    cg_block_begin(s, except_body);
+  }
+}
+
+void emit_try_except_end(struct cg_state *s, struct try_state *state,
+                         struct symbol *as)
+{
+  if (!state->try_reachable) return;
+  struct basic_block *except_unassign_as = state->except_unassign_as;
+
+  if (except_unassign_as != NULL) {
+    assert(as != NULL);
+    if (!unreachable(s)) {
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      cg_op(s, OPCODE_BEGIN_FINALLY, 0);
+      cg_jump(s, except_unassign_as);
+    }
+
+    cg_block_begin(s, except_unassign_as);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_store(s, as);
+    cg_delete(s, as);
+    cg_op(s, OPCODE_END_FINALLY, 0);
+    state->except_unassign_as = NULL;
+  } else {
+    if (unreachable(s)) return;
+  }
+  cg_op(s, OPCODE_POP_EXCEPT, 0);
+
+  struct basic_block *enter_finally = state->enter_finally;
+  if (enter_finally == NULL) {
+    enter_finally = cg_allocate_block(s);
+    state->enter_finally = enter_finally;
+  }
+  cg_jump(s, enter_finally);
+}
+
+void emit_try_else_begin(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+  state->had_else = true;
+
+  struct basic_block *else_block = state->else_block;
+  if (else_block == NULL) {
+    else_block = cg_allocate_block(s);
+    state->else_block = else_block;
+  }
+
+  struct basic_block *excepts = state->excepts;
+  if (excepts != NULL) {
+    cg_block_begin(s, excepts);
+    cg_op(s, OPCODE_END_FINALLY, 0);
+    /* END_FINALLY will jump away; no separate jump needed */
+    cg_block_end(s);
+    state->excepts = NULL;
+  }
+
+  cg_block_begin(s, else_block);
+}
+
+void emit_try_else_end(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+
+  if (!unreachable(s)) {
+    struct basic_block *enter_finally = state->enter_finally;
+    if (enter_finally == NULL) {
+      enter_finally = cg_allocate_block(s);
+      state->enter_finally = enter_finally;
+    }
+    cg_jump(s, enter_finally);
+  }
+}
+
+void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+  state->had_finally = true;
+
+  struct basic_block *finally_body = cg_allocate_block(s);
+
+  struct basic_block *setup_finally = state->setup_finally;
+  cg_block_begin_delayed(s, setup_finally);
+  cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_body,
+              /*fallthrough=*/setup_finally->next);
+  cg_push(s, 1);
+
+  struct basic_block *enter_finally = state->enter_finally;
+  struct basic_block *excepts = state->excepts;
+  if (enter_finally == NULL && (state->body_exit != NULL || excepts != NULL)) {
+    enter_finally = cg_allocate_block(s);
+    state->enter_finally = enter_finally;
+  }
+
+  if (excepts != NULL) {
+    cg_block_begin(s, excepts);
+    cg_op(s, OPCODE_END_FINALLY, 0);
+    cg_jump(s, enter_finally);
+    state->excepts = NULL;
+  }
+
+  if (enter_finally != NULL) {
+    cg_block_begin(s, enter_finally);
+    if (state->had_except) {
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+    }
+    cg_op(s, OPCODE_BEGIN_FINALLY, 0);
+    cg_jump(s, finally_body);
+  }
+
+  cg_block_begin(s, finally_body);
+}
+
+void emit_try_finally_end(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+  if (unreachable(s)) return;
+  cg_pop_op(s, OPCODE_END_FINALLY, 0);
+
+  struct basic_block *footer = state->footer;
+  if (footer == NULL) {
+    footer = cg_allocate_block(s);
+    state->footer = footer;
+  }
+  cg_jump(s, footer);
+}
+
+void emit_try_end(struct cg_state *s, struct try_state *state)
+{
+  if (!state->try_reachable) return;
+
+  struct basic_block *footer = state->footer;
+  if (footer == NULL) {
+    footer = cg_allocate_block(s);
+    state->footer = footer;
+  }
+
+  struct basic_block *enter_finally = state->enter_finally;
+
+  if (state->had_except) {
+    struct basic_block *excepts = state->excepts;
+    if (excepts != NULL) {
+      if (footer == NULL) {
+        footer = cg_allocate_block(s);
+      }
+      cg_block_begin(s, excepts);
+      cg_op(s, OPCODE_END_FINALLY, 0);
+      cg_jump(s, footer);
+    }
+  } else {
+    struct basic_block *setup_except = state->setup_except;
+    struct basic_block *setup_except_next = state->setup_except->next;
+    assert(setup_except_next != NULL);
+    cg_block_begin_delayed(s, setup_except);
+    cg_jump(s, setup_except_next);
+  }
+
+  if (!state->had_finally) {
+    struct basic_block *setup_finally = state->setup_finally;
+    struct basic_block *setup_finally_next = state->setup_finally->next;
+    assert(setup_finally_next != NULL);
+    cg_block_begin_delayed(s, setup_finally);
+    cg_jump(s, setup_finally_next);
+
+    if (enter_finally != NULL) {
+      cg_block_begin(s, enter_finally);
+      cg_jump(s, footer);
+    }
+  }
+
+  struct basic_block *body_exit = state->body_exit;
+  if (body_exit != NULL) {
+    struct basic_block *body_exit_target = footer;
+    if (state->had_else) {
+      body_exit_target = state->else_block;
+    } else if (state->had_finally) {
+      body_exit_target = enter_finally;
+    }
+    cg_block_begin_delayed(s, body_exit);
+    cg_op(s, OPCODE_POP_BLOCK, 0);
+    cg_jump(s, body_exit_target);
+  }
+
+  cg_block_begin(s, footer);
 }
 
 void emit_if_begin(struct cg_state *s, struct if_state *state,
@@ -596,7 +869,7 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) {
-    abort(); /* TODO: unreachable def-statement... */
+    unimplemented(); /* TODO: unreachable def-statement... */
   }
 
   emit_parameter_defaults(s, state, num_parameters, parameters);
@@ -710,8 +983,8 @@ static void emit_generator_expression_part(
 
   emit_expression(s, part->expression);
   struct basic_block *loop_header = s->code.loop_state.continue_block;
-  cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
   cg_pop(s, 1);
+  cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
   cg_block_begin(s, false_block);
 
   emit_generator_expression_part(s, generator_expression, part_index + 1);

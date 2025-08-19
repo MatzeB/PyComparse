@@ -43,8 +43,11 @@ void cg_block_begin(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_block_end(struct cg_state *s);
 bool                cg_in_block(struct cg_state *s);
 void                cg_condjump(struct cg_state *s, enum opcode opcode,
-                                struct basic_block *target, struct basic_block *fallthrough);
+                                struct basic_block          *target,
+                                struct basic_block *nullable fallthrough);
 void                cg_jump(struct cg_state *s, struct basic_block *target);
+void cg_block_insert_delayed(struct cg_state *s, struct basic_block *block);
+void cg_block_begin_delayed(struct cg_state *s, struct basic_block *block);
 
 void          cg_code_begin(struct cg_state *s, bool use_locals);
 union object *cg_code_end(struct cg_state *s, const char *name);
@@ -60,5 +63,6 @@ void cg_free(struct cg_state *s);
 
 void cg_load(struct cg_state *s, struct symbol *symbol);
 void cg_store(struct cg_state *s, struct symbol *symbol);
+void cg_delete(struct cg_state *s, struct symbol *symbol);
 
 ASSUME_NONNULL_END

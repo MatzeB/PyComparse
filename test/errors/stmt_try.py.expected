@@ -1,0 +1,5 @@
+test/errors/stmt_try.py:3 error: 'try' with 'else' requires prior 'except'
+test/errors/stmt_try.py:8 error: 'try' with 'else' requires prior 'except'
+test/errors/stmt_try.py:17 error: 'else' must come before 'finally'
+test/errors/stmt_try.py:26 error: 'else' must come before 'finally'
+test/errors/stmt_try.py:33 error: 'except' must come before 'finally'

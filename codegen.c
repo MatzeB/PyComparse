@@ -14,6 +14,8 @@
 
 #define INVALID_BLOCK_OFFSET (~0u)
 
+#define DELAYED_BLOCK_MARKER (~0u)
+
 struct saved_symbol_info {
   struct symbol     *symbol;
   struct symbol_info info;
@@ -101,15 +103,39 @@ struct basic_block *cg_block_end(struct cg_state *s)
 {
   struct basic_block *block = s->code.current_block;
   s->code.current_block = NULL;
-  s->code.last_block = block;
+  if (block->code_length != DELAYED_BLOCK_MARKER) {
+    s->code.last_block = block;
+  }
 
   block->code_length = arena_grow_current_size(&s->code.opcodes);
   block->code_bytes = arena_grow_finish(&s->code.opcodes);
   return block;
 }
 
+void cg_block_insert_delayed(struct cg_state *s, struct basic_block *block)
+{
+  assert(s->code.current_block == NULL);
+  struct basic_block *last_block = s->code.last_block;
+  if (last_block != NULL) {
+    assert(last_block->next == NULL);
+    last_block->next = block;
+  }
+  s->code.last_block = block;
+  block->code_length = DELAYED_BLOCK_MARKER;
+}
+
+void cg_block_begin_delayed(struct cg_state *s, struct basic_block *block)
+{
+  assert(block->code_length == DELAYED_BLOCK_MARKER
+         && block->code_bytes == NULL);
+  assert(s->code.current_block == NULL);
+  s->code.current_block = block;
+  arena_grow_begin(&s->code.opcodes, /*alignment=*/1);
+}
+
 void cg_condjump(struct cg_state *s, enum opcode opcode,
-                 struct basic_block *target, struct basic_block *fallthrough)
+                 struct basic_block          *target,
+                 struct basic_block *nullable fallthrough)
 {
   struct basic_block *block = cg_block_end(s);
   assert(block->jump_opcode == 0 && block->jump_target == NULL);
@@ -166,16 +192,6 @@ static void pop_symbol_infos(struct cg_state *s)
     memcpy(&symbol->info, &saved->info, sizeof(symbol->info));
     stack_pop(&s->stack, sizeof(*saved));
   }
-}
-
-static struct basic_block *skip_empty_blocks(struct basic_block *target)
-{
-  while (target->code_length == 0 && target->jump_opcode == 0) {
-    struct basic_block *default_target = target->default_target;
-    if (default_target == NULL) break;
-    target = default_target;
-  }
-  return target;
 }
 
 static uint8_t opcode_with_parameter_size(uint32_t parameter)
@@ -252,6 +268,16 @@ static bool relax_jumps_in_block(struct basic_block *block,
   return jump_size_increased;
 }
 
+static struct basic_block *skip_empty_blocks(struct basic_block *target)
+{
+  while (target->code_length == 0 && target->jump_opcode == 0) {
+    struct basic_block *default_target = target->default_target;
+    if (default_target == NULL) break;
+    target = default_target;
+  }
+  return target;
+}
+
 union object *cg_code_end(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
@@ -295,11 +321,16 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
     if (default_target != NULL) {
       default_target = skip_empty_blocks(default_target);
-      block->default_target = default_target;
-      if (default_target == next) {
-        default_target = NULL;
-        block->default_target = NULL;
+      struct basic_block *next_skip = next;
+      while (next_skip->next != NULL && next_skip->code_length == 0
+             && next_skip->jump_target == NULL
+             && next_skip->default_target == next_skip->next) {
+        next_skip = next_skip->next;
       }
+      if (default_target == next_skip) {
+        default_target = NULL;
+      }
+      block->default_target = default_target;
 
       /* we iterate forward and assign offsets, to if target alread has an
        * offset assigned, it must be a backwards jump. */
@@ -602,6 +633,35 @@ void cg_store(struct cg_state *s, struct symbol *symbol)
     return;
   case SYMBOL_LOCAL:
     cg_pop_op(s, OPCODE_STORE_FAST, info->index);
+    return;
+  }
+  fprintf(stderr, "invalid symbol_info type\n");
+  abort();
+}
+
+void cg_delete(struct cg_state *s, struct symbol *symbol)
+{
+  struct symbol_info *info = cg_symbol_info(s, symbol);
+  if (info == NULL) {
+    info = cg_new_symbol_info(s, symbol);
+    if (cg_use_locals(s)) {
+      info->type = SYMBOL_LOCAL;
+      info->index = cg_append_varname(s, symbol);
+    } else {
+      info->type = SYMBOL_NAME;
+      info->index = cg_register_name(s, symbol);
+    }
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_NAME:
+    cg_op(s, OPCODE_DELETE_NAME, info->index);
+    return;
+  case SYMBOL_GLOBAL:
+    cg_op(s, OPCODE_DELETE_GLOBAL, info->index);
+    return;
+  case SYMBOL_LOCAL:
+    cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
   }
   fprintf(stderr, "invalid symbol_info type\n");

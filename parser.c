@@ -149,6 +149,9 @@ static void eat_until_matching_token(struct parser_state *s,
   case '[':
     end_token_kind = ']';
     break;
+  case T_INDENT:
+    end_token_kind = T_DEDENT;
+    break;
   default:
     end_token_kind = token_kind;
     break;
@@ -157,6 +160,7 @@ static void eat_until_matching_token(struct parser_state *s,
   unsigned parenthesis_count = 0;
   unsigned brace_count = 0;
   unsigned bracket_count = 0;
+  unsigned indent_count = 0;
   while (peek(s) != end_token_kind || parenthesis_count != 0
          || brace_count != 0 || bracket_count != 0) {
     switch (peek(s)) {
@@ -171,20 +175,26 @@ static void eat_until_matching_token(struct parser_state *s,
     case '[':
       ++bracket_count;
       break;
+    case T_INDENT:
+      ++indent_count;
+      break;
 
     case ')':
       if (parenthesis_count > 0) --parenthesis_count;
       goto check_stop;
-
     case '}':
       if (brace_count > 0) --brace_count;
       goto check_stop;
-
     case ']':
       if (bracket_count > 0) --bracket_count;
+      goto check_stop;
+    case T_DEDENT:
+      if (indent_count > 0) --indent_count;
+      goto check_stop;
+
     check_stop:
       if (peek(s) == end_token_kind && parenthesis_count == 0
-          && brace_count == 0 && bracket_count == 0)
+          && brace_count == 0 && bracket_count == 0 && indent_count == 0)
         return;
       break;
     default:
@@ -199,6 +209,19 @@ static void eat_until_anchor(struct parser_state *s)
   while (s->anchor_set[peek(s)] == 0) {
     if (peek(s) == '(' || peek(s) == '{' || peek(s) == '[')
       eat_until_matching_token(s, peek(s));
+    if (peek(s) == ':') {
+      next_token(s);
+      if (accept(s, T_NEWLINE)) {
+        if (peek(s) == T_INDENT) {
+          eat_until_matching_token(s, peek(s));
+          next_token(s);
+          if (s->anchor_set[T_NEWLINE] != 0) {
+            break;
+          }
+        }
+      }
+      continue;
+    }
     next_token(s);
   }
 }
@@ -1320,7 +1343,7 @@ static void parse_from_import_statement(struct parser_state *s)
     module = parse_dotted_name(s);
   }
 
-  struct from_import_pair inline_storage[16];
+  struct from_import_item inline_storage[16];
   struct idynarray        pairs;
   idynarray_init(&pairs, inline_storage, sizeof(inline_storage));
 
@@ -1347,10 +1370,10 @@ static void parse_from_import_statement(struct parser_state *s)
         as = symbol_invalid(s);
       }
     }
-    struct from_import_pair *pair
-        = idynarray_append(&pairs, struct from_import_pair);
-    pair->name = name;
-    pair->as = as;
+    struct from_import_item *item
+        = idynarray_append(&pairs, struct from_import_item);
+    item->name = name;
+    item->as = as;
 
     if (!accept(s, ',')) break;
     if (braced && peek(s) == ')') break;
@@ -1358,7 +1381,7 @@ static void parse_from_import_statement(struct parser_state *s)
 
   if (braced) expect(s, ')');
 
-  unsigned num_pairs = idynarray_length(&pairs, struct from_import_pair);
+  unsigned num_pairs = idynarray_length(&pairs, struct from_import_item);
   emit_from_import_statement(&s->cg, num_prefix_dots, module, num_pairs,
                              idynarray_data(&pairs));
 }
@@ -1725,6 +1748,73 @@ static void parse_if(struct parser_state *s)
   emit_if_end(&s->cg, &state);
 }
 
+static void parse_try(struct parser_state *s)
+{
+  eat(s, T_try);
+  expect(s, ':');
+
+  struct try_state state;
+  emit_try_body_begin(&s->cg, &state);
+  parse_suite(s);
+  emit_try_body_end(&s->cg, &state);
+
+  bool had_except = false;
+  while (accept(s, T_except)) {
+    union ast_expression *match = NULL;
+    struct symbol        *as = NULL;
+    if (peek(s) != ':') {
+      match = parse_expression(s, PREC_TEST);
+      if (accept(s, T_as) && skip_till(s, T_IDENTIFIER)) {
+        as = eat_identifier(s);
+      }
+    }
+    expect(s, ':');
+
+    emit_try_except_begin(&s->cg, &state, match, as);
+    parse_suite(s);
+    emit_try_except_end(&s->cg, &state, as);
+    had_except = true;
+  }
+
+  if (accept(s, T_else)) {
+    if (!had_except) {
+      diag_begin_error(&s->d, scanner_location(&s->scanner));
+      diag_token_kind(&s->d, T_try);
+      diag_frag(&s->d, " with ");
+      diag_token_kind(&s->d, T_else);
+      diag_frag(&s->d, " requires prior ");
+      diag_token_kind(&s->d, T_except);
+      diag_end(&s->d);
+    }
+    expect(s, ':');
+
+    emit_try_else_begin(&s->cg, &state);
+    parse_suite(s);
+    emit_try_else_end(&s->cg, &state);
+  }
+
+  if (accept(s, T_finally)) {
+    expect(s, ':');
+
+    emit_try_finally_begin(&s->cg, &state);
+    parse_suite(s);
+    emit_try_finally_end(&s->cg, &state);
+  }
+
+  while (peek(s) == T_except || peek(s) == T_else) {
+    diag_begin_error(&s->d, scanner_location(&s->scanner));
+    diag_token_kind(&s->d, peek(s));
+    diag_frag(&s->d, " must come before ");
+    diag_token_kind(&s->d, T_finally);
+    diag_end(&s->d);
+    next_token(s);
+
+    eat_until_anchor(s);
+  }
+
+  emit_try_end(&s->cg, &state);
+}
+
 static void parse_while(struct parser_state *s)
 {
   eat(s, T_while);
@@ -1796,6 +1886,9 @@ static void parse_statement(struct parser_state *s)
     break;
   case T_if:
     parse_if(s);
+    break;
+  case T_try:
+    parse_try(s);
     break;
   case T_while:
     parse_while(s);

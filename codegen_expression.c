@@ -74,11 +74,10 @@ static void emit_binexpr_logical(struct cg_state    *s,
   cg_pop(s, 1);
   assert(opcode == OPCODE_JUMP_IF_TRUE_OR_POP
          || opcode == OPCODE_JUMP_IF_FALSE_OR_POP);
-  emit_condjump(s, opcode, /*target=*/target,
-                /*fallthrough=*/fallthrough);
+  cg_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
   cg_block_begin(s, fallthrough);
   emit_expression(s, binexpr->right);
-  emit_jump(s, target);
+  cg_jump(s, target);
   cg_block_begin(s, target);
 }
 

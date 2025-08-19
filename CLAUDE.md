@@ -8,13 +8,10 @@ PyParse is a Python bytecode compiler implemented in C. It consists of a scanner
 
 ## Build System
 
-This project uses CMake for building:
+This project uses CMake and Ninja for building:
 
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make
+ninja -C build
 ```
 
 The build produces three main executables:
@@ -31,20 +28,18 @@ mkdir -p build && cd build && cmake .. && make
 
 ### Testing
 ```bash
-./test.sh
+uv run ./test.sh
 ```
 This script runs the parser against test files in `test/` and compares output with reference Python execution. It also tests error cases in `test/errors/` and verifies expected error messages.
 
 ### Code Quality
 ```bash
 ./scripts/format.sh    # Format all C source files with clang-format
-./scripts/lint.sh      # Run clang-tidy static analysis
 ```
 
 ### Running Individual Tests
 ```bash
-build/parser_test test/simple.py > output.pyc
-python3 output.pyc
+build/parser_test test/simple.py > /tmp/output.pyc && uv run python /tmp/output.pyc
 ```
 
 ## Architecture

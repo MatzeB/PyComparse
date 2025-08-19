@@ -10,8 +10,6 @@ ASSUME_NONNULL_BEGIN
 
 struct basic_block;
 struct cg_state;
-struct diagnostics_state;
-struct name_info;
 struct symbol;
 struct symbol_table;
 union object;
@@ -44,6 +42,9 @@ struct basic_block *cg_allocate_block(struct cg_state *s);
 void cg_block_begin(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_block_end(struct cg_state *s);
 bool                cg_in_block(struct cg_state *s);
+void                cg_condjump(struct cg_state *s, enum opcode opcode,
+                                struct basic_block *target, struct basic_block *fallthrough);
+void                cg_jump(struct cg_state *s, struct basic_block *target);
 
 void          cg_code_begin(struct cg_state *s, bool use_locals);
 union object *cg_code_end(struct cg_state *s, const char *name);

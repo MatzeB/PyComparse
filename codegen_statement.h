@@ -8,7 +8,6 @@
 
 ASSUME_NONNULL_BEGIN
 
-struct argument;
 struct ast_call;
 struct ast_generator_expression;
 struct basic_block;
@@ -47,6 +46,16 @@ struct parameter {
 struct def_state {
   bool defaults;
   bool keyword_defaults;
+};
+
+struct dotted_name {
+  unsigned               num_symbols;
+  struct symbol *nonnull symbols[];
+};
+
+struct from_import_pair {
+  struct symbol          *name;
+  struct symbol *nullable as;
 };
 
 void          emit_module_begin(struct cg_state *s);
@@ -106,11 +115,6 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
                     unsigned positional_only_argcount);
 void emit_def_end(struct cg_state *s, struct def_state *state,
                   struct symbol *symbol, unsigned num_decorators);
-
-void emit_condjump(struct cg_state *s, enum opcode opcode,
-                   struct basic_block *target,
-                   struct basic_block *fallthrough);
-void emit_jump(struct cg_state *s, struct basic_block *target);
 
 void emit_code_end(struct cg_state *s);
 

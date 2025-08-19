@@ -1377,7 +1377,12 @@ static void parse_import_statement(struct parser_state *s)
   } while (accept(s, ','));
 }
 
-static void parse_return_statement(struct parser_state *s)
+static void parse_pass(struct parser_state *s)
+{
+  eat(s, T_pass);
+}
+
+static void parse_return(struct parser_state *s)
 {
   eat(s, T_return);
 
@@ -1412,10 +1417,10 @@ static void parse_small_statement(struct parser_state *s)
     parse_import_statement(s);
     break;
   case T_pass:
-    eat(s, T_pass);
+    parse_pass(s);
     break;
   case T_return:
-    parse_return_statement(s);
+    parse_return(s);
     break;
   default:
     error_expected(s, "statement");
@@ -1450,60 +1455,6 @@ static void parse_suite(struct parser_state *s)
     parse_simple_statement(s);
     assert(s->cg.code.stacksize == prev_stacksize);
   }
-}
-
-static void parse_if(struct parser_state *s)
-{
-  eat(s, T_if);
-  union ast_expression *expression = parse_expression(s, PREC_TEST);
-  expect(s, ':');
-
-  struct if_state state;
-  emit_if_begin(&s->cg, &state, expression);
-
-  parse_suite(s);
-
-  while (accept(s, T_elif)) {
-    union ast_expression *expression = parse_expression(s, PREC_TEST);
-    expect(s, ':');
-
-    emit_if_elif(&s->cg, &state, expression);
-    parse_suite(s);
-  }
-
-  if (accept(s, T_else)) {
-    expect(s, ':');
-
-    emit_if_else(&s->cg, &state);
-    parse_suite(s);
-  }
-  emit_if_end(&s->cg, &state);
-}
-
-static void parse_for(struct parser_state *s)
-{
-  eat(s, T_for);
-  union ast_expression *target = parse_expression(s, PREC_OR);
-  if (peek(s) == ',') {
-    target = parse_expression_list_helper(s, AST_EXPRESSION_LIST, target,
-                                          PREC_OR, /*allow_slices=*/false);
-  }
-  expect(s, T_in);
-  union ast_expression *expression = parse_expression(s, PREC_TEST);
-  expect(s, ':');
-
-  struct for_while_state state;
-  emit_for_begin(&s->cg, &state, target, expression);
-
-  parse_suite(s);
-
-  emit_for_else(&s->cg, &state);
-  if (accept(s, T_else)) {
-    expect(s, ':');
-    parse_suite(s);
-  }
-
-  emit_for_end(&s->cg, &state);
 }
 
 static void parse_type_parameters(struct parser_state *s)
@@ -1720,6 +1671,80 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
   }
 }
 
+static void parse_for(struct parser_state *s)
+{
+  eat(s, T_for);
+  union ast_expression *target = parse_expression(s, PREC_OR);
+  if (peek(s) == ',') {
+    target = parse_expression_list_helper(s, AST_EXPRESSION_LIST, target,
+                                          PREC_OR, /*allow_slices=*/false);
+  }
+  expect(s, T_in);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
+  expect(s, ':');
+
+  struct for_while_state state;
+  emit_for_begin(&s->cg, &state, target, expression);
+
+  parse_suite(s);
+
+  emit_for_else(&s->cg, &state);
+  if (accept(s, T_else)) {
+    expect(s, ':');
+    parse_suite(s);
+  }
+
+  emit_for_end(&s->cg, &state);
+}
+
+static void parse_if(struct parser_state *s)
+{
+  eat(s, T_if);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
+  expect(s, ':');
+
+  struct if_state state;
+  emit_if_begin(&s->cg, &state, expression);
+
+  parse_suite(s);
+
+  while (accept(s, T_elif)) {
+    union ast_expression *expression = parse_expression(s, PREC_TEST);
+    expect(s, ':');
+
+    emit_if_elif(&s->cg, &state, expression);
+    parse_suite(s);
+  }
+
+  if (accept(s, T_else)) {
+    expect(s, ':');
+
+    emit_if_else(&s->cg, &state);
+    parse_suite(s);
+  }
+  emit_if_end(&s->cg, &state);
+}
+
+static void parse_while(struct parser_state *s)
+{
+  eat(s, T_while);
+  union ast_expression *expression = parse_expression(s, PREC_TEST);
+  expect(s, ':');
+
+  struct for_while_state state;
+  emit_while_begin(&s->cg, &state, expression);
+
+  parse_suite(s);
+
+  emit_while_else(&s->cg, &state);
+  if (accept(s, T_else)) {
+    expect(s, ':');
+    parse_suite(s);
+  }
+
+  emit_while_end(&s->cg, &state);
+}
+
 static void parse_with(struct parser_state *s)
 {
   eat(s, T_with);
@@ -1751,26 +1776,6 @@ static void parse_with(struct parser_state *s)
     emit_with_end(&s->cg, &cleanup_blocks_arr[i]);
   }
   idynarray_free(&cleanup_blocks);
-}
-
-static void parse_while(struct parser_state *s)
-{
-  eat(s, T_while);
-  union ast_expression *expression = parse_expression(s, PREC_TEST);
-  expect(s, ':');
-
-  struct for_while_state state;
-  emit_while_begin(&s->cg, &state, expression);
-
-  parse_suite(s);
-
-  emit_while_else(&s->cg, &state);
-  if (accept(s, T_else)) {
-    expect(s, ':');
-    parse_suite(s);
-  }
-
-  emit_while_end(&s->cg, &state);
 }
 
 static void parse_statement(struct parser_state *s)

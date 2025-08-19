@@ -108,6 +108,23 @@ struct basic_block *cg_block_end(struct cg_state *s)
   return block;
 }
 
+void cg_condjump(struct cg_state *s, enum opcode opcode,
+                 struct basic_block *target, struct basic_block *fallthrough)
+{
+  struct basic_block *block = cg_block_end(s);
+  assert(block->jump_opcode == 0 && block->jump_target == NULL);
+  block->jump_opcode = opcode;
+  block->jump_target = target;
+  block->default_target = fallthrough;
+}
+
+void cg_jump(struct cg_state *s, struct basic_block *target)
+{
+  struct basic_block *block = cg_block_end(s);
+  assert(block->jump_opcode == 0 && block->jump_target == NULL);
+  block->default_target = target;
+}
+
 bool cg_in_block(struct cg_state *s)
 {
   return s->code.current_block != NULL;

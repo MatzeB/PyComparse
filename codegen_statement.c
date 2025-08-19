@@ -17,23 +17,6 @@
 #include "symbol_table.h"
 #include "symbol_types.h"
 
-void emit_condjump(struct cg_state *s, enum opcode opcode,
-                   struct basic_block *target, struct basic_block *fallthrough)
-{
-  struct basic_block *block = cg_block_end(s);
-  assert(block->jump_opcode == 0 && block->jump_target == NULL);
-  block->jump_opcode = opcode;
-  block->jump_target = target;
-  block->default_target = fallthrough;
-}
-
-void emit_jump(struct cg_state *s, struct basic_block *target)
-{
-  struct basic_block *block = cg_block_end(s);
-  assert(block->jump_opcode == 0 && block->jump_target == NULL);
-  block->default_target = target;
-}
-
 static void emit_condjump_expr(struct cg_state      *s,
                                union ast_expression *expression,
                                struct basic_block   *true_block,
@@ -84,7 +67,7 @@ static void emit_condjump_expr(struct cg_state      *s,
       fallthrough = false_block;
     }
     cg_pop(s, 1);
-    emit_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
+    cg_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
     return;
   }
 }
@@ -295,7 +278,7 @@ void emit_if_elif(struct cg_state *s, struct if_state *state,
     state->footer = footer;
   }
   if (!unreachable(s)) {
-    emit_jump(s, footer);
+    cg_jump(s, footer);
   }
 
   struct basic_block *new_else = cg_allocate_block(s);
@@ -319,7 +302,7 @@ void emit_if_else(struct cg_state *s, struct if_state *state)
   }
   state->else_or_footer = NULL;
   if (!unreachable(s)) {
-    emit_jump(s, footer);
+    cg_jump(s, footer);
   }
 
   cg_block_begin(s, else_block);
@@ -332,12 +315,12 @@ void emit_if_end(struct cg_state *s, struct if_state *state)
   if (footer == NULL) footer = else_or_footer;
   if (footer == NULL) return;
   if (!unreachable(s)) {
-    emit_jump(s, footer);
+    cg_jump(s, footer);
   }
 
   if (else_or_footer != NULL && else_or_footer != footer) {
     cg_block_begin(s, else_or_footer);
-    emit_jump(s, footer);
+    cg_jump(s, footer);
   }
 
   cg_block_begin(s, footer);
@@ -352,10 +335,10 @@ static void emit_for_begin_impl(struct cg_state        *s,
   struct basic_block *else_block = cg_allocate_block(s);
   struct basic_block *body = cg_allocate_block(s);
 
-  emit_jump(s, header);
+  cg_jump(s, header);
 
   cg_block_begin(s, header);
-  emit_condjump(s, OPCODE_FOR_ITER, else_block, body);
+  cg_condjump(s, OPCODE_FOR_ITER, else_block, body);
   cg_push(s, 1);
 
   cg_block_begin(s, body);
@@ -392,7 +375,7 @@ static void emit_loop_else(struct cg_state *s, struct for_while_state *state)
   struct basic_block *header = s->code.loop_state.continue_block;
   s->code.loop_state = state->saved;
   if (!unreachable(s)) {
-    emit_jump(s, header);
+    cg_jump(s, header);
   }
 
   cg_block_begin(s, else_block);
@@ -405,7 +388,7 @@ static void emit_loop_end(struct cg_state *s, struct for_while_state *state)
   if (footer == NULL) return;
 
   if (!unreachable(s)) {
-    emit_jump(s, footer);
+    cg_jump(s, footer);
   }
   cg_block_begin(s, footer);
 }
@@ -426,7 +409,7 @@ bool emit_continue(struct cg_state *s)
   struct basic_block *target = s->code.loop_state.continue_block;
   if (target == NULL) return false;
   if (!unreachable(s)) {
-    emit_jump(s, target);
+    cg_jump(s, target);
   }
   return true;
 }
@@ -439,7 +422,7 @@ bool emit_break(struct cg_state *s)
     if (s->code.loop_state.pop_on_break) {
       cg_op(s, OPCODE_POP_TOP, 0);
     }
-    emit_jump(s, target);
+    cg_jump(s, target);
   }
   return true;
 }
@@ -456,7 +439,7 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
   struct basic_block *else_block = cg_allocate_block(s);
   struct basic_block *footer = cg_allocate_block(s);
 
-  emit_jump(s, header);
+  cg_jump(s, header);
   cg_block_begin(s, header);
 
   emit_condjump_expr(s, expression, /*true_block=*/body,
@@ -727,7 +710,7 @@ static void emit_generator_expression_part(
 
   emit_expression(s, part->expression);
   struct basic_block *loop_header = s->code.loop_state.continue_block;
-  emit_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
+  cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE, loop_header, false_block);
   cg_pop(s, 1);
   cg_block_begin(s, false_block);
 
@@ -777,7 +760,7 @@ void emit_with_begin(struct cg_state *s, struct with_state *state,
   state->cleanup = cleanup;
 
   emit_expression(s, expression);
-  emit_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
+  cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
 
   cg_block_begin(s, body);
   if (target != NULL) {
@@ -793,7 +776,7 @@ void emit_with_end(struct cg_state *s, struct with_state *state)
   if (!unreachable(s)) {
     cg_op(s, OPCODE_POP_BLOCK, 0);
     cg_op(s, OPCODE_BEGIN_FINALLY, 0);
-    emit_jump(s, state->cleanup);
+    cg_jump(s, state->cleanup);
   }
 
   cg_block_begin(s, state->cleanup);

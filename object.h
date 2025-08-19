@@ -8,6 +8,7 @@
 ASSUME_NONNULL_BEGIN
 
 struct arena;
+union object;
 
 #define CO_OPTIMIZED          0x0001
 #define CO_NEWLOCALS          0x0002
@@ -52,8 +53,6 @@ enum object_type {
   /* convenience/make up for confusing python names... */
   OBJECT_BYTES = OBJECT_STRING,
 };
-
-union object;
 
 union object *object_new_ascii(struct arena *arena, const char *cstring);
 union object *object_new_singleton(struct arena *arena, enum object_type type);

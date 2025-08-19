@@ -9,7 +9,6 @@ ASSUME_NONNULL_BEGIN
 
 union object;
 struct argument;
-struct parameter;
 
 struct ast_node_base {
   uint8_t type;
@@ -114,16 +113,6 @@ union ast_expression {
   struct ast_identifier           identifier;
   struct ast_slice                slice;
   struct ast_unexpr               unexpr;
-};
-
-struct dotted_name {
-  unsigned               num_symbols;
-  struct symbol *nonnull symbols[];
-};
-
-struct from_import_pair {
-  struct symbol          *name;
-  struct symbol *nullable as;
 };
 
 ASSUME_NONNULL_END

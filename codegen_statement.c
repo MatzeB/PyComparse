@@ -955,6 +955,41 @@ void emit_def_end(struct cg_state *s, struct def_state *state,
   cg_store(s, symbol);
 }
 
+void emit_del(struct cg_state *s, union ast_expression *target)
+{
+  switch (ast_expression_type(target)) {
+  case AST_IDENTIFIER:
+    cg_delete(s, target->identifier.symbol);
+    return;
+  case AST_ATTR: {
+    struct ast_attr *attr = &target->attr;
+    emit_expression(s, attr->expression);
+    unsigned index = cg_register_name(s, attr->symbol);
+    cg_pop_op(s, OPCODE_DELETE_ATTR, index);
+    return;
+  }
+  case AST_BINEXPR_SUBSCRIPT: {
+    struct ast_binexpr *binexpr = &target->binexpr;
+    emit_expression(s, binexpr->left);
+    emit_expression(s, binexpr->right);
+    cg_pop(s, 2);
+    cg_op(s, OPCODE_DELETE_SUBSCR, 0);
+    return;
+  }
+  case AST_EXPRESSION_LIST:
+  case AST_LIST_DISPLAY: {
+    struct ast_expression_list *list = &target->expression_list;
+    unsigned                    num_expressions = list->num_expressions;
+    for (unsigned i = 0; i < num_expressions; i++) {
+      emit_del(s, list->expressions[i]);
+    }
+    return;
+  }
+  default:
+    abort();
+  }
+}
+
 static void emit_generator_expression_part(
     struct cg_state *s, struct ast_generator_expression *generator_expression,
     unsigned part_index)

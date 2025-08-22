@@ -870,7 +870,7 @@ static union ast_expression *parse_and_assign(struct parser_state  *s,
 
 static bool check_assignment_target(struct parser_state  *s,
                                     union ast_expression *expression,
-                                    struct location       location)
+                                    struct location location, bool is_del)
 {
   enum ast_expression_type type = ast_expression_type(expression);
   if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
@@ -881,15 +881,19 @@ static bool check_assignment_target(struct parser_state  *s,
     union ast_expression **expressions
         = expression->expression_list.expressions;
     for (unsigned i = 0; i < num_expressions; i++) {
-      if (check_assignment_target(s, expressions[i], location)) return true;
+      if (check_assignment_target(s, expressions[i], location, is_del)) {
+        return true;
+      }
     }
     return false;
   }
   diag_begin_error(&s->d, location);
-  diag_frag(&s->d, "cannot assign to ");
+  diag_frag(&s->d, is_del ? "cannot delete " : "cannot assign to ");
   diag_expression(&s->d, expression);
-  /* TODO: only show ':=' suggestion where it makes sense like python... */
-  diag_frag(&s->d, ". Maybe you meant '==', or ':=' instead of '='?");
+  if (!is_del) {
+    /* TODO: only show ':=' suggestion where it makes sense like python... */
+    diag_frag(&s->d, ". Maybe you meant '==', or ':=' instead of '='?");
+  }
   diag_end(&s->d);
   return true;
 }
@@ -900,7 +904,7 @@ static union ast_expression *parse_assignment(struct parser_state  *s,
   struct location       location = scanner_location(&s->scanner);
   union ast_expression *expression
       = parse_binexpr(s, PREC_ASSIGN, AST_BINEXPR_ASSIGN, left);
-  if (check_assignment_target(s, left, location)) {
+  if (check_assignment_target(s, left, location, /*is_del=*/false)) {
     expression = ast_invalid(s);
   }
   return expression;
@@ -1306,6 +1310,17 @@ static void parse_continue(struct parser_state *s)
   eat(s, T_continue);
 }
 
+static void parse_del(struct parser_state *s)
+{
+  eat(s, T_del);
+  struct location       location = scanner_location(&s->scanner);
+  union ast_expression *expression = parse_expression(s, PREC_LIST);
+  if (check_assignment_target(s, expression, location, /*is_del=*/true)) {
+    return;
+  }
+  emit_del(&s->cg, expression);
+}
+
 static struct dotted_name *parse_dotted_name(struct parser_state *s)
 {
   arena_grow_begin(&s->ast, alignof(struct dotted_name));
@@ -1444,6 +1459,9 @@ static void parse_small_statement(struct parser_state *s)
     break;
   case T_continue:
     parse_continue(s);
+    break;
+  case T_del:
+    parse_del(s);
     break;
   case T_from:
     parse_from_import_statement(s);

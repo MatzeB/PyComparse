@@ -94,6 +94,8 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
 void emit_def_end(struct cg_state *s, struct def_state *state,
                   struct symbol *symbol, unsigned num_decorators);
 
+void emit_del(struct cg_state *s, union ast_expression *target);
+
 void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression);
 

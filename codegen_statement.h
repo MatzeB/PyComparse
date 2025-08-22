@@ -154,4 +154,8 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
 void emit_while_else(struct cg_state *s, struct for_while_state *state);
 void emit_while_end(struct cg_state *s, struct for_while_state *state);
 
+void emit_yield_statement(struct cg_state *s, union ast_expression *value);
+void emit_yield_from_statement(struct cg_state      *s,
+                               union ast_expression *value);
+
 ASSUME_NONNULL_END

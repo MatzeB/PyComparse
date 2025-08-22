@@ -473,7 +473,8 @@ static union ast_expression *parse_argument_list(struct parser_state  *s,
       struct argument *argument
           = idynarray_append(&arguments, struct argument);
       parse_argument(s, argument);
-      if (ast_expression_type(argument->expression) == AST_UNEXPR_STAR) {
+      enum ast_expression_type type = ast_expression_type(argument->expression);
+      if (type == AST_UNEXPR_STAR || type == AST_UNEXPR_STAR_STAR) {
         has_star_argument = true;
       }
       if (argument->name != NULL) {
@@ -619,11 +620,22 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
 
   add_anchor(s, ')');
   add_anchor(s, ',');
-  union ast_expression *expression = parse_expression(s, PREC_LIST);
 
-  if (peek(s) == T_for) {
-    expression
-        = parse_generator_expression(s, AST_GENERATOR_EXPRESSION, expression);
+  union ast_expression *expression;
+  if (peek(s) == T_yield) {
+    eat(s, T_yield);
+    enum ast_expression_type type
+        = accept(s, T_from) ? AST_UNEXPR_YIELD_FROM : AST_UNEXPR_YIELD;
+    union ast_expression *value = parse_expression(s, PREC_LIST);
+    expression = ast_allocate_expression(s, struct ast_unexpr, type);
+    expression->unexpr.op = value;
+    had_yield(&s->cg);
+  } else {
+    expression = parse_expression(s, PREC_LIST);
+    if (peek(s) == T_for) {
+      expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION,
+                                              expression);
+    }
   }
 
   remove_anchor(s, ',');
@@ -1445,6 +1457,19 @@ static void parse_return(struct parser_state *s)
   emit_return_statement(&s->cg, expression);
 }
 
+static void parse_yield(struct parser_state *s)
+{
+  eat(s, T_yield);
+
+  if (accept(s, T_from)) {
+    union ast_expression *expression = parse_expression(s, PREC_LIST);
+    emit_yield_from_statement(&s->cg, expression);
+  } else {
+    union ast_expression *expression = parse_expression(s, PREC_LIST);
+    emit_yield_statement(&s->cg, expression);
+  }
+}
+
 static void parse_small_statement(struct parser_state *s)
 {
   switch (peek(s)) {
@@ -1477,6 +1502,9 @@ static void parse_small_statement(struct parser_state *s)
     break;
   case T_return:
     parse_return(s);
+    break;
+  case T_yield:
+    parse_yield(s);
     break;
   default:
     error_expected(s, "statement");

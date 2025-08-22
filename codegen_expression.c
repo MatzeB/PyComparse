@@ -518,6 +518,25 @@ static void emit_generator_expression(
   cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
 }
 
+void emit_yield(struct cg_state *s, union ast_expression *value)
+{
+  emit_expression(s, value);
+  cg_op(s, OPCODE_YIELD_VALUE, 0);
+}
+
+void emit_yield_from(struct cg_state *s, union ast_expression *value)
+{
+  emit_expression(s, value);
+  cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
+  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_pop_op(s, OPCODE_YIELD_FROM, 0);
+}
+
+void had_yield(struct cg_state *s)
+{
+  s->code.flags |= CO_GENERATOR;
+}
+
 static void emit_expression_impl(struct cg_state      *s,
                                  union ast_expression *expression, bool drop)
 {
@@ -645,8 +664,14 @@ static void emit_expression_impl(struct cg_state      *s,
     break;
   case AST_UNEXPR_STAR:
   case AST_UNEXPR_STAR_STAR:
-    /* not allow in generic contexts */
+    /* not allowed in generic contexts */
     abort();
+  case AST_UNEXPR_YIELD:
+    emit_yield(s, expression->unexpr.op);
+    break;
+  case AST_UNEXPR_YIELD_FROM:
+    emit_yield_from(s, expression->unexpr.op);
+    break;
   }
 
   if (drop) {

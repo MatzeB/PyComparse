@@ -1405,6 +1405,18 @@ static void parse_pass(struct parser_state *s)
   eat(s, T_pass);
 }
 
+static void parse_raise(struct parser_state *s)
+{
+  eat(s, T_raise);
+
+  union ast_expression *expression = parse_expression(s, PREC_LAMBDA);
+  union ast_expression *from = NULL;
+  if (accept(s, T_from)) {
+    from = parse_expression(s, PREC_LAMBDA);
+  }
+  emit_raise_statement(&s->cg, expression, from);
+}
+
 static void parse_return(struct parser_state *s)
 {
   eat(s, T_return);
@@ -1441,6 +1453,9 @@ static void parse_small_statement(struct parser_state *s)
     break;
   case T_pass:
     parse_pass(s);
+    break;
+  case T_raise:
+    parse_raise(s);
     break;
   case T_return:
     parse_return(s);

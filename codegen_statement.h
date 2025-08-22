@@ -123,17 +123,21 @@ void emit_if_end(struct cg_state *s, struct if_state *state);
 void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as);
 
-void emit_return_statement(struct cg_state      *s,
-                           union ast_expression *expression);
+void emit_raise_statement(struct cg_state *s, union ast_expression *expression,
+                          union ast_expression *nullable from);
+
+void emit_return_statement(struct cg_state               *s,
+                           union ast_expression *nullable expression);
 
 void emit_try_body_begin(struct cg_state *s, struct try_state *state);
 void emit_try_body_end(struct cg_state *s, struct try_state *state);
 void emit_try_else_begin(struct cg_state *s, struct try_state *state);
 void emit_try_else_end(struct cg_state *s, struct try_state *state);
 void emit_try_except_begin(struct cg_state *s, struct try_state *state,
-                           union ast_expression *match, struct symbol *as);
+                           union ast_expression   *match,
+                           struct symbol *nullable as);
 void emit_try_except_end(struct cg_state *s, struct try_state *state,
-                         struct symbol *as);
+                         struct symbol *nullable as);
 void emit_try_finally_begin(struct cg_state *s, struct try_state *state);
 void emit_try_finally_end(struct cg_state *s, struct try_state *state);
 void emit_try_end(struct cg_state *s, struct try_state *state);

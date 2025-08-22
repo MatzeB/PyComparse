@@ -5,7 +5,10 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGUREATION_TYPES)
   set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
 endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-nullability-extension -Wnullable-to-nonnull-conversion -Wno-nullability-completeness")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-nullability-extension -Wnullability-completeness")
+# nullable-to-nonnull-conversion warning is annoying as it is not
+# flow-sensitive. Rather use clang-static-analyzer to check...
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-nullable-to-nonnull-conversion")
 # glibc 2.40 keeps warning about _FORTIFY_SOURCE in -O0 but I somehow cannot
 # remove the define from clang either...
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-#warnings")

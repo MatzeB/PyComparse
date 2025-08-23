@@ -923,6 +923,22 @@ static union ast_expression *parse_assignment(struct parser_state  *s,
   return expression;
 }
 
+static union ast_expression *
+parse_conditional(struct parser_state  *s,
+                  union ast_expression *true_expression)
+{
+  eat(s, T_if);
+  union ast_expression *condition = parse_expression(s, PREC_TEST + 1);
+  expect(s, T_else);
+  union ast_expression *false_expression = parse_expression(s, PREC_TEST);
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_conditional, AST_CONDITIONAL);
+  expression->conditional.condition = condition;
+  expression->conditional.true_expression = true_expression;
+  expression->conditional.false_expression = false_expression;
+  return expression;
+}
+
 static union ast_expression *parse_equal(struct parser_state  *s,
                                          union ast_expression *left)
 {
@@ -1201,6 +1217,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['^']    = { .func = parse_xor,         .precedence = PREC_XOR         },
   ['|']    = { .func = parse_or,          .precedence = PREC_OR          },
   [T_and]  = { .func = parse_logical_and, .precedence = PREC_LOGICAL_AND },
+  [T_if]   = { .func = parse_conditional, .precedence = PREC_TEST        },
   [T_in]   = { .func = parse_in,          .precedence = PREC_COMPARISON  },
   [T_is]   = { .func = parse_is,          .precedence = PREC_COMPARISON  },
   [T_not]  = { .func = parse_not_in,      .precedence = PREC_COMPARISON  },

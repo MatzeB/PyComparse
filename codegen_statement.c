@@ -18,11 +18,10 @@
 #include "symbol_types.h"
 #include "util.h"
 
-static void emit_condjump_expr(struct cg_state      *s,
-                               union ast_expression *expression,
-                               struct basic_block   *true_block,
-                               struct basic_block   *false_block,
-                               struct basic_block   *next)
+void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
+                        struct basic_block *true_block,
+                        struct basic_block *false_block,
+                        struct basic_block *next)
 {
   switch (ast_expression_type(expression)) {
   case AST_UNEXPR_NOT:

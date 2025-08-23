@@ -86,6 +86,11 @@ void emit_class_end(struct cg_state *s, struct symbol *name,
 
 void emit_code_end(struct cg_state *s);
 
+void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
+                        struct basic_block *true_block,
+                        struct basic_block *false_block,
+                        struct basic_block *next);
+
 bool emit_continue(struct cg_state *s);
 
 void emit_def_begin(struct cg_state *s, struct def_state *state,

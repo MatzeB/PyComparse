@@ -40,6 +40,13 @@ struct ast_call {
   struct argument                arguments[];
 };
 
+struct ast_conditional {
+  struct ast_node_base  base;
+  union ast_expression *condition;
+  union ast_expression *true_expression;
+  union ast_expression *false_expression;
+};
+
 struct ast_const {
   struct ast_node_base base;
   union object        *object;
@@ -106,6 +113,7 @@ union ast_expression {
   struct ast_attr                 attr;
   struct ast_binexpr              binexpr;
   struct ast_call                 call;
+  struct ast_conditional          conditional;
   struct ast_const                cnst;
   struct ast_dict_item_list       dict_item_list;
   struct ast_expression_list      expression_list;

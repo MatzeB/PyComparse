@@ -561,6 +561,27 @@ static void emit_call(struct cg_state *s, struct ast_call *call)
   emit_call_helper(s, call, /*num_extra_args=*/0);
 }
 
+static void emit_conditional(struct cg_state        *s,
+                             struct ast_conditional *conditional)
+{
+  struct basic_block *true_block = cg_allocate_block(s);
+  struct basic_block *false_block = cg_allocate_block(s);
+  struct basic_block *footer = cg_allocate_block(s);
+
+  emit_condjump_expr(s, conditional->condition, /*true_block=*/true_block,
+                     /*false_block=*/false_block, /*next=*/true_block);
+  cg_block_begin(s, true_block);
+  emit_expression(s, conditional->true_expression);
+  cg_jump(s, footer);
+  cg_pop(s, 1); /* adjust because we don't track stacksize per block... */
+
+  cg_block_begin(s, false_block);
+  emit_expression(s, conditional->false_expression);
+  cg_jump(s, footer);
+
+  cg_block_begin(s, footer);
+}
+
 static void emit_generator_expression(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
@@ -685,6 +706,9 @@ static void emit_expression_impl(struct cg_state      *s,
     break;
   case AST_CALL:
     emit_call(s, &expression->call);
+    break;
+  case AST_CONDITIONAL:
+    emit_conditional(s, &expression->conditional);
     break;
   case AST_CONST:
   case AST_INVALID:

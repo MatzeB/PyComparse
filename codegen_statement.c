@@ -1109,18 +1109,19 @@ void emit_with_end(struct cg_state *s, struct with_state *state)
   cg_op(s, OPCODE_END_FINALLY, 0);
 }
 
-void emit_yield_statement(struct cg_state *s, union ast_expression *value)
+void emit_yield_statement(struct cg_state *s, union ast_expression *expression)
 {
   s->code.flags |= CO_GENERATOR;
   if (unreachable(s)) return;
-  emit_yield(s, value);
+  emit_yield(s, expression);
   cg_pop_op(s, OPCODE_POP_TOP, 0);
 }
 
-void emit_yield_from_statement(struct cg_state *s, union ast_expression *value)
+void emit_yield_from_statement(struct cg_state      *s,
+                               union ast_expression *expression)
 {
   s->code.flags |= CO_GENERATOR;
   if (unreachable(s)) return;
-  emit_yield_from(s, value);
+  emit_yield_from(s, expression);
   cg_pop_op(s, OPCODE_POP_TOP, 0);
 }

@@ -473,7 +473,8 @@ static union ast_expression *parse_argument_list(struct parser_state  *s,
       struct argument *argument
           = idynarray_append(&arguments, struct argument);
       parse_argument(s, argument);
-      enum ast_expression_type type = ast_expression_type(argument->expression);
+      enum ast_expression_type type
+          = ast_expression_type(argument->expression);
       if (type == AST_UNEXPR_STAR || type == AST_UNEXPR_STAR_STAR) {
         has_star_argument = true;
       }
@@ -580,11 +581,11 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *key = first;
   for (;;) {
     expect(s, ':');
-    union ast_expression *value = parse_expression(s, PREC_LIST + 1);
+    union ast_expression *expression = parse_expression(s, PREC_LIST + 1);
 
     struct dict_item *item = idynarray_append(&items, struct dict_item);
     item->key = key;
-    item->value = value;
+    item->expression = expression;
 
     if (peek(s) == '}' || peek(s) == T_EOF) break;
     expect(s, ',');
@@ -626,9 +627,9 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     eat(s, T_yield);
     enum ast_expression_type type
         = accept(s, T_from) ? AST_UNEXPR_YIELD_FROM : AST_UNEXPR_YIELD;
-    union ast_expression *value = parse_expression(s, PREC_LIST);
+    union ast_expression *yield_expression = parse_expression(s, PREC_LIST);
     expression = ast_allocate_expression(s, struct ast_unexpr, type);
-    expression->unexpr.op = value;
+    expression->unexpr.op = yield_expression;
     had_yield(&s->cg);
   } else {
     expression = parse_expression(s, PREC_LIST);
@@ -1669,7 +1670,8 @@ static void parse_def_parameters(struct parser_state *s,
           diag_end(&s->d);
           initializer = NULL;
         }
-      } else if (had_default && !had_variable_args) {
+      } else if (had_default && !had_variable_args
+                 && type != PARAMETER_STAR_STAR) {
         diag_begin_error(&s->d, location);
         diag_frag(&s->d,
                   "parameter without default follows parameter with default");

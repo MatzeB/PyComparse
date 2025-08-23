@@ -1055,9 +1055,9 @@ restart:
       }
       if (s->c == '\n') {
         next_char(s);
+        s->line++;
         continue;
       }
-      s->line++;
       /* report error? */
       abort();
 

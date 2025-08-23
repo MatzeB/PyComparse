@@ -191,7 +191,7 @@ static void emit_dictionary_display(struct cg_state           *s,
   for (unsigned i = 0; i < num_items; i++) {
     struct dict_item *item = &list->items[i];
     emit_expression(s, item->key);
-    emit_expression(s, item->value);
+    emit_expression(s, item->expression);
   }
   cg_pop(s, num_items * 2);
   cg_push_op(s, OPCODE_BUILD_MAP, num_items);
@@ -363,24 +363,27 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
 static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
                                 unsigned num_extra_args)
 {
-  unsigned         num_processed_arguments = 0;
+  unsigned         num_tuple_elements = 0;
   unsigned         num_arguments = call->num_arguments;
   struct argument *arguments = call->arguments;
   unsigned         idx = 0;
 
   while (idx < num_arguments) {
-    struct argument      *argument = &arguments[idx];
-    union ast_expression *expression = argument->expression;
-    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+    struct argument *argument = &arguments[idx];
+    if (argument->name != NULL) break;
+    union ast_expression    *expression = argument->expression;
+    enum ast_expression_type type = ast_expression_type(expression);
+    if (type == AST_UNEXPR_STAR_STAR) break;
+    if (type == AST_UNEXPR_STAR) {
       if (num_extra_args > 0) {
         cg_pop(s, num_extra_args);
         cg_push_op(s, OPCODE_BUILD_TUPLE, num_extra_args);
-        ++num_processed_arguments;
+        ++num_tuple_elements;
         num_extra_args = 0;
         continue;
       }
       emit_expression(s, expression->unexpr.op);
-      ++num_processed_arguments;
+      ++num_tuple_elements;
       ++idx;
       continue;
     }
@@ -390,11 +393,11 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
     unsigned tuple_begin_idx = idx;
     unsigned tuple_end_idx = idx + 1;
     while (tuple_end_idx < num_arguments) {
-      struct argument      *argument = &arguments[tuple_end_idx];
-      union ast_expression *expression = argument->expression;
-      if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
-        break;
-      }
+      struct argument *argument = &arguments[tuple_end_idx];
+      if (argument->name != NULL) break;
+      union ast_expression    *expression = argument->expression;
+      enum ast_expression_type type = ast_expression_type(expression);
+      if (type == AST_UNEXPR_STAR || type == AST_UNEXPR_STAR_STAR) break;
       if (tuple_const && ast_expression_as_constant(expression) == NULL) {
         tuple_const = false;
       }
@@ -423,12 +426,73 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
       object_new_tuple_end(tuple);
       cg_load_const(s, tuple);
     }
-    ++num_processed_arguments;
+    ++num_tuple_elements;
   }
-  cg_pop(s, num_processed_arguments);
-  cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL, num_processed_arguments);
-  cg_pop(s, 2);
-  cg_push_op(s, OPCODE_CALL_FUNCTION_EX, 0);
+  if (num_tuple_elements == 0) {
+    cg_push_op(s, OPCODE_BUILD_TUPLE, 0);
+  } else {
+    cg_pop(s, num_tuple_elements);
+    cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL, num_tuple_elements);
+  }
+
+  unsigned num_maps = 0;
+  while (idx < num_arguments) {
+    struct argument *argument = &arguments[idx];
+    struct symbol   *name = argument->name;
+
+    if (name == NULL) {
+      union ast_expression *expression = argument->expression;
+      assert(ast_expression_type(expression) == AST_UNEXPR_STAR_STAR);
+      emit_expression(s, expression->unexpr.op);
+      ++num_maps;
+      ++idx;
+      continue;
+    }
+
+    unsigned kw_begin_idx = idx;
+    unsigned kw_end_idx = idx + 1;
+    while (kw_end_idx < num_arguments) {
+      struct argument *argument = &arguments[kw_end_idx];
+      if (argument->name == NULL) break;
+      ++kw_end_idx;
+    }
+    idx = kw_end_idx;
+
+    unsigned kw_length = kw_end_idx - kw_begin_idx;
+    if (kw_length == 1) {
+      struct argument *argument = &arguments[kw_begin_idx];
+      union object    *name
+          = object_intern_cstring(&s->objects, argument->name->string);
+      cg_load_const(s, name);
+      emit_expression(s, argument->expression);
+      cg_pop(s, 2);
+      cg_push_op(s, OPCODE_BUILD_MAP, 1);
+    } else {
+      struct arena *arena = object_intern_arena(&s->objects);
+      union object *names = object_new_tuple_begin(arena, kw_length);
+      for (unsigned a = 0; a < kw_length; a++) {
+        struct argument *argument = &arguments[kw_begin_idx + a];
+        union object    *name
+            = object_intern_cstring(&s->objects, argument->name->string);
+        object_new_tuple_set_at(names, a, name);
+        emit_expression(s, argument->expression);
+      }
+      object_new_tuple_end(names);
+      cg_load_const(s, names);
+      cg_pop(s, kw_length + 1);
+      cg_push_op(s, OPCODE_BUILD_CONST_KEY_MAP, kw_length);
+    }
+    ++num_maps;
+  }
+
+  if (num_maps > 1) {
+    cg_pop(s, num_maps);
+    cg_push_op(s, OPCODE_BUILD_MAP_UNPACK_WITH_CALL, num_maps);
+  }
+
+  unsigned call_ex_arg = num_maps > 0;
+  cg_pop(s, 2 + call_ex_arg);
+  cg_push_op(s, OPCODE_CALL_FUNCTION_EX, call_ex_arg);
 }
 
 static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,

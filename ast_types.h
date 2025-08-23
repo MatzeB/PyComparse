@@ -47,7 +47,7 @@ struct ast_const {
 
 struct dict_item {
   union ast_expression *key;
-  union ast_expression *value;
+  union ast_expression *expression;
 };
 
 struct ast_dict_item_list {

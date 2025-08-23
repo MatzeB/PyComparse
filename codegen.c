@@ -582,19 +582,30 @@ struct symbol_info *cg_new_symbol_info(struct cg_state *s,
   return &symbol->info;
 }
 
-void cg_load(struct cg_state *s, struct symbol *symbol)
+static struct symbol_info *get_or_init_info(struct cg_state *s, struct symbol *name,
+                                            bool is_def)
 {
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info == NULL) {
-    info = cg_new_symbol_info(s, symbol);
-    if (cg_use_locals(s)) {
-      info->type = SYMBOL_GLOBAL;
+  struct symbol_info *info = cg_symbol_info(s, name);
+  if (info != NULL) return info;
+  info = cg_new_symbol_info(s, name);
+  if (cg_use_locals(s)) {
+    if (is_def) {
+      info->type = SYMBOL_LOCAL;
+      info->index = cg_append_varname(s, name);
     } else {
-      info->type = SYMBOL_NAME;
+      info->type = SYMBOL_GLOBAL;
+      info->index = cg_register_name(s, name);
     }
-    info->index = cg_register_name(s, symbol);
+  } else {
+    info->type = SYMBOL_NAME;
+    info->index = cg_register_name(s, name);
   }
+  return info;
+}
 
+void cg_load(struct cg_state *s, struct symbol *name)
+{
+  struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/false);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
     cg_push_op(s, OPCODE_LOAD_NAME, info->index);
@@ -606,24 +617,12 @@ void cg_load(struct cg_state *s, struct symbol *symbol)
     cg_push_op(s, OPCODE_LOAD_FAST, info->index);
     return;
   }
-  fprintf(stderr, "invalid symbol_info type\n");
   abort();
 }
 
-void cg_store(struct cg_state *s, struct symbol *symbol)
+void cg_store(struct cg_state *s, struct symbol *name)
 {
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info == NULL) {
-    info = cg_new_symbol_info(s, symbol);
-    if (cg_use_locals(s)) {
-      info->type = SYMBOL_LOCAL;
-      info->index = cg_append_varname(s, symbol);
-    } else {
-      info->type = SYMBOL_NAME;
-      info->index = cg_register_name(s, symbol);
-    }
-  }
-
+  struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/true);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
     cg_pop_op(s, OPCODE_STORE_NAME, info->index);
@@ -635,24 +634,12 @@ void cg_store(struct cg_state *s, struct symbol *symbol)
     cg_pop_op(s, OPCODE_STORE_FAST, info->index);
     return;
   }
-  fprintf(stderr, "invalid symbol_info type\n");
   abort();
 }
 
-void cg_delete(struct cg_state *s, struct symbol *symbol)
+void cg_delete(struct cg_state *s, struct symbol *name)
 {
-  struct symbol_info *info = cg_symbol_info(s, symbol);
-  if (info == NULL) {
-    info = cg_new_symbol_info(s, symbol);
-    if (cg_use_locals(s)) {
-      info->type = SYMBOL_LOCAL;
-      info->index = cg_append_varname(s, symbol);
-    } else {
-      info->type = SYMBOL_NAME;
-      info->index = cg_register_name(s, symbol);
-    }
-  }
-
+  struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/true);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
     cg_op(s, OPCODE_DELETE_NAME, info->index);
@@ -664,6 +651,5 @@ void cg_delete(struct cg_state *s, struct symbol *symbol)
     cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
   }
-  fprintf(stderr, "invalid symbol_info type\n");
   abort();
 }

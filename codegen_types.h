@@ -53,7 +53,8 @@ struct code_state {
   unsigned            stacksize;
   unsigned            max_stacksize;
   uint32_t            flags;
-  bool                use_locals;
+  bool                in_function;
+  bool                setup_annotations;
 };
 
 struct cg_state {

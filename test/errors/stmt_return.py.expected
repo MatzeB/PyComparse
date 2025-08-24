@@ -1,0 +1,2 @@
+test/errors/stmt_return.py:2 error: 'return' outside function
+test/errors/stmt_return.py:4 error: 'return' outside function

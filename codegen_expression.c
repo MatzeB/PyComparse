@@ -61,7 +61,7 @@ static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr)
   emit_expression(s, binexpr->left);
   emit_expression(s, binexpr->right);
   enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
-  cg_pop_op(s, opcode, 0);
+  cg_op_pop_push(s, opcode, 0, /*pop=*/2, /*push=*/1);
 }
 
 static void emit_binexpr_logical(struct cg_state    *s,
@@ -71,9 +71,9 @@ static void emit_binexpr_logical(struct cg_state    *s,
   emit_expression(s, binexpr->left);
   struct basic_block *target = cg_allocate_block(s);
   struct basic_block *fallthrough = cg_allocate_block(s);
-  cg_pop(s, 1);
   assert(opcode == OPCODE_JUMP_IF_TRUE_OR_POP
          || opcode == OPCODE_JUMP_IF_FALSE_OR_POP);
+  cg_pop(s, 1);
   cg_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
   cg_block_begin(s, fallthrough);
   emit_expression(s, binexpr->right);
@@ -91,24 +91,22 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     struct ast_attr *attr = &target->attr;
     emit_expression(s, attr->expression);
     unsigned index = cg_register_name(s, attr->symbol);
-    cg_op(s, OPCODE_STORE_ATTR, index);
-    cg_pop(s, 2);
+    cg_op_pop_push(s, OPCODE_STORE_ATTR, index, /*pop=*/2, /*push=*/0);
     return;
   }
   case AST_BINEXPR_SUBSCRIPT: {
     struct ast_binexpr *binexpr = &target->binexpr;
     emit_expression(s, binexpr->left);
     emit_expression(s, binexpr->right);
-    cg_op(s, OPCODE_STORE_SUBSCR, 0);
-    cg_pop(s, 3);
+    cg_op_pop_push(s, OPCODE_STORE_SUBSCR, 0, /*pop=*/3, /*push=*/0);
     return;
   }
   case AST_EXPRESSION_LIST:
   case AST_LIST_DISPLAY: {
     struct ast_expression_list *list = &target->expression_list;
     unsigned                    num_expressions = list->num_expressions;
-    cg_pop_op(s, OPCODE_UNPACK_SEQUENCE, num_expressions);
-    cg_push(s, num_expressions);
+    cg_op_pop_push(s, OPCODE_UNPACK_SEQUENCE, num_expressions, /*pop=*/1,
+                   /*push=*/num_expressions);
     for (unsigned i = 0; i < num_expressions; i++) {
       emit_assignment(s, list->expressions[i]);
     }
@@ -124,7 +122,7 @@ static void emit_binexpr_assign_inner(struct cg_state    *s,
 {
   emit_expression(s, binexpr->right);
   enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
-  cg_pop_op(s, opcode, 0);
+  cg_op_pop1(s, opcode, 0);
 }
 
 static void emit_binexpr_assign(struct cg_state    *s,
@@ -142,26 +140,23 @@ static void emit_binexpr_assign(struct cg_state    *s,
   case AST_ATTR: {
     struct ast_attr *attr = &target->attr;
     emit_expression(s, attr->expression);
-    cg_push_op(s, OPCODE_DUP_TOP, 0);
+    cg_op_push1(s, OPCODE_DUP_TOP, 0);
     unsigned index = cg_register_name(s, attr->symbol);
-    cg_op(s, OPCODE_LOAD_ATTR, index);
+    cg_op_pop_push(s, OPCODE_LOAD_ATTR, index, /*pop=*/1, /*push=*/1);
     emit_binexpr_assign_inner(s, binexpr);
-    cg_op(s, OPCODE_ROT_TWO, 0);
-    cg_op(s, OPCODE_STORE_ATTR, index);
-    cg_pop(s, 2);
+    cg_op_pop_push(s, OPCODE_ROT_TWO, 0, /*pop=*/2, /*push=*/2);
+    cg_op_pop_push(s, OPCODE_STORE_ATTR, index, /*pop=*/2, /*push=*/0);
     return;
   }
   case AST_BINEXPR_SUBSCRIPT: {
     struct ast_binexpr *subscript = &target->binexpr;
     emit_expression(s, subscript->left);
     emit_expression(s, subscript->right);
-    cg_op(s, OPCODE_DUP_TOP_TWO, 0);
-    cg_push(s, 2);
-    cg_pop_op(s, OPCODE_BINARY_SUBSCR, 0);
+    cg_op_pop_push(s, OPCODE_DUP_TOP_TWO, 0, /*pop=*/0, /*push=*/2);
+    cg_op_pop1(s, OPCODE_BINARY_SUBSCR, 0);
     emit_binexpr_assign_inner(s, binexpr);
-    cg_op(s, OPCODE_ROT_THREE, 0);
-    cg_op(s, OPCODE_STORE_SUBSCR, 0);
-    cg_pop(s, 3);
+    cg_op_pop_push(s, OPCODE_ROT_THREE, 0, /*pop=*/3, /*push=*/3);
+    cg_op_pop_push(s, OPCODE_STORE_SUBSCR, 0, /*pop=*/3, /*push=*/0);
     return;
   }
   default:
@@ -174,14 +169,14 @@ static void emit_comparison(struct cg_state *s, struct ast_binexpr *binexpr,
 {
   emit_expression(s, binexpr->left);
   emit_expression(s, binexpr->right);
-  cg_pop_op(s, OPCODE_COMPARE_OP, arg);
+  cg_op_pop_push(s, OPCODE_COMPARE_OP, arg, /*pop=*/2, /*push=*/1);
 }
 
 static void emit_unexpr(struct cg_state *s, struct ast_unexpr *unexpr,
                         uint8_t opcode)
 {
   emit_expression(s, unexpr->op);
-  cg_op(s, opcode, 0);
+  cg_op_pop_push(s, opcode, 0, /*pop=*/1, /*push=*/1);
 }
 
 static void emit_dictionary_display(struct cg_state           *s,
@@ -193,8 +188,8 @@ static void emit_dictionary_display(struct cg_state           *s,
     emit_expression(s, item->key);
     emit_expression(s, item->expression);
   }
-  cg_pop(s, num_items * 2);
-  cg_push_op(s, OPCODE_BUILD_MAP, num_items);
+  cg_op_pop_push(s, OPCODE_BUILD_MAP, num_items, /*pop=*/num_items * 2,
+                 /*push=*/1);
 }
 
 static void
@@ -202,21 +197,19 @@ emit_list_comprehension(struct cg_state                 *s,
                         struct ast_generator_expression *generator_expression)
 {
   cg_push_code(s);
-  cg_code_begin(s, /*use_locals=*/true);
+  cg_code_begin(s, /*in_function=*/true);
   emit_generator_expression_code(s, generator_expression);
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, "<listcomp>");
-  unsigned      code_index = cg_register_object(s, code);
-  cg_push_op(s, OPCODE_LOAD_CONST, code_index);
+  cg_load_const(s, code);
   cg_load_const(s, object_intern_cstring(&s->objects, "<listcomp>"));
-  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
 
   struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
-  cg_op(s, OPCODE_GET_ITER, 0);
-  cg_pop(s, 2);
-  cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
+  cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
 }
 
 static void emit_list_display(struct cg_state            *s,
@@ -226,8 +219,8 @@ static void emit_list_display(struct cg_state            *s,
   for (unsigned i = 0; i < num_expressions; i++) {
     emit_expression(s, list->expressions[i]);
   }
-  cg_pop(s, num_expressions);
-  cg_push_op(s, OPCODE_BUILD_LIST, num_expressions);
+  cg_op_pop_push(s, OPCODE_BUILD_LIST, num_expressions,
+                 /*pop=*/num_expressions, /*push=*/1);
 }
 
 static void emit_set_display(struct cg_state            *s,
@@ -237,8 +230,8 @@ static void emit_set_display(struct cg_state            *s,
   for (unsigned i = 0; i < num_expressions; i++) {
     emit_expression(s, list->expressions[i]);
   }
-  cg_pop(s, num_expressions);
-  cg_push_op(s, OPCODE_BUILD_SET, num_expressions);
+  cg_op_pop_push(s, OPCODE_BUILD_SET, num_expressions,
+                 /*pop=*/num_expressions, /*push=*/1);
 }
 
 static void emit_none(struct cg_state *s)
@@ -268,8 +261,7 @@ static void emit_slice(struct cg_state *s, struct ast_slice *slice)
   } else {
     arg = 2;
   }
-  cg_pop(s, arg);
-  cg_push_op(s, OPCODE_BUILD_SLICE, arg);
+  cg_op_pop_push(s, OPCODE_BUILD_SLICE, arg, /*pop=*/arg, /*push=*/1);
 }
 
 static void
@@ -307,8 +299,8 @@ emit_expression_list_helper_unpack(struct cg_state            *s,
       for (unsigned i = tuple_begin_idx; i < tuple_end_idx; i++) {
         emit_expression(s, expressions[i]);
       }
-      cg_pop(s, tuple_length);
-      cg_push_op(s, OPCODE_BUILD_TUPLE, tuple_length);
+      cg_op_pop_push(s, OPCODE_BUILD_TUPLE, tuple_length,
+                     /*pop=*/tuple_length, /*push=*/1);
     } else {
       struct arena *arena = object_intern_arena(&s->objects);
       union object *tuple = object_new_tuple_begin(arena, tuple_length);
@@ -323,8 +315,8 @@ emit_expression_list_helper_unpack(struct cg_state            *s,
     ++num_unpack_expressions;
     idx += tuple_length;
   }
-  cg_pop(s, num_unpack_expressions);
-  cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK, num_unpack_expressions);
+  cg_op_pop_push(s, OPCODE_BUILD_TUPLE_UNPACK, num_unpack_expressions,
+                 /*pop=*/num_unpack_expressions, /*push=*/1);
 }
 
 static void emit_expression_list_helper(struct cg_state            *s,
@@ -337,8 +329,8 @@ static void emit_expression_list_helper(struct cg_state            *s,
     for (unsigned i = 0; i < num_expressions; i++) {
       emit_expression(s, tuple->expressions[i]);
     }
-    cg_pop(s, num_expressions);
-    cg_push_op(s, OPCODE_BUILD_TUPLE, num_expressions);
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_expressions,
+                   /*pop=*/num_expressions, /*push=*/1);
   }
 }
 
@@ -376,8 +368,8 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
     if (type == AST_UNEXPR_STAR_STAR) break;
     if (type == AST_UNEXPR_STAR) {
       if (num_extra_args > 0) {
-        cg_pop(s, num_extra_args);
-        cg_push_op(s, OPCODE_BUILD_TUPLE, num_extra_args);
+        cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_extra_args,
+                       /*pop=*/num_extra_args, /*push=*/1);
         ++num_tuple_elements;
         num_extra_args = 0;
         continue;
@@ -412,8 +404,8 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
         union ast_expression *expression = argument->expression;
         emit_expression(s, expression);
       }
-      cg_pop(s, tuple_length);
-      cg_push_op(s, OPCODE_BUILD_TUPLE, tuple_length + num_extra_args);
+      cg_op_pop_push(s, OPCODE_BUILD_TUPLE, tuple_length + num_extra_args,
+                     /*pop=*/tuple_length, /*push=*/1);
     } else {
       struct arena *arena = object_intern_arena(&s->objects);
       union object *tuple = object_new_tuple_begin(arena, tuple_length);
@@ -429,10 +421,10 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
     ++num_tuple_elements;
   }
   if (num_tuple_elements == 0) {
-    cg_push_op(s, OPCODE_BUILD_TUPLE, 0);
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, 0, /*pop=*/0, /*push=*/1);
   } else {
-    cg_pop(s, num_tuple_elements);
-    cg_push_op(s, OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL, num_tuple_elements);
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE_UNPACK_WITH_CALL, num_tuple_elements,
+                   /*pop=*/num_tuple_elements, /*push=*/1);
   }
 
   unsigned num_maps = 0;
@@ -465,8 +457,7 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
           = object_intern_cstring(&s->objects, argument->name->string);
       cg_load_const(s, name);
       emit_expression(s, argument->expression);
-      cg_pop(s, 2);
-      cg_push_op(s, OPCODE_BUILD_MAP, 1);
+      cg_op_pop_push(s, OPCODE_BUILD_MAP, 1, /*pop=*/2, /*push=*/1);
     } else {
       struct arena *arena = object_intern_arena(&s->objects);
       union object *names = object_new_tuple_begin(arena, kw_length);
@@ -479,20 +470,20 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
       }
       object_new_tuple_end(names);
       cg_load_const(s, names);
-      cg_pop(s, kw_length + 1);
-      cg_push_op(s, OPCODE_BUILD_CONST_KEY_MAP, kw_length);
+      cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, kw_length,
+                     /*pop=*/kw_length + 1, /*push=*/1);
     }
     ++num_maps;
   }
 
   if (num_maps > 1) {
-    cg_pop(s, num_maps);
-    cg_push_op(s, OPCODE_BUILD_MAP_UNPACK_WITH_CALL, num_maps);
+    cg_op_pop_push(s, OPCODE_BUILD_MAP_UNPACK_WITH_CALL, num_maps,
+                   /*pop=*/num_maps, /*push=*/1);
   }
 
-  unsigned call_ex_arg = num_maps > 0;
-  cg_pop(s, 2 + call_ex_arg);
-  cg_push_op(s, OPCODE_CALL_FUNCTION_EX, call_ex_arg);
+  uint32_t call_ex_arg = num_maps > 0;
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION_EX, call_ex_arg,
+                 /*pop=*/2 + call_ex_arg, /*push=*/1);
 }
 
 static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,
@@ -527,8 +518,8 @@ static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,
   cg_load_const(s, names);
 
   num_arguments += num_extra_args;
-  cg_pop(s, num_arguments + 2);
-  cg_push_op(s, OPCODE_CALL_FUNCTION_KW, num_arguments);
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION_KW, num_arguments,
+                 /*pop=*/num_arguments + 2, /*push=*/1);
 }
 
 void emit_call_helper(struct cg_state *s, struct ast_call *call,
@@ -549,8 +540,8 @@ void emit_call_helper(struct cg_state *s, struct ast_call *call,
     emit_expression(s, argument->expression);
   }
   num_arguments += num_extra_args;
-  cg_pop(s, num_arguments + 1);
-  cg_push_op(s, OPCODE_CALL_FUNCTION, num_arguments);
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, num_arguments,
+                 /*pop=*/num_arguments + 1, /*push=*/1);
 }
 
 static void emit_call(struct cg_state *s, struct ast_call *call)
@@ -586,21 +577,19 @@ static void emit_generator_expression(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
   cg_push_code(s);
-  cg_code_begin(s, /*use_locals=*/true);
+  cg_code_begin(s, /*in_function=*/true);
   emit_generator_expression_code(s, generator_expression);
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, "<genexpr>");
-  unsigned      code_index = cg_register_object(s, code);
-  cg_push_op(s, OPCODE_LOAD_CONST, code_index);
+  cg_load_const(s, code);
   cg_load_const(s, object_intern_cstring(&s->objects, "<genexpr>"));
-  cg_pop_op(s, OPCODE_MAKE_FUNCTION, 0);
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
 
   struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
   cg_op(s, OPCODE_GET_ITER, 0);
-  cg_pop(s, 2);
-  cg_push_op(s, OPCODE_CALL_FUNCTION, 1);
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
 }
 
 void emit_yield(struct cg_state *s, union ast_expression *value)
@@ -614,7 +603,7 @@ void emit_yield_from(struct cg_state *s, union ast_expression *value)
   emit_expression(s, value);
   cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
-  cg_pop_op(s, OPCODE_YIELD_FROM, 0);
+  cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
 }
 
 void had_yield(struct cg_state *s)
@@ -664,7 +653,7 @@ static void emit_expression_impl(struct cg_state      *s,
   case AST_BINEXPR_ASSIGN:
     emit_expression(s, expression->binexpr.right);
     if (!drop) {
-      cg_push_op(s, OPCODE_DUP_TOP, 0);
+      cg_op_push1(s, OPCODE_DUP_TOP, 0);
     }
     emit_assignment(s, expression->binexpr.left);
     return;
@@ -763,7 +752,7 @@ static void emit_expression_impl(struct cg_state      *s,
   }
 
   if (drop) {
-    cg_pop_op(s, OPCODE_POP_TOP, 0);
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
 

@@ -64,16 +64,24 @@ void cg_pop(struct cg_state *s, unsigned n)
   s->code.stacksize -= n;
 }
 
-void cg_push_op(struct cg_state *s, enum opcode opcode, uint32_t arg)
+void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
+                    unsigned pop, unsigned push)
+{
+  cg_pop(s, pop);
+  cg_op(s, opcode, arg);
+  cg_push(s, push);
+}
+
+void cg_op_pop1(struct cg_state *s, enum opcode opcode, uint32_t arg)
+{
+  cg_pop(s, 1);
+  cg_op(s, opcode, arg);
+}
+
+void cg_op_push1(struct cg_state *s, enum opcode opcode, uint32_t arg)
 {
   cg_op(s, opcode, arg);
   cg_push(s, 1);
-}
-
-void cg_pop_op(struct cg_state *s, enum opcode opcode, uint32_t arg)
-{
-  cg_op(s, opcode, arg);
-  cg_pop(s, 1);
 }
 
 struct basic_block *cg_allocate_block(struct cg_state *s)
@@ -156,7 +164,7 @@ bool cg_in_block(struct cg_state *s)
   return s->code.current_block != NULL;
 }
 
-void cg_code_begin(struct cg_state *s, bool use_locals)
+void cg_code_begin(struct cg_state *s, bool in_function)
 {
   struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
@@ -170,9 +178,9 @@ void cg_code_begin(struct cg_state *s, bool use_locals)
   }
   code->scope_id = s->next_scope_id++;
   code->cg_stack_begin = stack_size(&s->stack);
-  code->use_locals = use_locals;
+  code->in_function = in_function;
 
-  if (use_locals) {
+  if (in_function) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
   }
 
@@ -288,9 +296,12 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // TODO: compute NOFREE...
   s->code.flags |= CO_NOFREE;
 
+  unsigned prologue_length = 0;
+  if (s->code.setup_annotations) prologue_length += 2;
+
   // Jump relaxation: First assign minimum offsets necessary, then expand as
   // necessary.
-  unsigned            offset = 0;
+  unsigned            offset = prologue_length;
   struct basic_block *first_block = s->code.first_block;
   for (struct basic_block *block = first_block, *next; block != NULL;
        block = next) {
@@ -350,7 +361,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   do {
     changed = false;
 
-    unsigned offset = 0;
+    unsigned offset = prologue_length;
     for (struct basic_block *block = first_block; block != NULL;
          block = block->next) {
       unsigned offset_adjust_forward = 0;
@@ -369,6 +380,10 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // Emit code.
   struct arena *arena = object_intern_arena(&s->objects);
   arena_grow_begin(arena, /*alignment=*/1);
+  if (s->code.setup_annotations) {
+    cg_op_with_arena(arena, OPCODE_SETUP_ANNOTATIONS, 0);
+  }
+
   for (struct basic_block *block = first_block, *next; block != NULL;
        block = next) {
     next = block->next;
@@ -491,9 +506,9 @@ void cg_free(struct cg_state *s)
   stack_free(&s->stack);
 }
 
-bool cg_use_locals(struct cg_state *s)
+bool cg_in_function(struct cg_state *s)
 {
-  return s->code.use_locals;
+  return s->code.in_function;
 }
 
 unsigned cg_register_unique_object(struct cg_state *s, union object *object)
@@ -515,7 +530,7 @@ unsigned cg_register_object(struct cg_state *s, union object *object)
 void cg_load_const(struct cg_state *s, union object *object)
 {
   unsigned index = cg_register_object(s, object);
-  cg_push_op(s, OPCODE_LOAD_CONST, index);
+  cg_op_push1(s, OPCODE_LOAD_CONST, index);
 }
 
 static unsigned cg_append_name_from_cstring(struct cg_state *s,
@@ -582,13 +597,13 @@ struct symbol_info *cg_new_symbol_info(struct cg_state *s,
   return &symbol->info;
 }
 
-static struct symbol_info *get_or_init_info(struct cg_state *s, struct symbol *name,
-                                            bool is_def)
+static struct symbol_info *get_or_init_info(struct cg_state *s,
+                                            struct symbol *name, bool is_def)
 {
   struct symbol_info *info = cg_symbol_info(s, name);
   if (info != NULL) return info;
   info = cg_new_symbol_info(s, name);
-  if (cg_use_locals(s)) {
+  if (cg_in_function(s)) {
     if (is_def) {
       info->type = SYMBOL_LOCAL;
       info->index = cg_append_varname(s, name);
@@ -608,13 +623,13 @@ void cg_load(struct cg_state *s, struct symbol *name)
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/false);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
-    cg_push_op(s, OPCODE_LOAD_NAME, info->index);
+    cg_op_push1(s, OPCODE_LOAD_NAME, info->index);
     return;
   case SYMBOL_GLOBAL:
-    cg_push_op(s, OPCODE_LOAD_GLOBAL, info->index);
+    cg_op_push1(s, OPCODE_LOAD_GLOBAL, info->index);
     return;
   case SYMBOL_LOCAL:
-    cg_push_op(s, OPCODE_LOAD_FAST, info->index);
+    cg_op_push1(s, OPCODE_LOAD_FAST, info->index);
     return;
   }
   abort();
@@ -625,13 +640,13 @@ void cg_store(struct cg_state *s, struct symbol *name)
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/true);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
-    cg_pop_op(s, OPCODE_STORE_NAME, info->index);
+    cg_op_pop1(s, OPCODE_STORE_NAME, info->index);
     return;
   case SYMBOL_GLOBAL:
-    cg_pop_op(s, OPCODE_STORE_GLOBAL, info->index);
+    cg_op_pop1(s, OPCODE_STORE_GLOBAL, info->index);
     return;
   case SYMBOL_LOCAL:
-    cg_pop_op(s, OPCODE_STORE_FAST, info->index);
+    cg_op_pop1(s, OPCODE_STORE_FAST, info->index);
     return;
   }
   abort();

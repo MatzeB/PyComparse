@@ -75,6 +75,9 @@ struct with_state {
 void          emit_module_begin(struct cg_state *s);
 union object *emit_module_end(struct cg_state *s);
 
+void emit_annotation(struct cg_state *s, union ast_expression *target,
+                     union ast_expression *annotation);
+
 void emit_assert(struct cg_state *s, union ast_expression *expression,
                  union ast_expression *message);
 

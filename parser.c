@@ -48,7 +48,6 @@ enum precedence {
   PREC_LIST,        /* , */
   PREC_STAR,        /* *, ** prefix */
   PREC_WALRUS,      /* := */
-  PREC_LAMBDA,      /* lambda ... */
   PREC_TEST,        /* postfix 'if' _ 'else' _ */
   PREC_LOGICAL_OR,  /* OR */
   PREC_LOGICAL_AND, /* AND */
@@ -67,6 +66,10 @@ enum precedence {
 
   PREC_PRIMARY, /* .attr  [subscript]   (call) */
   PREC_ATOM,    /* name, number, string, ..., None, True, False */
+
+  /* PREC_ASSIGN, PREC_LIST, PREC_STAR are only used in some instances, while
+   * most contexts should start with this. */
+  PREC_EXPRESSION = PREC_WALRUS,
 };
 
 static void error_expected(struct parser_state *s, const char *what)
@@ -301,7 +304,7 @@ static union ast_expression *parse_expression_or_slice(struct parser_state *s)
 {
   union ast_expression *expression = NULL;
   if (peek(s) != ':') {
-    expression = parse_expression(s, PREC_LIST + 1);
+    expression = parse_expression(s, PREC_STAR);
     if (peek(s) != ':') {
       return expression;
     }
@@ -312,10 +315,10 @@ static union ast_expression *parse_expression_or_slice(struct parser_state *s)
   union ast_expression *stop = NULL;
   union ast_expression *step = NULL;
   if (is_expression_start(peek(s))) {
-    stop = parse_expression(s, PREC_LIST + 1);
+    stop = parse_expression(s, PREC_STAR);
   }
   if (accept(s, ':') && is_expression_start(peek(s))) {
-    step = parse_expression(s, PREC_LIST + 1);
+    step = parse_expression(s, PREC_STAR);
   }
 
   expression = ast_allocate_expression(s, struct ast_slice, AST_SLICE);
@@ -1302,7 +1305,23 @@ union ast_expression *parse_expression(struct parser_state *s,
 static void parse_expression_statement(struct parser_state *s)
 {
   union ast_expression *expression = parse_expression(s, PREC_ASSIGN);
-  emit_expression_statement(&s->cg, expression);
+  if (accept(s, ':')) {
+    /* TODO Check: check that expression is either:
+     *  NAME |  ( single_target ) | single_subscript_attribute_target
+     */
+    union ast_expression *annotation = parse_expression(s, PREC_EXPRESSION);
+
+    if (accept(s, '=')) {
+      /* "annotated_rhs": yield | star_expressions */
+      union ast_expression *rhs = parse_expression(s, PREC_EXPRESSION);
+      emit_expression(&s->cg, rhs);
+      emit_assignment(&s->cg, expression);
+    }
+
+    emit_annotation(&s->cg, expression, annotation);
+  } else {
+    emit_expression_statement(&s->cg, expression);
+  }
 }
 
 static void parse_assert(struct parser_state *s)
@@ -1454,16 +1473,17 @@ static void parse_raise(struct parser_state *s)
 {
   eat(s, T_raise);
 
-  union ast_expression *expression = parse_expression(s, PREC_LAMBDA);
+  union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
   union ast_expression *from = NULL;
   if (accept(s, T_from)) {
-    from = parse_expression(s, PREC_LAMBDA);
+    from = parse_expression(s, PREC_EXPRESSION);
   }
   emit_raise_statement(&s->cg, expression, from);
 }
 
 static void parse_return(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_return);
 
   union ast_expression *expression;
@@ -1472,6 +1492,14 @@ static void parse_return(struct parser_state *s)
   } else {
     expression = NULL;
   }
+
+  if (!cg_in_function(&s->cg)) {
+    diag_begin_error(&s->d, location);
+    diag_token_kind(&s->d, T_return);
+    diag_frag(&s->d, " outside function");
+    diag_end(&s->d);
+  }
+
   emit_return_statement(&s->cg, expression);
 }
 

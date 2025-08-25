@@ -9,6 +9,7 @@
 ASSUME_NONNULL_BEGIN
 
 struct ast_call;
+struct ast_comparison;
 struct ast_generator_expression;
 struct basic_block;
 struct cg_state;
@@ -90,6 +91,9 @@ void emit_class_end(struct cg_state *s, struct symbol *name,
                     struct ast_call *call, unsigned num_decorators);
 
 void emit_code_end(struct cg_state *s);
+
+void emit_comparison_multi_value(struct cg_state       *s,
+                                 struct ast_comparison *comparison);
 
 void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
                         struct basic_block *true_block,

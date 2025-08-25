@@ -18,6 +18,103 @@
 #include "symbol_types.h"
 #include "util.h"
 
+static void emit_comparison_multi(struct cg_state             *s,
+                                  struct ast_comparison       *comparison,
+                                  struct basic_block *nullable true_block,
+                                  struct basic_block *nullable false_block)
+{
+  emit_expression(s, comparison->left);
+
+  unsigned num_operands = comparison->num_operands;
+  assert(num_operands > 1);
+  unsigned            i = 0;
+  struct basic_block *op_false_block = NULL;
+  bool                produce_value = (true_block == NULL);
+  for (;;) {
+    struct comparison_op *comparison_op = &comparison->operands[i];
+    ++i;
+    bool last = (i == num_operands);
+
+    emit_expression(s, comparison_op->operand);
+    if (!last) {
+      cg_op_push1(s, OPCODE_DUP_TOP, 0);
+      cg_op_pop_push(s, OPCODE_ROT_THREE, 0, /*pop=*/3,
+                     /*push=*/3);
+    }
+    cg_op_pop_push(s, OPCODE_COMPARE_OP, comparison_op->op,
+                   /*pop=*/2, /*push=*/1);
+
+    if (last) {
+      if (produce_value) {
+        assert(op_false_block != NULL);
+        struct basic_block *footer = cg_allocate_block(s);
+        cg_jump(s, footer);
+
+        cg_block_begin(s, op_false_block);
+        cg_push(s, 1); /* adjust for tracking not working along jumps */
+        cg_op_pop_push(s, OPCODE_ROT_TWO, 0, /*pop=*/2, /*push=*/2);
+        cg_op_pop1(s, OPCODE_POP_TOP, 0);
+        cg_jump(s, footer);
+
+        cg_block_begin(s, footer);
+        break;
+      }
+
+      assert(false_block != NULL);
+      assert(true_block != NULL);
+      cg_pop(s, 1);
+      cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE,
+                  /*target=*/false_block, /*fallthrough=*/true_block);
+      if (op_false_block != NULL) {
+        cg_block_begin(s, op_false_block);
+        cg_push(s, 1); /* adjust for tracking not working along jumps */
+        cg_op_pop1(s, OPCODE_POP_TOP, 0);
+        cg_jump(s, false_block);
+      }
+      break;
+    }
+    struct basic_block *op_true_block = cg_allocate_block(s);
+    if (op_false_block == NULL) {
+      op_false_block = cg_allocate_block(s);
+    }
+    cg_pop(s, 1);
+    cg_condjump(s,
+                produce_value ? OPCODE_JUMP_IF_FALSE_OR_POP
+                              : OPCODE_POP_JUMP_IF_FALSE,
+                /*target=*/op_false_block, /*fallthrough=*/op_true_block);
+    cg_block_begin(s, op_true_block);
+  }
+}
+
+void emit_comparison_multi_value(struct cg_state       *s,
+                                 struct ast_comparison *comparison)
+{
+  emit_comparison_multi(s, comparison, /*true_block=*/NULL,
+                        /*false_block=*/NULL);
+}
+
+static void emit_condjump_optimize(struct cg_state    *s,
+                                   struct basic_block *true_block,
+                                   struct basic_block *false_block,
+                                   struct basic_block *next)
+{
+  enum opcode         opcode;
+  struct basic_block *target;
+  struct basic_block *fallthrough;
+  if (next == true_block) {
+    opcode = OPCODE_POP_JUMP_IF_FALSE;
+    target = false_block;
+    fallthrough = true_block;
+  } else {
+    opcode = OPCODE_POP_JUMP_IF_TRUE;
+    target = true_block;
+    fallthrough = false_block;
+  }
+  cg_pop(s, 1);
+  cg_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
+  return;
+}
+
 void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
                         struct basic_block *true_block,
                         struct basic_block *false_block,
@@ -52,22 +149,24 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
                        /*next=*/next);
     return;
   }
+  case AST_COMPARISON: {
+    struct ast_comparison *comparison = &expression->comparison;
+    if (comparison->num_operands > 1) {
+      emit_comparison_multi(s, comparison, true_block, false_block);
+      return;
+    }
+    emit_expression(s, comparison->left);
+    struct comparison_op *comparison_op = &comparison->operands[0];
+    emit_expression(s, comparison_op->operand);
+    cg_op_pop_push(s, OPCODE_COMPARE_OP, comparison_op->op,
+                   /*pop=*/2, /*push=*/1);
+    goto emit_condjump;
+  }
   default:
     emit_expression(s, expression);
-    enum opcode         opcode;
-    struct basic_block *target;
-    struct basic_block *fallthrough;
-    if (next == true_block) {
-      opcode = OPCODE_POP_JUMP_IF_FALSE;
-      target = false_block;
-      fallthrough = true_block;
-    } else {
-      opcode = OPCODE_POP_JUMP_IF_TRUE;
-      target = true_block;
-      fallthrough = false_block;
-    }
-    cg_pop(s, 1);
-    cg_condjump(s, opcode, /*target=*/target, /*fallthrough=*/fallthrough);
+    goto emit_condjump;
+  emit_condjump:
+    emit_condjump_optimize(s, true_block, false_block, next);
     return;
   }
 }

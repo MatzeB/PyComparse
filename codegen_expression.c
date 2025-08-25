@@ -164,14 +164,6 @@ static void emit_binexpr_assign(struct cg_state    *s,
   }
 }
 
-static void emit_comparison(struct cg_state *s, struct ast_binexpr *binexpr,
-                            enum compare_op_arg arg)
-{
-  emit_expression(s, binexpr->left);
-  emit_expression(s, binexpr->right);
-  cg_op_pop_push(s, OPCODE_COMPARE_OP, arg, /*pop=*/2, /*push=*/1);
-}
-
 static void emit_unexpr(struct cg_state *s, struct ast_unexpr *unexpr,
                         uint8_t opcode)
 {
@@ -556,6 +548,21 @@ static void emit_call(struct cg_state *s, struct ast_call *call)
   emit_call_helper(s, call, /*num_extra_args=*/0);
 }
 
+static void emit_comparison(struct cg_state       *s,
+                            struct ast_comparison *comparison)
+{
+  unsigned num_operands = comparison->num_operands;
+  if (num_operands == 1) {
+    struct comparison_op *operand = &comparison->operands[0];
+    emit_expression(s, comparison->left);
+    emit_expression(s, operand->operand);
+    cg_op_pop_push(s, OPCODE_COMPARE_OP, operand->op,
+                   /*pop=*/2, /*push=*/1);
+  } else {
+    emit_comparison_multi_value(s, comparison);
+  }
+}
+
 static void emit_conditional(struct cg_state        *s,
                              struct ast_conditional *conditional)
 {
@@ -661,44 +668,17 @@ static void emit_expression_impl(struct cg_state      *s,
     }
     emit_assignment(s, expression->binexpr.left);
     return;
-  case AST_BINEXPR_EQUAL:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_EQ);
-    break;
-  case AST_BINEXPR_GREATER:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_GT);
-    break;
-  case AST_BINEXPR_GREATER_EQUAL:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_GE);
-    break;
-  case AST_BINEXPR_IN:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_IN);
-    break;
-  case AST_BINEXPR_IS:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_IS);
-    break;
-  case AST_BINEXPR_IS_NOT:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_IS_NOT);
-    break;
-  case AST_BINEXPR_LESS:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_LT);
-    break;
-  case AST_BINEXPR_LESS_EQUAL:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_LE);
-    break;
   case AST_BINEXPR_LOGICAL_AND:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_FALSE_OR_POP);
     break;
   case AST_BINEXPR_LOGICAL_OR:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_TRUE_OR_POP);
     break;
-  case AST_BINEXPR_NOT_IN:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_NOT_IN);
-    break;
-  case AST_BINEXPR_UNEQUAL:
-    emit_comparison(s, &expression->binexpr, COMPARE_OP_NE);
-    break;
   case AST_CALL:
     emit_call(s, &expression->call);
+    break;
+  case AST_COMPARISON:
+    emit_comparison(s, &expression->comparison);
     break;
   case AST_CONDITIONAL:
     emit_conditional(s, &expression->conditional);

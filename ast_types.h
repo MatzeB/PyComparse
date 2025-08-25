@@ -26,6 +26,18 @@ struct ast_binexpr {
   union ast_expression *right;
 };
 
+struct comparison_op {
+  uint8_t               op;
+  union ast_expression *operand;
+};
+
+struct ast_comparison {
+  struct ast_node_base  base;
+  unsigned              num_operands;
+  union ast_expression *left;
+  struct comparison_op  operands[];
+};
+
 struct argument {
   union ast_expression   *expression;
   struct symbol *nullable name;
@@ -33,10 +45,10 @@ struct argument {
 
 struct ast_call {
   struct ast_node_base           base;
+  unsigned                       num_arguments;
   bool                           has_star_argument;
   bool                           has_kw_argument;
   union ast_expression *nullable callee;
-  unsigned                       num_arguments;
   struct argument                arguments[];
 };
 
@@ -65,8 +77,8 @@ struct ast_dict_item_list {
 
 struct ast_expression_list {
   struct ast_node_base          base;
-  bool                          has_star_expression;
   unsigned                      num_expressions;
+  bool                          has_star_expression;
   union object *nullable        as_constant;
   union ast_expression *nonnull expressions[];
 };
@@ -84,8 +96,8 @@ struct generator_expression_part {
 
 struct ast_generator_expression {
   struct ast_node_base             base;
-  union ast_expression            *expression;
   unsigned                         num_parts;
+  union ast_expression            *expression;
   struct generator_expression_part parts[];
 };
 
@@ -113,6 +125,7 @@ union ast_expression {
   struct ast_attr                 attr;
   struct ast_binexpr              binexpr;
   struct ast_call                 call;
+  struct ast_comparison           comparison;
   struct ast_conditional          conditional;
   struct ast_const                cnst;
   struct ast_dict_item_list       dict_item_list;

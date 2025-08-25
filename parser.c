@@ -860,6 +860,76 @@ parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
   return expression;
 }
 
+static int parse_compare_op(struct parser_state *s)
+{
+  switch (peek(s)) {
+  case '<':
+    next_token(s);
+    return COMPARE_OP_LT;
+  case T_LESS_THAN_EQUALS:
+    next_token(s);
+    return COMPARE_OP_LE;
+  case T_EQUALS_EQUALS:
+    next_token(s);
+    return COMPARE_OP_EQ;
+  case T_EXCLAMATIONMARK_EQUALS:
+    next_token(s);
+    return COMPARE_OP_NE;
+  case '>':
+    next_token(s);
+    return COMPARE_OP_GT;
+  case T_GREATER_THAN_EQUALS:
+    next_token(s);
+    return COMPARE_OP_GE;
+  case T_in:
+    next_token(s);
+    return COMPARE_OP_IN;
+  case T_not:
+    next_token(s);
+    expect(s, T_in);
+    return COMPARE_OP_NOT_IN;
+  case T_is:
+    next_token(s);
+    if (accept(s, T_not)) return COMPARE_OP_IS_NOT;
+    return COMPARE_OP_IS;
+  default:
+    return -1;
+  }
+}
+
+static union ast_expression *parse_comparison(struct parser_state  *s,
+                                              union ast_expression *left)
+{
+  int op = parse_compare_op(s);
+  assert(op >= 0);
+
+  struct comparison_op inline_storage[2];
+  struct idynarray     operands;
+  idynarray_init(&operands, inline_storage, sizeof(inline_storage));
+
+  do {
+    union ast_expression *operand = parse_expression(s, PREC_COMPARISON + 1);
+
+    struct comparison_op *comparison_op
+        = idynarray_append(&operands, struct comparison_op);
+    comparison_op->op = op;
+    comparison_op->operand = operand;
+
+    op = parse_compare_op(s);
+  } while (op >= 0);
+
+  unsigned num_operands = idynarray_length(&operands, struct comparison_op);
+  size_t   operands_size = num_operands * sizeof(struct comparison_op);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_comparison) + operands_size, AST_COMPARISON);
+  expression->comparison.num_operands = num_operands;
+  expression->comparison.left = left;
+  memcpy(expression->comparison.operands, idynarray_data(&operands),
+         operands_size);
+  idynarray_free(&operands);
+  return expression;
+}
+
 static union ast_expression *parse_add(struct parser_state  *s,
                                        union ast_expression *left)
 {
@@ -949,12 +1019,6 @@ parse_conditional(struct parser_state  *s,
   return expression;
 }
 
-static union ast_expression *parse_equal(struct parser_state  *s,
-                                         union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_EQUAL, left);
-}
-
 static union ast_expression *parse_floor_div(struct parser_state  *s,
                                              union ast_expression *left)
 {
@@ -965,53 +1029,6 @@ static union ast_expression *parse_floor_div_assign(struct parser_state  *s,
                                                     union ast_expression *left)
 {
   return parse_binexpr_assign(s, AST_BINEXPR_FLOORDIV_ASSIGN, left);
-}
-
-static union ast_expression *parse_greater(struct parser_state  *s,
-                                           union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER, left);
-}
-
-static union ast_expression *parse_greater_equal(struct parser_state  *s,
-                                                 union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_GREATER_EQUAL,
-                       left);
-}
-
-static union ast_expression *parse_in(struct parser_state  *s,
-                                      union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_IN, left);
-}
-
-static union ast_expression *parse_is(struct parser_state  *s,
-                                      union ast_expression *left)
-{
-  eat(s, T_is);
-  uint8_t ast_node_type
-      = accept(s, T_not) ? AST_BINEXPR_IS_NOT : AST_BINEXPR_IS;
-
-  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_binexpr, ast_node_type);
-  expression->binexpr.left = left;
-  expression->binexpr.right = right;
-  return expression;
-}
-
-static union ast_expression *parse_less(struct parser_state  *s,
-                                        union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS, left);
-}
-
-static union ast_expression *parse_less_equal(struct parser_state  *s,
-                                              union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_LESS_EQUAL, left);
 }
 
 static union ast_expression *parse_logical_and(struct parser_state  *s,
@@ -1060,20 +1077,6 @@ static union ast_expression *parse_mul_assign(struct parser_state  *s,
                                               union ast_expression *left)
 {
   return parse_binexpr_assign(s, AST_BINEXPR_MUL_ASSIGN, left);
-}
-
-static union ast_expression *parse_not_in(struct parser_state  *s,
-                                          union ast_expression *left)
-{
-  eat(s, T_not);
-  expect(s, T_in);
-
-  union ast_expression *right = parse_expression(s, PREC_COMPARISON + 1);
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_binexpr, AST_BINEXPR_NOT_IN);
-  expression->binexpr.left = left;
-  expression->binexpr.right = right;
-  return expression;
 }
 
 static union ast_expression *parse_or(struct parser_state  *s,
@@ -1182,12 +1185,6 @@ static union ast_expression *parse_true_div_assign(struct parser_state  *s,
   return parse_binexpr_assign(s, AST_BINEXPR_TRUEDIV_ASSIGN, left);
 }
 
-static union ast_expression *parse_unequal(struct parser_state  *s,
-                                           union ast_expression *left)
-{
-  return parse_binexpr(s, PREC_COMPARISON + 1, AST_BINEXPR_UNEQUAL, left);
-}
-
 static union ast_expression *parse_xor(struct parser_state  *s,
                                        union ast_expression *left)
 {
@@ -1219,18 +1216,18 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   ['-']    = { .func = parse_sub,         .precedence = PREC_ARITH       },
   ['.']    = { .func = parse_attr,        .precedence = PREC_PRIMARY     },
   ['/']    = { .func = parse_true_div,    .precedence = PREC_TERM        },
-  ['<']    = { .func = parse_less,        .precedence = PREC_COMPARISON  },
+  ['<']    = { .func = parse_comparison,  .precedence = PREC_COMPARISON  },
   ['=']    = { .func = parse_assignment,  .precedence = PREC_ASSIGN      },
-  ['>']    = { .func = parse_greater,     .precedence = PREC_COMPARISON  },
+  ['>']    = { .func = parse_comparison,  .precedence = PREC_COMPARISON  },
   ['@']    = { .func = parse_matmul,      .precedence = PREC_TERM        },
   ['[']    = { .func = parse_subscript,   .precedence = PREC_PRIMARY     },
   ['^']    = { .func = parse_xor,         .precedence = PREC_XOR         },
   ['|']    = { .func = parse_or,          .precedence = PREC_OR          },
   [T_and]  = { .func = parse_logical_and, .precedence = PREC_LOGICAL_AND },
   [T_if]   = { .func = parse_conditional, .precedence = PREC_TEST        },
-  [T_in]   = { .func = parse_in,          .precedence = PREC_COMPARISON  },
-  [T_is]   = { .func = parse_is,          .precedence = PREC_COMPARISON  },
-  [T_not]  = { .func = parse_not_in,      .precedence = PREC_COMPARISON  },
+  [T_in]   = { .func = parse_comparison,  .precedence = PREC_COMPARISON  },
+  [T_is]   = { .func = parse_comparison,  .precedence = PREC_COMPARISON  },
+  [T_not]  = { .func = parse_comparison,  .precedence = PREC_COMPARISON  },
   [T_or]   = { .func = parse_logical_or,  .precedence = PREC_LOGICAL_OR  },
   [T_AMPERSAND_EQUALS]
     = { .func = parse_and_assign,         .precedence = PREC_ASSIGN     },
@@ -1247,17 +1244,17 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   [T_CARET_EQUALS]
     = { .func = parse_xor_assign,         .precedence = PREC_ASSIGN     },
   [T_EQUALS_EQUALS]
-    = { .func = parse_equal,              .precedence = PREC_COMPARISON },
-  [T_EXCLAMATIONMARKEQUALS]
-    = { .func = parse_unequal,            .precedence = PREC_COMPARISON },
+    = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
+  [T_EXCLAMATIONMARK_EQUALS]
+    = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
   [T_GREATER_THAN_EQUALS]
-    = { .func = parse_greater_equal,      .precedence = PREC_COMPARISON },
+    = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
   [T_GREATER_THAN_GREATER_THAN_EQUALS]
     = { .func = parse_shift_right_assign, .precedence = PREC_ASSIGN     },
   [ T_GREATER_THAN_GREATER_THAN]
     = { .func = parse_shift_right,        .precedence = PREC_SHIFT      },
   [T_LESS_THAN_EQUALS]
-    = { .func = parse_less_equal,         .precedence = PREC_COMPARISON },
+    = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
   [T_LESS_THAN_LESS_THAN_EQUALS]
     = { .func = parse_shift_left_assign,  .precedence = PREC_ASSIGN     },
   [T_LESS_THAN_LESS_THAN]

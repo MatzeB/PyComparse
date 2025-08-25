@@ -836,7 +836,7 @@ restart:
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        s->token.kind = T_EXCLAMATIONMARKEQUALS;
+        s->token.kind = T_EXCLAMATIONMARK_EQUALS;
       } else {
         goto invalid_char;
       }
@@ -1027,6 +1027,16 @@ restart:
         return;
       }
 
+    case ':':
+      next_char(s);
+      if (s->c == '=') {
+        next_char(s);
+        s->token.kind = T_COLOR_EQUALS;
+      } else {
+        s->token.kind = ':';
+      }
+      return;
+
     case '(':
     case '[':
     case '{':
@@ -1040,7 +1050,6 @@ restart:
       goto single_char_token;
 
     case ',':
-    case ':':
     case ';':
     case '~':
     single_char_token:

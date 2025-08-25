@@ -14,9 +14,8 @@ void object_intern_init(struct object_intern *s)
   s->singleton_false = object_new_singleton(&s->arena, OBJECT_FALSE);
   s->singleton_ellipsis = object_new_singleton(&s->arena, OBJECT_ELLIPSIS);
 
-  union object *empty_tuple = object_new_tuple_begin(&s->arena, 0);
-  object_new_tuple_end(empty_tuple);
-  s->empty_tuple = empty_tuple;
+  struct tuple_prep *empty_tuple_prep = object_new_tuple_begin(&s->arena, 0);
+  s->empty_tuple = object_new_tuple_end(empty_tuple_prep);
 }
 
 void object_intern_free(struct object_intern *s)
@@ -109,4 +108,39 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   union object *result = object_new_int(&s->arena, value);
   object_list_append(s->objects, result);
   return result;
+}
+
+struct tuple_prep *object_intern_tuple_begin(struct object_intern *s,
+                                             uint32_t              length)
+{
+  return object_new_tuple_begin(&s->arena, length);
+}
+
+union object *object_intern_tuple_end(struct object_intern *s,
+                                      struct tuple_prep    *tuple,
+                                      bool                  may_free_arena)
+{
+  union object *tuple_obj = object_new_tuple_end(tuple);
+
+  // TODO: hashmap
+  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
+    union object *object = object_list_at(s->objects, i);
+    if (object_type(object) != OBJECT_TUPLE) continue;
+    uint32_t length = object_tuple_length(tuple_obj);
+    if (object_tuple_length(object) != length) continue;
+    bool equal = true;
+    for (uint32_t i = 0; i < length; i++) {
+      if (object_tuple_at(object, i) != object_tuple_at(tuple_obj, i)) {
+        equal = false;
+        break;
+      }
+    }
+    if (equal) {
+      if (may_free_arena) {
+        arena_free_to(&s->arena, tuple_obj);
+      }
+      return object;
+    }
+  }
+  return tuple_obj;
 }

@@ -33,28 +33,15 @@ void diag_token_kind(struct diagnostics_state *s, enum token_kind kind)
 {
   assert(s->in_diagnostic);
   const char *name = token_kind_name(kind);
-  switch (kind) {
-  case T_STRING:
-  case T_INDENT:
-  case T_DEDENT:
-  case T_NEWLINE:
-  case T_EOF:
-    fputs(name, s->out);
-    break;
-  default:
-    fputc('\'', s->out);
-    fputs(name, s->out);
-    fputc('\'', s->out);
-    break;
-  }
+  fputs(name, s->out);
 }
 
 void diag_symbol(struct diagnostics_state *s, struct symbol *symbol)
 {
   assert(s->in_diagnostic);
-  fputc('\'', s->out);
+  fputc('`', s->out);
   fputs(symbol->string, s->out);
-  fputc('\'', s->out);
+  fputc('`', s->out);
 }
 
 void diag_expression(struct diagnostics_state *s,

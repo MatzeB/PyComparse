@@ -67,7 +67,7 @@ union object *object_new_code(struct arena *arena)
   return object_allocate_zero(arena, struct object_code, OBJECT_CODE);
 }
 
-union object *object_new_tuple_begin(struct arena *arena, uint32_t length)
+struct tuple_prep *object_new_tuple_begin(struct arena *arena, uint32_t length)
 {
   assert(length < UINT32_MAX);
   union object *object;
@@ -80,26 +80,29 @@ union object *object_new_tuple_begin(struct arena *arena, uint32_t length)
     object->tuple.items[i] = (union object *)(-1);
   }
 #endif
-  return object;
+  return (struct tuple_prep *)object;
 }
 
-void object_new_tuple_set_at(union object *tuple, uint32_t index,
+void object_new_tuple_set_at(struct tuple_prep *tuple, uint32_t index,
                              union object *object)
 {
-  assert(tuple->type == OBJECT_TUPLE_CONSTRUCTION);
-  assert(index < tuple->tuple.length);
-  tuple->tuple.items[index] = object;
+  union object *tuple_obj = (union object *)tuple;
+  assert(tuple_obj->type == OBJECT_TUPLE_CONSTRUCTION);
+  assert(index < tuple_obj->tuple.length);
+  tuple_obj->tuple.items[index] = object;
 }
 
-void object_new_tuple_end(union object *tuple)
+union object *object_new_tuple_end(struct tuple_prep *tuple)
 {
-  assert(tuple->type == OBJECT_TUPLE_CONSTRUCTION);
+  union object *object = (union object *)tuple;
+  assert(object->type == OBJECT_TUPLE_CONSTRUCTION);
 #ifndef NDEBUG
-  for (uint32_t i = 0; i < tuple->tuple.length; i++) {
-    assert(tuple->tuple.items[i] != (union object *)(-1));
+  for (uint32_t i = 0; i < object->tuple.length; i++) {
+    assert(object->tuple.items[i] != (union object *)(-1));
   }
 #endif
-  tuple->type = OBJECT_TUPLE;
+  object->type = OBJECT_TUPLE;
+  return object;
 }
 
 static bool object_type_is_singleton(enum object_type type)
@@ -180,6 +183,19 @@ bool object_string_equals(const union object *object, uint32_t length,
   }
   if (length == 0) return true;
   return memcmp(object->string.chars, chars, length) == 0;
+}
+
+uint32_t object_tuple_length(const union object *object)
+{
+  assert(object->type == OBJECT_TUPLE);
+  return object->tuple.length;
+}
+
+union object *object_tuple_at(union object *object, uint32_t index)
+{
+  assert(object->type == OBJECT_TUPLE);
+  assert(index <= object->tuple.length);
+  return object->tuple.items[index];
 }
 
 double object_float_value(const union object *object)

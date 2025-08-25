@@ -36,14 +36,13 @@ union object *ast_tuple_compute_constant(struct object_intern       *intern,
     }
   }
 
-  struct arena *arena = object_intern_arena(intern);
-  union object *constant = object_new_tuple_begin(arena, num_expressions);
+  struct tuple_prep *constant_prep
+      = object_intern_tuple_begin(intern, num_expressions);
   for (unsigned i = 0; i < num_expressions; i++) {
     union ast_expression *expression = tuple->expressions[i];
     union object *expression_constant = ast_expression_as_constant(expression);
-    object_new_tuple_set_at(constant, i, expression_constant);
+    object_new_tuple_set_at(constant_prep, i, expression_constant);
   }
-  object_new_tuple_end(constant);
-  /* TODO: intern? */
-  return constant;
+  return object_intern_tuple_end(intern, constant_prep,
+                                 /*may_free_arena=*/true);
 }

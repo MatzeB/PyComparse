@@ -93,13 +93,14 @@ static inline void arena_free_to(struct arena *arena, const void *free_up_to)
 {
   assert(arena->grow == 0);
   struct block_header *block = arena->block;
-  for (struct block_header *prev; block != NULL; block = prev) {
-    assert(block != NULL && "address must be part of arena");
-    if (free_up_to > (const void *)block
+  for (;;) {
+    if ((const void *)block <= free_up_to
         && free_up_to < (const void *)((char *)block + block->block_size))
       break;
-    prev = block->prev;
+    struct block_header *prev = block->prev;
     free(block);
+    block = prev;
+    assert(block != NULL && "address must be part of arena");
   }
   arena->block = block;
   arena->allocated = (const char *)free_up_to - (const char *)block;

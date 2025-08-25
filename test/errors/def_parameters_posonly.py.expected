@@ -1,4 +1,4 @@
-test/errors/def_parameters_posonly.py:1 error: at least one argument must precede '/'
-test/errors/def_parameters_posonly.py:4 error: at least one argument must precede '/'
-test/errors/def_parameters_posonly.py:7 error: '/' must be ahead of '*'
-test/errors/def_parameters_posonly.py:10 error: '/' must be ahead of '**'
+test/errors/def_parameters_posonly.py:1 error: need at least one argument before `/`
+test/errors/def_parameters_posonly.py:4 error: need at least one argument before `/`
+test/errors/def_parameters_posonly.py:7 error: `/` must be ahead of `*`-parameter
+test/errors/def_parameters_posonly.py:10 error: `/` must be ahead of `**`-parameter

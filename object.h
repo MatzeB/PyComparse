@@ -8,6 +8,7 @@
 ASSUME_NONNULL_BEGIN
 
 struct arena;
+struct tuple_prep; /* deliberately incomplete */
 union object;
 
 #define CO_OPTIMIZED          0x0001
@@ -63,16 +64,20 @@ union object *object_new_string(struct arena *arena, enum object_type type,
 union object *object_new_float(struct arena *arena, double value);
 union object *object_new_int(struct arena *arena, int32_t value);
 
-union object *object_new_tuple_begin(struct arena *arena, uint32_t length);
-void          object_new_tuple_set_at(union object *tuple, uint32_t index,
+struct tuple_prep *object_new_tuple_begin(struct arena *arena,
+                                          uint32_t      length);
+void          object_new_tuple_set_at(struct tuple_prep *tuple, uint32_t index,
                                       union object *object);
-void          object_new_tuple_end(union object *tuple);
+union object *object_new_tuple_end(struct tuple_prep *tuple_prep);
 
 enum object_type object_type(const union object *object);
 bool objects_equal(const union object *object0, const union object *object1);
 
 bool object_string_equals(const union object *object, uint32_t length,
                           const char *nullable chars);
+
+uint32_t      object_tuple_length(const union object *object);
+union object *object_tuple_at(union object *object, uint32_t index);
 
 double  object_float_value(const union object *object);
 int64_t object_int_value(const union object *object);

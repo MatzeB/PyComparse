@@ -1,1 +1,1 @@
-test/errors/statement_for.py:2 error: expected :, got new line
+test/errors/statement_for.py:2 error: expected `:`, got new line

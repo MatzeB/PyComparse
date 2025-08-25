@@ -1,2 +1,2 @@
-test/errors/expr_conditional.py:1 error: expected else, got if
-test/errors/expr_conditional.py:1 error: expected new line, got else
+test/errors/expr_conditional.py:1 error: expected `else`, got `if`
+test/errors/expr_conditional.py:1 error: expected new line, got `else`

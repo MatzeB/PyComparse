@@ -17,6 +17,7 @@ struct symbol;
 union ast_expression;
 
 struct def_state {
+  bool annotations;
   bool defaults;
   bool keyword_defaults;
 };
@@ -41,7 +42,7 @@ struct if_state {
   struct basic_block *nullable footer;
 };
 
-enum parameter_type {
+enum parameter_variant {
   PARAMETER_NORMAL,
   PARAMETER_STAR,
   PARAMETER_STAR_STAR,
@@ -49,8 +50,9 @@ enum parameter_type {
 
 struct parameter {
   struct symbol                 *name;
+  union ast_expression *nullable type;
   union ast_expression *nullable initializer;
-  enum parameter_type            type;
+  enum parameter_variant         variant;
 };
 
 struct try_state {
@@ -98,7 +100,8 @@ bool emit_continue(struct cg_state *s);
 
 void emit_def_begin(struct cg_state *s, struct def_state *state,
                     unsigned num_parameters, struct parameter *parameters,
-                    unsigned positional_only_argcount);
+                    unsigned                       positional_only_argcount,
+                    union ast_expression *nullable return_type);
 void emit_def_end(struct cg_state *s, struct def_state *state,
                   struct symbol *symbol, unsigned num_decorators);
 

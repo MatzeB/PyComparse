@@ -1,1 +1,1 @@
-test/errors/def_duplicate_parameter.py:1 error: duplicate argument 'x'
+test/errors/def_duplicate_parameter.py:1 error: duplicate argument `x`

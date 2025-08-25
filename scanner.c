@@ -1108,12 +1108,14 @@ void scanner_free(struct scanner_state *s)
 }
 
 static const char *const token_names[] = {
-#define TCHAR(val, name, desc) TDES(name, desc)
-#define TDES(name, desc)       [name] = desc,
-#define TID(id, name)          [name] = #id,
+#define TCHAR(val, name, desc)    [name] = "`" desc "`",
+#define TDES_VAL(name, desc, val) [name] = desc,
+#define TDES(name, desc)          [name] = desc,
+#define TID(id, name)             [name] = "`" #id "`",
 #include "tokens.h"
 #undef TID
 #undef TDES
+#undef TDES_VAL
 #undef TCHAR
 };
 
@@ -1154,13 +1156,13 @@ void print_token(FILE *out, const struct token *token)
     fputc('"', out);
     break;
   case T_FLOAT:
-    fprintf(out, "float %f", token->u.object->float_obj.value);
+    fprintf(out, "%f", token->u.object->float_obj.value);
     break;
   case T_INTEGER:
-    fprintf(out, "integer %" PRId64, token->u.object->int_obj.value);
+    fprintf(out, "%" PRId64, token->u.object->int_obj.value);
     break;
   case T_IDENTIFIER:
-    fprintf(out, "identifier %s", token->u.symbol->string);
+    fprintf(out, "`%s`", token->u.symbol->string);
     break;
   default:
     fprintf(out, "%s", token_kind_name(token->kind));

@@ -1,2 +1,2 @@
-test/errors/loop_contine_break.py:1 error: 'break' outside loop
-test/errors/loop_contine_break.py:2 error: 'continue' outside loop
+test/errors/loop_contine_break.py:1 error: `break` outside loop
+test/errors/loop_contine_break.py:2 error: `continue` outside loop

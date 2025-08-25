@@ -302,14 +302,15 @@ emit_expression_list_helper_unpack(struct cg_state            *s,
       cg_op_pop_push(s, OPCODE_BUILD_TUPLE, tuple_length,
                      /*pop=*/tuple_length, /*push=*/1);
     } else {
-      struct arena *arena = object_intern_arena(&s->objects);
-      union object *tuple = object_new_tuple_begin(arena, tuple_length);
+      struct tuple_prep *tuple_prep
+          = object_intern_tuple_begin(&s->objects, tuple_length);
       for (unsigned i = 0; i < tuple_length; i++) {
         union ast_expression *expression = expressions[tuple_begin_idx + i];
         union object *as_const = ast_expression_as_constant(expression);
-        object_new_tuple_set_at(tuple, i, as_const);
+        object_new_tuple_set_at(tuple_prep, i, as_const);
       }
-      object_new_tuple_end(tuple);
+      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+                                                    /*may_free_arena=*/true);
       cg_load_const(s, tuple);
     }
     ++num_unpack_expressions;
@@ -407,15 +408,16 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
       cg_op_pop_push(s, OPCODE_BUILD_TUPLE, tuple_length + num_extra_args,
                      /*pop=*/tuple_length, /*push=*/1);
     } else {
-      struct arena *arena = object_intern_arena(&s->objects);
-      union object *tuple = object_new_tuple_begin(arena, tuple_length);
+      struct tuple_prep *tuple_prep
+          = object_intern_tuple_begin(&s->objects, tuple_length);
       for (unsigned i = 0; i < tuple_length; i++) {
         struct argument      *argument = &arguments[tuple_begin_idx + i];
         union ast_expression *expression = argument->expression;
         union object         *object = ast_expression_as_constant(expression);
-        object_new_tuple_set_at(tuple, i, object);
+        object_new_tuple_set_at(tuple_prep, i, object);
       }
-      object_new_tuple_end(tuple);
+      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+                                                    /*may_free_arena=*/true);
       cg_load_const(s, tuple);
     }
     ++num_tuple_elements;
@@ -459,16 +461,17 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
       emit_expression(s, argument->expression);
       cg_op_pop_push(s, OPCODE_BUILD_MAP, 1, /*pop=*/2, /*push=*/1);
     } else {
-      struct arena *arena = object_intern_arena(&s->objects);
-      union object *names = object_new_tuple_begin(arena, kw_length);
+      struct tuple_prep *names_prep
+          = object_intern_tuple_begin(&s->objects, kw_length);
       for (unsigned a = 0; a < kw_length; a++) {
         struct argument *argument = &arguments[kw_begin_idx + a];
         union object    *name
             = object_intern_cstring(&s->objects, argument->name->string);
-        object_new_tuple_set_at(names, a, name);
+        object_new_tuple_set_at(names_prep, a, name);
         emit_expression(s, argument->expression);
       }
-      object_new_tuple_end(names);
+      union object *names = object_intern_tuple_end(&s->objects, names_prep,
+                                                    /*may_free_arena=*/false);
       cg_load_const(s, names);
       cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, kw_length,
                      /*pop=*/kw_length + 1, /*push=*/1);
@@ -504,17 +507,18 @@ static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,
     emit_expression(s, argument->expression);
   }
 
-  unsigned      num_kw_arguments = num_arguments - kw_idx;
-  struct arena *arena = object_intern_arena(&s->objects);
-  union object *names = object_new_tuple_begin(arena, num_kw_arguments);
+  unsigned           num_kw_arguments = num_arguments - kw_idx;
+  struct tuple_prep *names_prep
+      = object_intern_tuple_begin(&s->objects, num_kw_arguments);
   for (unsigned i = 0; i < num_kw_arguments; i++) {
     struct argument *argument = &arguments[kw_idx + i];
     emit_expression(s, argument->expression);
     union object *name
         = object_intern_cstring(&s->objects, argument->name->string);
-    object_new_tuple_set_at(names, i, name);
+    object_new_tuple_set_at(names_prep, i, name);
   }
-  object_new_tuple_end(names);
+  union object *names = object_intern_tuple_end(&s->objects, names_prep,
+                                                /*may_free_arena=*/false);
   cg_load_const(s, names);
 
   num_arguments += num_extra_args;

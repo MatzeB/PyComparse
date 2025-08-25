@@ -1,1 +1,1 @@
-test/errors/statement2.py:2 error: expected ), got identifier print
+test/errors/statement2.py:2 error: expected `)`, got `print`

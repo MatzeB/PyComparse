@@ -907,8 +907,15 @@ static bool check_assignment_target(struct parser_state  *s,
   diag_frag(&s->d, is_del ? "cannot delete " : "cannot assign to ");
   diag_expression(&s->d, expression);
   if (!is_del) {
-    /* TODO: only show ':=' suggestion where it makes sense like python... */
-    diag_frag(&s->d, ". Maybe you meant '==', or ':=' instead of '='?");
+    /* TODO: only show ':=' suggestion where it makes sense (like cpython)...
+     */
+    diag_frag(&s->d, ". Maybe you meant ");
+    diag_token_kind(&s->d, T_EQUALS_EQUALS);
+    diag_frag(&s->d, ", or ");
+    diag_token_kind(&s->d, T_COLOR_EQUALS);
+    diag_frag(&s->d, " instead of ");
+    diag_token_kind(&s->d, '=');
+    diag_frag(&s->d, "?");
   }
   diag_end(&s->d);
   return true;
@@ -1342,7 +1349,8 @@ static void parse_break(struct parser_state *s)
   if (!emit_break(&s->cg)) {
     struct location location = scanner_location(&s->scanner);
     diag_begin_error(&s->d, location);
-    diag_frag(&s->d, "'break' outside loop");
+    diag_token_kind(&s->d, T_break);
+    diag_frag(&s->d, " outside loop");
     diag_end(&s->d);
   }
   eat(s, T_break);
@@ -1353,7 +1361,8 @@ static void parse_continue(struct parser_state *s)
   if (!emit_continue(&s->cg)) {
     struct location location = scanner_location(&s->scanner);
     diag_begin_error(&s->d, location);
-    diag_frag(&s->d, "'continue' outside loop");
+    diag_token_kind(&s->d, T_continue);
+    diag_frag(&s->d, " outside loop");
     diag_end(&s->d);
   }
   eat(s, T_continue);
@@ -1622,14 +1631,11 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 }
 
 static void parse_def_parameters(struct parser_state *s,
-                                 struct def_state    *state)
+                                 struct idynarray    *parameters,
+                                 unsigned *positional_only_argcount_res)
 {
   expect(s, '(');
   add_anchor(s, ')');
-
-  struct parameter inline_storage[16];
-  struct idynarray parameters;
-  idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
 
   unsigned positional_only_argcount = 0;
   bool     had_default = false;
@@ -1637,7 +1643,7 @@ static void parse_def_parameters(struct parser_state *s,
   bool     had_variable_keyword_args = false;
 
   for (;;) {
-    enum parameter_type type = PARAMETER_NORMAL;
+    enum parameter_variant variant = PARAMETER_NORMAL;
     switch (peek(s)) {
     case ')':
       break;
@@ -1652,13 +1658,14 @@ static void parse_def_parameters(struct parser_state *s,
         diag_token_kind(&s->d, '/');
         diag_frag(&s->d, " must be ahead of ");
         diag_token_kind(&s->d, had_variable_args ? '*' : T_ASTERISK_ASTERISK);
+        diag_frag(&s->d, "-parameter");
         diag_end(&s->d);
       } else {
         positional_only_argcount
-            = idynarray_length(&parameters, struct parameter);
+            = idynarray_length(parameters, struct parameter);
         if (positional_only_argcount == 0) {
           diag_begin_error(&s->d, scanner_location(&s->scanner));
-          diag_frag(&s->d, "at least one argument must precede ");
+          diag_frag(&s->d, "need at least one argument before ");
           diag_token_kind(&s->d, '/');
           diag_end(&s->d);
         }
@@ -1672,7 +1679,7 @@ static void parse_def_parameters(struct parser_state *s,
         diag_frag(&s->d, " argument may appear only once");
         diag_end(&s->d);
       } else {
-        type = PARAMETER_STAR;
+        variant = PARAMETER_STAR;
         had_variable_args = true;
       }
       eat(s, '*');
@@ -1689,7 +1696,7 @@ static void parse_def_parameters(struct parser_state *s,
         diag_frag(&s->d, " argument may appear only once");
         diag_end(&s->d);
       } else {
-        type = PARAMETER_STAR_STAR;
+        variant = PARAMETER_STAR_STAR;
         had_variable_keyword_args = true;
       }
       /* TODO: report error when any other parameters follow ** */
@@ -1703,12 +1710,17 @@ static void parse_def_parameters(struct parser_state *s,
       struct location location = scanner_location(&s->scanner);
       struct symbol  *name = eat_identifier(s);
 
+      union ast_expression *type = NULL;
+      if (accept(s, ':')) {
+        type = parse_expression(s, PREC_EXPRESSION);
+      }
+
       union ast_expression *initializer = NULL;
       if (accept(s, '=')) {
         struct location location = scanner_location(&s->scanner);
         initializer = parse_expression(s, PREC_LIST + 1);
         had_default = true;
-        if (type != PARAMETER_NORMAL) {
+        if (variant != PARAMETER_NORMAL) {
           diag_begin_error(&s->d, location);
           diag_frag(&s->d,
                     "variable argument parameter cannot have a default value");
@@ -1716,7 +1728,7 @@ static void parse_def_parameters(struct parser_state *s,
           initializer = NULL;
         }
       } else if (had_default && !had_variable_args
-                 && type != PARAMETER_STAR_STAR) {
+                 && variant != PARAMETER_STAR_STAR) {
         diag_begin_error(&s->d, location);
         diag_frag(&s->d,
                   "parameter without default follows parameter with default");
@@ -1724,8 +1736,8 @@ static void parse_def_parameters(struct parser_state *s,
       }
 
       bool              error_duplicate = false;
-      struct parameter *parr = idynarray_data(&parameters);
-      for (unsigned p = 0, e = idynarray_length(&parameters, struct parameter);
+      struct parameter *parr = idynarray_data(parameters);
+      for (unsigned p = 0, e = idynarray_length(parameters, struct parameter);
            p < e; p++) {
         if (parr[p].name == name) {
           diag_begin_error(&s->d, location);
@@ -1738,10 +1750,11 @@ static void parse_def_parameters(struct parser_state *s,
 
       if (!error_duplicate) {
         struct parameter *parameter
-            = idynarray_append(&parameters, struct parameter);
+            = idynarray_append(parameters, struct parameter);
         parameter->name = name;
-        parameter->initializer = initializer;
         parameter->type = type;
+        parameter->initializer = initializer;
+        parameter->variant = variant;
       }
       break;
     }
@@ -1751,12 +1764,7 @@ static void parse_def_parameters(struct parser_state *s,
 
   remove_anchor(s, ')');
   expect(s, ')');
-
-  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
-  emit_def_begin(&s->cg, state, num_parameters, idynarray_data(&parameters),
-                 positional_only_argcount);
-
-  idynarray_free(&parameters);
+  *positional_only_argcount_res = positional_only_argcount;
 }
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)
@@ -1765,14 +1773,26 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
   if (!skip_till(s, T_IDENTIFIER)) return;
   struct symbol *name = eat_identifier(s);
 
-  struct def_state state;
+  struct parameter inline_storage[16];
+  struct idynarray parameters;
+  idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
+  unsigned positional_only_argcount;
 
-  parse_def_parameters(s, &state);
+  parse_def_parameters(s, &parameters, &positional_only_argcount);
+
+  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
+  struct parameter *parameter_arr = idynarray_data(&parameters);
+
+  union ast_expression *return_type = NULL;
   if (accept(s, T_MINUS_GREATER_THAN)) {
-    parse_expression(s, PREC_TEST);
-    unimplemented();
+    return_type = parse_expression(s, PREC_EXPRESSION);
   }
   expect(s, ':');
+
+  struct def_state state;
+  emit_def_begin(&s->cg, &state, num_parameters, parameter_arr,
+                 positional_only_argcount, return_type);
+  idynarray_free(&parameters);
 
   parse_suite(s);
 

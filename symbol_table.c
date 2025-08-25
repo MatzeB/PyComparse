@@ -113,10 +113,12 @@ void symbol_table_init(struct symbol_table *symbol_table)
 
 #define TCHAR(val, name, desc)
 #define TDES(name, desc)
+#define TDES_VAL(name, desc, val)
 #define TID(id, name) symbol_table_insert_predefined(symbol_table, #id, name);
 #include "tokens.h"
 #undef TID
 #undef TDES
+#undef TDES_VAL
 #undef TCHAR
 }
 

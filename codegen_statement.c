@@ -197,22 +197,23 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
                                         : cg_register_name_from_cstring(s, "");
   bool     import_star = (num_pairs == 0);
 
-  struct arena *arena = object_intern_arena(&s->objects);
-  union object *name_tuple;
+  struct tuple_prep *name_tuple_prep;
   if (import_star) {
-    name_tuple = object_new_tuple_begin(arena, 1);
     union object *name = object_intern_cstring(&s->objects, "*");
-    object_new_tuple_set_at(name_tuple, 0, name);
+    name_tuple_prep = object_intern_tuple_begin(&s->objects, 1);
+    object_new_tuple_set_at(name_tuple_prep, 0, name);
   } else {
-    name_tuple = object_new_tuple_begin(arena, num_pairs);
+    name_tuple_prep = object_intern_tuple_begin(&s->objects, num_pairs);
     for (unsigned i = 0; i < num_pairs; i++) {
       struct from_import_item *item = &items[i];
       union object            *name
           = object_intern_cstring(&s->objects, item->name->string);
-      object_new_tuple_set_at(name_tuple, i, name);
+      object_new_tuple_set_at(name_tuple_prep, i, name);
     }
   }
-  object_new_tuple_end(name_tuple);
+  union object *name_tuple
+      = object_intern_tuple_end(&s->objects, name_tuple_prep,
+                                /*may_free_arena=*/false);
 
   cg_load_const(s, object_intern_int(&s->objects, num_prefix_dots));
   cg_load_const(s, name_tuple);
@@ -844,7 +845,7 @@ static void emit_parameter_defaults(struct cg_state  *s,
   for (unsigned i = 0; i < num_parameters; i++) {
     struct parameter     *parameter = &parameters[i];
     union ast_expression *initializer = parameter->initializer;
-    if (parameter->type == PARAMETER_STAR) {
+    if (parameter->variant == PARAMETER_STAR) {
       keyword_parameters_begin = i + 1;
       assert(initializer == NULL);
       continue;
@@ -863,18 +864,18 @@ static void emit_parameter_defaults(struct cg_state  *s,
 
   if (num_positional_defaults > 0) {
     if (all_positional_const) {
-      struct arena *arena = object_intern_arena(&s->objects);
-      union object *tuple
-          = object_new_tuple_begin(arena, num_positional_defaults);
+      struct tuple_prep *tuple_prep
+          = object_intern_tuple_begin(&s->objects, num_positional_defaults);
       unsigned tuple_idx = 0;
       for (unsigned i = 0; i < keyword_parameters_begin; i++) {
         struct parameter     *parameter = &parameters[i];
         union ast_expression *initializer = parameter->initializer;
         if (initializer == NULL) continue;
         union object *constant = ast_expression_as_constant(initializer);
-        object_new_tuple_set_at(tuple, tuple_idx++, constant);
+        object_new_tuple_set_at(tuple_prep, tuple_idx++, constant);
       }
-      object_new_tuple_end(tuple);
+      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+                                                    /*may_free_arena=*/true);
       cg_load_const(s, tuple);
     } else {
       for (unsigned i = 0; i < keyword_parameters_begin; i++) {
@@ -889,9 +890,9 @@ static void emit_parameter_defaults(struct cg_state  *s,
     state->defaults = true;
   }
   if (num_keyword_defaults > 0) {
-    struct arena *arena = object_intern_arena(&s->objects);
-    union object *names = object_new_tuple_begin(arena, num_keyword_defaults);
-    unsigned      name_idx = 0;
+    struct tuple_prep *names_prep
+        = object_intern_tuple_begin(&s->objects, num_keyword_defaults);
+    unsigned name_idx = 0;
     for (unsigned i = keyword_parameters_begin; i < num_parameters; i++) {
       struct parameter     *parameter = &parameters[i];
       union ast_expression *initializer = parameter->initializer;
@@ -899,10 +900,11 @@ static void emit_parameter_defaults(struct cg_state  *s,
       emit_expression(s, initializer);
       union object *name
           = object_intern_cstring(&s->objects, parameter->name->string);
-      object_new_tuple_set_at(names, name_idx++, name);
+      object_new_tuple_set_at(names_prep, name_idx++, name);
     }
     assert(name_idx == num_keyword_defaults);
-    object_new_tuple_end(names);
+    union object *names = object_intern_tuple_end(&s->objects, names_prep,
+                                                  /*may_free_arena=*/false);
     cg_load_const(s, names);
     cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_keyword_defaults,
                    /*pop=*/num_keyword_defaults + 1, /*push=*/1);
@@ -910,9 +912,51 @@ static void emit_parameter_defaults(struct cg_state  *s,
   }
 }
 
+static void emit_function_annotations(
+    struct cg_state *s, struct def_state *state, unsigned num_parameters,
+    struct parameter *parameters, union ast_expression *nullable return_type)
+{
+  /* TODO: parameters */
+  unsigned num_annotation_items = 0;
+  if (return_type != NULL) num_annotation_items++;
+  for (unsigned i = 0; i < num_parameters; ++i) {
+    struct parameter *parameter = &parameters[i];
+    num_annotation_items += (parameter->type != NULL);
+  }
+
+  if (num_annotation_items == 0) return;
+
+  state->annotations = true;
+  struct tuple_prep *names_prep
+      = object_intern_tuple_begin(&s->objects, num_annotation_items);
+  unsigned names_idx = 0;
+
+  for (unsigned i = 0; i < num_parameters; ++i) {
+    struct parameter     *parameter = &parameters[i];
+    union ast_expression *type = parameter->type;
+    if (type == NULL) continue;
+    emit_expression(s, type);
+    union object *name
+        = object_intern_cstring(&s->objects, parameter->name->string);
+    object_new_tuple_set_at(names_prep, names_idx++, name);
+  }
+  if (return_type != NULL) {
+    emit_expression(s, return_type);
+    union object *name = object_intern_cstring(&s->objects, "return");
+    object_new_tuple_set_at(names_prep, names_idx++, name);
+  }
+
+  union object *names = object_intern_tuple_end(&s->objects, names_prep,
+                                                /*may_free_arena=*/false);
+  cg_load_const(s, names);
+  cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_annotation_items,
+                 /*pop=*/num_annotation_items + 1, /*push=*/1);
+}
+
 void emit_def_begin(struct cg_state *s, struct def_state *state,
                     unsigned num_parameters, struct parameter *parameters,
-                    unsigned positional_only_argcount)
+                    unsigned                       positional_only_argcount,
+                    union ast_expression *nullable return_type)
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) {
@@ -920,6 +964,7 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
   }
 
   emit_parameter_defaults(s, state, num_parameters, parameters);
+  emit_function_annotations(s, state, num_parameters, parameters, return_type);
 
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
@@ -931,13 +976,13 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
     struct parameter *parameter = &parameters[i];
 
     struct symbol *name = parameter->name;
-    if (parameter->type == PARAMETER_STAR) {
+    if (parameter->variant == PARAMETER_STAR) {
       assert(variable_arguments_name == NULL);
       keyword_only_idx = i + 1;
       variable_arguments_name = name;
       continue;
     }
-    if (parameter->type == PARAMETER_STAR_STAR) {
+    if (parameter->variant == PARAMETER_STAR_STAR) {
       assert(variable_keyword_arguments_name == NULL);
       s->code.flags |= CO_VARKEYWORDS;
       variable_keyword_arguments_name = name;
@@ -971,6 +1016,10 @@ void emit_def_end(struct cg_state *s, struct def_state *state,
   cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
   uint32_t flags = 0;
   unsigned operands = 2;
+  if (state->annotations) {
+    flags |= MAKE_FUNCTION_ANNOTATIONS;
+    operands++;
+  }
   if (state->defaults) {
     flags |= MAKE_FUNCTION_DEFAULTS;
     operands++;

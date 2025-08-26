@@ -143,6 +143,7 @@ union object *object_new_singleton(struct arena *arena, enum object_type type)
 union object *object_new_string(struct arena *arena, enum object_type type,
                                 uint32_t length, const char *chars)
 {
+  assert(chars != NULL);
   assert(length < UINT32_MAX);
   assert(object_type_is_string(type));
   union object *object

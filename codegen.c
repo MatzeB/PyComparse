@@ -452,7 +452,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   union object *filename = object_intern_cstring(&s->objects, s->filename);
   union object *name_string = object_intern_cstring(&s->objects, name);
   union object *lnotab
-      = object_intern_string(&s->objects, OBJECT_BYTES, 0, NULL);
+      = object_intern_string(&s->objects, OBJECT_BYTES, 0, "");
 
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;

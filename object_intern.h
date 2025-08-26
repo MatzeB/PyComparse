@@ -22,7 +22,7 @@ union object      *object_intern_singleton(struct object_intern *s,
                                            enum object_type      type);
 union object      *object_intern_string(struct object_intern *s,
                                         enum object_type type, uint32_t length,
-                                        const char *nullable chars);
+                                        const char *chars);
 struct tuple_prep *object_intern_tuple_begin(struct object_intern *s,
                                              uint32_t              length);
 union object      *object_intern_tuple_end(struct object_intern *s,

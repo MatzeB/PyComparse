@@ -1,0 +1,4 @@
+test/errors/stmt_for.py:2 error: starred expression not allowed here
+test/errors/stmt_for.py:6 error: starred expression not allowed here
+test/errors/stmt_for.py:10 error: cannot assign to expression
+test/errors/stmt_for.py:13 error: cannot assign to literal

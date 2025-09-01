@@ -90,7 +90,7 @@ enum generator_expression_part_type {
 
 struct generator_expression_part {
   enum generator_expression_part_type type;
-  union ast_expression *nullable      target;
+  union ast_expression *nullable      targets;
   union ast_expression               *expression;
 };
 

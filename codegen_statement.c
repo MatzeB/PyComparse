@@ -255,6 +255,21 @@ void emit_assert(struct cg_state *s, union ast_expression *expression,
   cg_block_begin(s, continue_block);
 }
 
+void emit_assign_statement(struct cg_state *s, unsigned num_targets,
+                           union ast_expression **targets,
+                           union ast_expression  *value)
+{
+  if (unreachable(s)) return;
+  emit_expression(s, value);
+  for (unsigned i = 0; i < num_targets; i++) {
+    union ast_expression *target = targets[i];
+    if (i < num_targets - 1) {
+      cg_op_push1(s, OPCODE_DUP_TOP, 0);
+    }
+    emit_assignment(s, target);
+  }
+}
+
 void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression)
 {
@@ -749,7 +764,7 @@ void emit_if_end(struct cg_state *s, struct if_state *state)
 
 static void emit_for_begin_impl(struct cg_state        *s,
                                 struct for_while_state *state,
-                                union ast_expression   *target)
+                                union ast_expression   *targets)
 {
   struct basic_block *header = cg_allocate_block(s);
   struct basic_block *footer = cg_allocate_block(s);
@@ -763,7 +778,7 @@ static void emit_for_begin_impl(struct cg_state        *s,
   cg_push(s, 1);
 
   cg_block_begin(s, body);
-  emit_assignment(s, target);
+  emit_assignment(s, targets);
 
   state->else_or_footer = else_block;
   state->saved = s->code.loop_state;
@@ -775,7 +790,7 @@ static void emit_for_begin_impl(struct cg_state        *s,
 }
 
 void emit_for_begin(struct cg_state *s, struct for_while_state *state,
-                    union ast_expression *target,
+                    union ast_expression *targets,
                     union ast_expression *expression)
 {
   if (unreachable(s)) {
@@ -784,7 +799,7 @@ void emit_for_begin(struct cg_state *s, struct for_while_state *state,
   }
   emit_expression(s, expression);
   cg_op(s, OPCODE_GET_ITER, 0);
-  emit_for_begin_impl(s, state, target);
+  emit_for_begin_impl(s, state, targets);
 }
 
 static void emit_loop_else(struct cg_state *s, struct for_while_state *state)
@@ -1133,21 +1148,21 @@ void emit_def_end(struct cg_state *s, struct def_state *state,
   cg_store(s, symbol);
 }
 
-void emit_del(struct cg_state *s, union ast_expression *target)
+void emit_del(struct cg_state *s, union ast_expression *targets)
 {
-  switch (ast_expression_type(target)) {
+  switch (ast_expression_type(targets)) {
   case AST_IDENTIFIER:
-    cg_delete(s, target->identifier.symbol);
+    cg_delete(s, targets->identifier.symbol);
     return;
   case AST_ATTR: {
-    struct ast_attr *attr = &target->attr;
+    struct ast_attr *attr = &targets->attr;
     emit_expression(s, attr->expression);
     unsigned index = cg_register_name(s, attr->symbol);
     cg_op_pop1(s, OPCODE_DELETE_ATTR, index);
     return;
   }
   case AST_BINEXPR_SUBSCRIPT: {
-    struct ast_binexpr *binexpr = &target->binexpr;
+    struct ast_binexpr *binexpr = &targets->binexpr;
     emit_expression(s, binexpr->left);
     emit_expression(s, binexpr->right);
     cg_op_pop_push(s, OPCODE_DELETE_SUBSCR, 0, /*pop=*/2, /*push=*/0);
@@ -1155,13 +1170,15 @@ void emit_del(struct cg_state *s, union ast_expression *target)
   }
   case AST_EXPRESSION_LIST:
   case AST_LIST_DISPLAY: {
-    struct ast_expression_list *list = &target->expression_list;
+    struct ast_expression_list *list = &targets->expression_list;
     unsigned                    num_expressions = list->num_expressions;
     for (unsigned i = 0; i < num_expressions; i++) {
       emit_del(s, list->expressions[i]);
     }
     return;
   }
+  case AST_INVALID:
+    return;
   default:
     abort();
   }
@@ -1196,9 +1213,9 @@ static void emit_generator_expression_part(
       = &generator_expression->parts[part_index];
   if (part->type == GENERATOR_EXPRESSION_PART_FOR) {
     struct for_while_state state;
-    union ast_expression  *target = part->target;
-    assert(target != NULL);
-    emit_for_begin(s, &state, target, part->expression);
+    union ast_expression  *targets = part->targets;
+    assert(targets != NULL);
+    emit_for_begin(s, &state, targets, part->expression);
 
     emit_generator_expression_part(s, generator_expression, part_index + 1);
 
@@ -1234,7 +1251,7 @@ void emit_generator_expression_code(
   struct generator_expression_part *part = generator_expression->parts;
   cg_op_push1(s, OPCODE_LOAD_FAST, 0);
   struct for_while_state state;
-  emit_for_begin_impl(s, &state, part->target);
+  emit_for_begin_impl(s, &state, part->targets);
 
   emit_generator_expression_part(s, generator_expression, /*part_index=*/1);
 
@@ -1249,7 +1266,7 @@ void emit_generator_expression_code(
 
 void emit_with_begin(struct cg_state *s, struct with_state *state,
                      union ast_expression *expression,
-                     union ast_expression *target)
+                     union ast_expression *targets)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -1264,8 +1281,8 @@ void emit_with_begin(struct cg_state *s, struct with_state *state,
   cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
 
   cg_block_begin(s, body);
-  if (target != NULL) {
-    emit_assignment(s, target);
+  if (targets != NULL) {
+    emit_assignment(s, targets);
   } else {
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }

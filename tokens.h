@@ -98,6 +98,4 @@ TID(try,      T_try)
 TID(while,    T_while)
 TID(with,     T_with)
 TID(yield,    T_yield)
-
-TDES(NUM_TOKENS, NULL)
 /* clang-format on */

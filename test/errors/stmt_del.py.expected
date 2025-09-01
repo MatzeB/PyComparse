@@ -1,5 +1,5 @@
 test/errors/stmt_del.py:1 error: cannot delete literal
 test/errors/stmt_del.py:2 error: cannot delete expression
-test/errors/stmt_del.py:3 error: cannot delete expression
+test/errors/stmt_del.py:3 error: starred expression not allowed here
 test/errors/stmt_del.py:4 error: cannot delete literal
 test/errors/stmt_del.py:5 error: cannot delete literal

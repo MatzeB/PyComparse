@@ -10,4 +10,5 @@ enum token_kind {
 #undef TDES
 #undef TDES_VAL
 #undef TCHAR
+  NUM_TOKENS,
 };

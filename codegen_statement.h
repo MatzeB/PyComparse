@@ -84,6 +84,10 @@ void emit_annotation(struct cg_state *s, union ast_expression *target,
 void emit_assert(struct cg_state *s, union ast_expression *expression,
                  union ast_expression *message);
 
+void emit_assign_statement(struct cg_state *s, unsigned num_targets,
+                           union ast_expression *nonnull *nonnull targets,
+                           union ast_expression                  *value);
+
 bool emit_break(struct cg_state *s);
 
 void emit_class_begin(struct cg_state *s, struct symbol *name);
@@ -109,13 +113,13 @@ void emit_def_begin(struct cg_state *s, struct def_state *state,
 void emit_def_end(struct cg_state *s, struct def_state *state,
                   struct symbol *symbol, unsigned num_decorators);
 
-void emit_del(struct cg_state *s, union ast_expression *target);
+void emit_del(struct cg_state *s, union ast_expression *targets);
 
 void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression);
 
 void emit_for_begin(struct cg_state *s, struct for_while_state *state,
-                    union ast_expression *target,
+                    union ast_expression *targets,
                     union ast_expression *expression);
 void emit_for_else(struct cg_state *s, struct for_while_state *state);
 void emit_for_end(struct cg_state *s, struct for_while_state *state);
@@ -161,7 +165,7 @@ void emit_try_end(struct cg_state *s, struct try_state *state);
 
 void emit_with_begin(struct cg_state *s, struct with_state *state,
                      union ast_expression *expression,
-                     union ast_expression *target);
+                     union ast_expression *targets);
 void emit_with_end(struct cg_state *s, struct with_state *state);
 
 void emit_while_begin(struct cg_state *s, struct for_while_state *state,

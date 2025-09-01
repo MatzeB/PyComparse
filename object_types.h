@@ -42,16 +42,16 @@ struct object_int {
 };
 
 struct object_list {
-  struct object_base              base;
-  uint32_t                        length;
-  uint32_t                        capacity;
+  struct object_base             base;
+  uint32_t                       length;
+  uint32_t                       capacity;
   union object *nonnull *nonnull items;
 };
 
 struct object_string {
   struct object_base base;
   uint32_t           length;
-  const char *       chars;
+  const char        *chars;
 };
 
 struct object_tuple {

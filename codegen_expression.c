@@ -105,13 +105,25 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   case AST_LIST_DISPLAY: {
     struct ast_expression_list *list = &target->expression_list;
     unsigned                    num_expressions = list->num_expressions;
-    cg_op_pop_push(s, OPCODE_UNPACK_SEQUENCE, num_expressions, /*pop=*/1,
-                   /*push=*/num_expressions);
+    if (list->has_star_expression) {
+      cg_op_pop_push(s, OPCODE_UNPACK_EX, num_expressions - 1, /*pop=*/1,
+                     /*push=*/num_expressions);
+    } else {
+      cg_op_pop_push(s, OPCODE_UNPACK_SEQUENCE, num_expressions, /*pop=*/1,
+                     /*push=*/num_expressions);
+    }
     for (unsigned i = 0; i < num_expressions; i++) {
-      emit_assignment(s, list->expressions[i]);
+      union ast_expression *expression = list->expressions[i];
+      if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+        expression = expression->unexpr.op;
+      }
+      emit_assignment(s, expression);
     }
     return;
   }
+  case AST_INVALID:
+    cg_pop(s, 1);
+    return;
   default:
     abort();
   }

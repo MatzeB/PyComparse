@@ -1,0 +1,3 @@
+test/errors/expr_walrus.py:3 error: cannot use `:=` expression with literal
+test/errors/expr_walrus.py:5 error: cannot use `:=` expression with expression
+test/errors/expr_walrus.py:7 error: cannot use `:=` expression with expression

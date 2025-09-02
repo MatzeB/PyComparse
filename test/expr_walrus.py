@@ -1,0 +1,5 @@
+print(x := "hello")
+print(x := (y := "world"))
+print(2 + (z := 44))
+print(l := 2 * 4)
+print(l)

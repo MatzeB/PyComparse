@@ -129,6 +129,14 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
   }
 }
 
+static void emit_assign_expression(struct cg_state    *s,
+                                   struct ast_binexpr *binexpr)
+{
+  emit_expression(s, binexpr->right);
+  cg_op_push1(s, OPCODE_DUP_TOP, 0);
+  emit_assignment(s, binexpr->left);
+}
+
 static void emit_binexpr_assign_inner(struct cg_state    *s,
                                       struct ast_binexpr *binexpr)
 {
@@ -634,13 +642,12 @@ void had_yield(struct cg_state *s)
   s->code.flags |= CO_GENERATOR;
 }
 
-static void emit_expression_impl(struct cg_state      *s,
-                                 union ast_expression *expression, bool drop)
+void emit_expression(struct cg_state *s, union ast_expression *expression)
 {
   switch (ast_expression_type(expression)) {
   case AST_ATTR:
     emit_attr(s, &expression->attr);
-    break;
+    return;
   case AST_BINEXPR_ADD:
   case AST_BINEXPR_AND:
   case AST_BINEXPR_FLOORDIV:
@@ -656,7 +663,7 @@ static void emit_expression_impl(struct cg_state      *s,
   case AST_BINEXPR_TRUEDIV:
   case AST_BINEXPR_XOR:
     emit_binexpr(s, &expression->binexpr);
-    break;
+    return;
   case AST_BINEXPR_ADD_ASSIGN:
   case AST_BINEXPR_AND_ASSIGN:
   case AST_BINEXPR_FLOORDIV_ASSIGN:
@@ -670,95 +677,75 @@ static void emit_expression_impl(struct cg_state      *s,
   case AST_BINEXPR_SUB_ASSIGN:
   case AST_BINEXPR_TRUEDIV_ASSIGN:
   case AST_BINEXPR_XOR_ASSIGN:
-    assert(drop);
     emit_binexpr_assign(s, &expression->binexpr);
     return;
   case AST_BINEXPR_ASSIGN:
-    emit_expression(s, expression->binexpr.right);
-    if (!drop) {
-      cg_op_push1(s, OPCODE_DUP_TOP, 0);
-    }
-    emit_assignment(s, expression->binexpr.left);
+    emit_assign_expression(s, &expression->binexpr);
     return;
   case AST_BINEXPR_LOGICAL_AND:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_FALSE_OR_POP);
-    break;
+    return;
   case AST_BINEXPR_LOGICAL_OR:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_TRUE_OR_POP);
-    break;
+    return;
   case AST_CALL:
     emit_call(s, &expression->call);
-    break;
+    return;
   case AST_COMPARISON:
     emit_comparison(s, &expression->comparison);
-    break;
+    return;
   case AST_CONDITIONAL:
     emit_conditional(s, &expression->conditional);
-    break;
+    return;
   case AST_CONST:
   case AST_INVALID:
     cg_load_const(s, expression->cnst.object);
-    break;
+    return;
   case AST_DICT_DISPLAY:
     emit_dictionary_display(s, &expression->dict_item_list);
-    break;
+    return;
   case AST_EXPRESSION_LIST:
     emit_tuple(s, &expression->expression_list);
-    break;
+    return;
   case AST_GENERATOR_EXPRESSION:
     emit_generator_expression(s, &expression->generator_expression);
-    break;
+    return;
   case AST_IDENTIFIER:
     cg_load(s, expression->identifier.symbol);
-    break;
+    return;
   case AST_LIST_COMPREHENSION:
     emit_list_comprehension(s, &expression->generator_expression);
-    break;
+    return;
   case AST_LIST_DISPLAY:
     emit_list_display(s, &expression->expression_list);
-    break;
+    return;
   case AST_SET_DISPLAY:
     emit_set_display(s, &expression->expression_list);
-    break;
+    return;
   case AST_SLICE:
     emit_slice(s, &expression->slice);
-    break;
+    return;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);
-    break;
+    return;
   case AST_UNEXPR_NEGATIVE:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_NEGATIVE);
-    break;
+    return;
   case AST_UNEXPR_NOT:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_NOT);
-    break;
+    return;
   case AST_UNEXPR_INVERT:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_INVERT);
-    break;
+    return;
   case AST_UNEXPR_STAR:
   case AST_UNEXPR_STAR_STAR:
     /* not allowed in generic contexts */
     abort();
   case AST_UNEXPR_YIELD:
     emit_yield(s, expression->unexpr.op);
-    break;
+    return;
   case AST_UNEXPR_YIELD_FROM:
     emit_yield_from(s, expression->unexpr.op);
-    break;
+    return;
   }
-
-  if (drop) {
-    cg_op_pop1(s, OPCODE_POP_TOP, 0);
-  }
-}
-
-void emit_expression(struct cg_state *s, union ast_expression *expression)
-{
-  emit_expression_impl(s, expression, false);
-}
-
-void emit_expression_drop_result(struct cg_state      *s,
-                                 union ast_expression *expression)
-{
-  emit_expression_impl(s, expression, true);
 }

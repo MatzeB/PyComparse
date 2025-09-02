@@ -27,7 +27,7 @@ def show_code(code, indent=''):
         if type(const) == types.CodeType:
             show_code(const, indent+'   ')
         else:
-            print(f"   {indent}{const}")
+            print(f"   {indent}{const!r}")
     print(f"{indent}names {code.co_names}")
     print(f"{indent}varnames {code.co_varnames}")
     print(f"{indent}freevars {code.co_freevars}")

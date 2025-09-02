@@ -44,6 +44,7 @@
   case T_DOT_DOT_DOT
 
 enum precedence {
+  PREC_INVALID,
   PREC_ASSIGN,      /* +=, -=, ... */
   PREC_NAMED,       /* := */
   PREC_TEST,        /* postfix 'if' _ 'else' _ */
@@ -1172,6 +1173,22 @@ static union ast_expression *parse_true_div_assign(struct parser_state  *s,
   return parse_binexpr_assign(s, AST_BINEXPR_TRUEDIV_ASSIGN, left);
 }
 
+static union ast_expression *parse_walrus(struct parser_state  *s,
+                                          union ast_expression *left)
+{
+  struct location location = scanner_location(&s->scanner);
+  if (ast_expression_type(left) != AST_IDENTIFIER) {
+    diag_begin_error(&s->d, location);
+    diag_frag(&s->d, "cannot use ");
+    diag_token_kind(&s->d, T_COLON_EQUALS);
+    diag_frag(&s->d, " expression with ");
+    diag_expression(&s->d, left);
+    diag_end(&s->d);
+    left = invalid_expression(s);
+  }
+  return parse_binexpr(s, PREC_NAMED + 1, AST_BINEXPR_ASSIGN, left);
+}
+
 static union ast_expression *parse_xor(struct parser_state  *s,
                                        union ast_expression *left)
 {
@@ -1228,6 +1245,8 @@ static const struct postfix_expression_parser postfix_parsers[] = {
     = { .func = parse_or_assign,          .precedence = PREC_ASSIGN     },
   [T_CARET_EQUALS]
     = { .func = parse_xor_assign,         .precedence = PREC_ASSIGN     },
+  [T_COLON_EQUALS]
+    = { .func = parse_walrus,             .precedence = PREC_NAMED      },
   [T_EQUALS_EQUALS]
     = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
   [T_EXCLAMATIONMARK_EQUALS]
@@ -1349,7 +1368,7 @@ static void parse_assignment(struct parser_state  *s,
 
 static void parse_expression_statement(struct parser_state *s)
 {
-  union ast_expression *expression = parse_expression(s, PREC_ASSIGN);
+  union ast_expression *expression = parse_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
     /* TODO Check: check that expression is either:
      *  NAME |  ( single_target ) | single_subscript_attribute_target
@@ -1371,6 +1390,17 @@ static void parse_expression_statement(struct parser_state *s)
         = parse_expression_list_helper(s, AST_EXPRESSION_LIST, expression,
                                        PREC_NAMED, /*allow_slices=*/false);
   }
+  enum token_kind postfix_token_kind = peek(s);
+  if (postfix_token_kind
+      < sizeof(postfix_parsers) / sizeof(postfix_parsers[0])) {
+    const struct postfix_expression_parser *parser = &postfix_parsers[peek(s)];
+    if (parser->precedence == PREC_ASSIGN) {
+      expression = parser->func(s, expression);
+      emit_binexpr_assign_statement(&s->cg, expression);
+      return;
+    }
+  }
+
   if (peek(s) == '=') {
     parse_assignment(s, expression);
     return;

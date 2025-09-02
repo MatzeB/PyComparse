@@ -115,6 +115,8 @@ void emit_def_end(struct cg_state *s, struct def_state *state,
 
 void emit_del(struct cg_state *s, union ast_expression *targets);
 
+void emit_binexpr_assign_statement(struct cg_state      *s,
+                                   union ast_expression *expression);
 void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression);
 

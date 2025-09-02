@@ -274,7 +274,15 @@ void emit_expression_statement(struct cg_state      *s,
                                union ast_expression *expression)
 {
   if (unreachable(s)) return;
-  emit_expression_drop_result(s, expression);
+  emit_expression(s, expression);
+  cg_op_pop1(s, OPCODE_POP_TOP, 0);
+}
+
+void emit_binexpr_assign_statement(struct cg_state      *s,
+                                   union ast_expression *expression)
+{
+  if (unreachable(s)) return;
+  emit_expression(s, expression);
 }
 
 static unsigned register_dotted_name(struct cg_state    *s,

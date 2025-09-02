@@ -59,6 +59,9 @@ void diag_expression(struct diagnostics_state *s,
   case AST_DICT_DISPLAY:
     name = "dict literal";
     break;
+  case AST_IDENTIFIER:
+    name = "name";
+    break;
   case AST_SET_DISPLAY:
     name = "set literal";
     break;

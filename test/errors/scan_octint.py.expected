@@ -1,0 +1,13 @@
+test/errors/scan_octint.py:1 error: octal literal had no digits
+test/errors/scan_octint.py:3 error: octal literal cannot end with `_`
+test/errors/scan_octint.py:5 error: octal literal cannot end with `_`
+test/errors/scan_octint.py:7 error: octal literal cannot have consecutive `_`
+test/errors/scan_octint.py:9 error: invalid digit for octal literal: `8`
+test/errors/scan_octint.py:11 error: invalid digit for octal literal: `9`
+test/errors/scan_octint.py:13 error: invalid digit for octal literal: `8`
+test/errors/scan_octint.py:15 error: invalid digit for octal literal: `9`
+test/errors/scan_octint.py:17 error: invalid digit for octal literal: `A`
+test/errors/scan_octint.py:19 error: invalid digit for octal literal: `Z`
+test/errors/scan_octint.py:21 error: invalid digit for octal literal: `a`
+test/errors/scan_octint.py:23 error: invalid digit for octal literal: `s`
+test/errors/scan_octint.py:25 error: invalid digit for octal literal: `z`

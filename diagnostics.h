@@ -19,6 +19,7 @@ void diag_frag(struct diagnostics_state *s, const char *message);
 void diag_token(struct diagnostics_state *s, struct token *token);
 void diag_token_kind(struct diagnostics_state *s, enum token_kind kind);
 void diag_symbol(struct diagnostics_state *s, struct symbol *symbol);
+void diag_quoted_char(struct diagnostics_state *s, char c);
 void diag_expression(struct diagnostics_state *s,
                      union ast_expression     *expression);
 void diag_end(struct diagnostics_state *s);

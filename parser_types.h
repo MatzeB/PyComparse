@@ -12,10 +12,10 @@
 ASSUME_NONNULL_BEGIN
 
 struct parser_state {
-  struct scanner_state     scanner;
-  struct arena             ast;
-  struct cg_state          cg;
-  struct diagnostics_state d;
+  struct scanner_state      scanner;
+  struct arena              ast;
+  struct cg_state           cg;
+  struct diagnostics_state *d;
 
   unsigned short anchor_set[NUM_TOKENS];
 };

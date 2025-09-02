@@ -1,0 +1,1 @@
+test/errors/stmt_try2.py:3 error: `try`-block requires an `except`- or `finally`-block

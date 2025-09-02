@@ -135,8 +135,29 @@ static void write_float(struct writer_state       *s,
 
 static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
-  write_char(s, OBJECT_INT);
-  write_uint32(s, (uint32_t)int_obj->value);
+  int64_t value = int_obj->value;
+  if (INT32_MIN <= value && value <= INT32_MAX) {
+    write_char(s, OBJECT_INT);
+    write_uint32(s, (int32_t)int_obj->value);
+    return;
+  }
+  bool negative = false;
+  if (value < 0) {
+    negative = true;
+    if (value == INT64_MIN) {
+      abort(); /* TODO, overflows -value */
+    }
+    value = -value;
+  }
+  unsigned num_digits = 0;
+  for (int64_t c = value; c != 0; c >>= 15) {
+    ++num_digits;
+  }
+  write_char(s, 'l');
+  write_uint32(s, (uint32_t)(negative ? -(int32_t)num_digits : num_digits));
+  for (int64_t c = value; c != 0; c >>= 15) {
+    write_uint16(s, c & 0x7fff);
+  }
 }
 
 static void write_code(struct writer_state *s, const struct object_code *code)

@@ -1,0 +1,8 @@
+test/errors/scan_hexint.py:1 error: hexadecimal literal had no digits
+test/errors/scan_hexint.py:3 error: hexadecimal literal cannot end with `_`
+test/errors/scan_hexint.py:5 error: hexadecimal literal cannot end with `_`
+test/errors/scan_hexint.py:7 error: hexadecimal literal cannot have consecutive `_`
+test/errors/scan_hexint.py:9 error: invalid digit for hexadecimal literal: `g`
+test/errors/scan_hexint.py:13 error: invalid digit for hexadecimal literal: `Z`
+test/errors/scan_hexint.py:17 error: invalid digit for hexadecimal literal: `s`
+test/errors/scan_hexint.py:19 error: invalid digit for hexadecimal literal: `z`

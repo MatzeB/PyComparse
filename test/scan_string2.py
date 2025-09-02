@@ -35,3 +35,11 @@ rB = 12
 Rb = 13
 RB = 14
 print(rb, rB, Rb, RB)
+
+
+print(r'\'')
+print(r'\"')
+print(r'\\')
+print(r"\'")
+print(r"\"")
+print(r"\\")

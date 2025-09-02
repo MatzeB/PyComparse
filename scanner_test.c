@@ -1,3 +1,5 @@
+#include "diagnostics.h"
+#include "diagnostics_types.h"
 #include "object_intern.h"
 #include "object_intern_types.h"
 #include "scanner.h"
@@ -24,10 +26,14 @@ int main(int argc, char **argv)
   struct arena strings;
   arena_init(&strings);
 
+  struct diagnostics_state diagnostics;
+  diag_init(&diagnostics, stderr, filename);
+
   struct scanner_state s;
   struct object_intern objects;
   object_intern_init(&objects);
-  scanner_init(&s, input, filename, &symbol_table, &objects, &strings);
+  scanner_init(&s, input, filename, &symbol_table, &objects, &strings,
+               &diagnostics);
 
   const struct token *token = &s.token;
   do {

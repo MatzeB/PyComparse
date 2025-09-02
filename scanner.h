@@ -10,6 +10,7 @@
 ASSUME_NONNULL_BEGIN
 
 struct arena;
+struct diagnostics_state;
 struct object_intern;
 struct scanner_state;
 struct symbol_table;
@@ -17,7 +18,8 @@ struct token;
 
 void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct symbol_table  *symbol_table,
-                  struct object_intern *objects, struct arena *strings);
+                  struct object_intern *objects, struct arena *strings,
+                  struct diagnostics_state *diagnostics);
 
 void scanner_free(struct scanner_state *s);
 

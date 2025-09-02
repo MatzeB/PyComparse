@@ -62,7 +62,7 @@ union object *object_new_list(struct arena *arena);
 union object *object_new_string(struct arena *arena, enum object_type type,
                                 uint32_t length, const char *chars);
 union object *object_new_float(struct arena *arena, double value);
-union object *object_new_int(struct arena *arena, int32_t value);
+union object *object_new_int(struct arena *arena, int64_t value);
 
 struct tuple_prep *object_new_tuple_begin(struct arena *arena,
                                           uint32_t      length);

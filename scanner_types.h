@@ -11,6 +11,7 @@ ASSUME_NONNULL_BEGIN
 #define MAXINDENT 100
 
 struct arena;
+struct diagnostics_state;
 struct symbol_table;
 union object;
 
@@ -28,11 +29,16 @@ struct token {
 };
 
 struct scanner_state {
-  int   c;
-  char *p;
+  int            c;
+  char *nullable p;
 
   struct token token;
 
+  char *nullable buffer_end;
+  char *nullable read_buffer;
+  size_t         read_buffer_size;
+
+  FILE       *input;
   const char *filename;
   unsigned    line;
   unsigned    paren_level;
@@ -47,10 +53,7 @@ struct scanner_state {
   unsigned indentation_stack_top;
   unsigned indentation_stack[MAXINDENT];
 
-  char  *buffer_end;
-  FILE  *input;
-  char  *read_buffer;
-  size_t read_buffer_size;
+  struct diagnostics_state *d;
 };
 
 ASSUME_NONNULL_END

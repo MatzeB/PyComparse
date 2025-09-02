@@ -161,7 +161,7 @@ union object *object_new_float(struct arena *arena, double value)
   return object;
 }
 
-union object *object_new_int(struct arena *arena, int32_t value)
+union object *object_new_int(struct arena *arena, int64_t value)
 {
   union object *object
       = object_allocate_zero(arena, struct object_int, OBJECT_INT);

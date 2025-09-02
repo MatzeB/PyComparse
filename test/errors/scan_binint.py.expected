@@ -1,0 +1,25 @@
+test/errors/scan_binint.py:1 error: hexadecimal literal had no digits
+test/errors/scan_binint.py:3 error: hexadecimal literal cannot end with `_`
+test/errors/scan_binint.py:5 error: hexadecimal literal cannot end with `_`
+test/errors/scan_binint.py:7 error: binary literal cannot have consecutive `_`
+test/errors/scan_binint.py:9 error: invalid digit for hexadecimal literal: `2`
+test/errors/scan_binint.py:11 error: invalid digit for hexadecimal literal: `3`
+test/errors/scan_binint.py:13 error: invalid digit for hexadecimal literal: `4`
+test/errors/scan_binint.py:15 error: invalid digit for hexadecimal literal: `5`
+test/errors/scan_binint.py:17 error: invalid digit for hexadecimal literal: `6`
+test/errors/scan_binint.py:19 error: invalid digit for hexadecimal literal: `7`
+test/errors/scan_binint.py:21 error: invalid digit for hexadecimal literal: `8`
+test/errors/scan_binint.py:23 error: invalid digit for hexadecimal literal: `9`
+test/errors/scan_binint.py:25 error: invalid digit for hexadecimal literal: `2`
+test/errors/scan_binint.py:27 error: invalid digit for hexadecimal literal: `3`
+test/errors/scan_binint.py:29 error: invalid digit for hexadecimal literal: `4`
+test/errors/scan_binint.py:31 error: invalid digit for hexadecimal literal: `5`
+test/errors/scan_binint.py:33 error: invalid digit for hexadecimal literal: `6`
+test/errors/scan_binint.py:35 error: invalid digit for hexadecimal literal: `7`
+test/errors/scan_binint.py:37 error: invalid digit for hexadecimal literal: `8`
+test/errors/scan_binint.py:39 error: invalid digit for hexadecimal literal: `9`
+test/errors/scan_binint.py:41 error: invalid digit for hexadecimal literal: `A`
+test/errors/scan_binint.py:43 error: invalid digit for hexadecimal literal: `Z`
+test/errors/scan_binint.py:45 error: invalid digit for hexadecimal literal: `a`
+test/errors/scan_binint.py:47 error: invalid digit for hexadecimal literal: `s`
+test/errors/scan_binint.py:49 error: invalid digit for hexadecimal literal: `z`

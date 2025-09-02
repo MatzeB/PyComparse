@@ -19,6 +19,12 @@ add_executable(arena_test
   adt/arena.h
 )
 add_executable(scanner_test
+  ast.c
+  ast.h
+  ast_types.h
+  diagnostics.c
+  diagnostics.h
+  diagnostics_types.h
   object.c
   object.h
   object_intern.c

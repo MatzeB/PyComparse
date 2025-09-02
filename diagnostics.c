@@ -72,6 +72,14 @@ void diag_expression(struct diagnostics_state *s,
   diag_frag(s, name);
 }
 
+void diag_quoted_char(struct diagnostics_state *s, char c)
+{
+  assert(s->in_diagnostic);
+  fputc('`', s->out);
+  fputc(c, s->out);
+  fputc('`', s->out);
+}
+
 void diag_end(struct diagnostics_state *s)
 {
   assert(s->in_diagnostic);

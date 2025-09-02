@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include "adt/arena.h"
+#include "diagnostics.h"
 #include "object_intern.h"
 #include "object_types.h"
 #include "symbol_table.h"
@@ -196,60 +197,249 @@ static void scan_identifier(struct scanner_state *s, char first_char,
   s->token.u.symbol = symbol;
 }
 
-static void scan_hexinteger(struct scanner_state *s, struct arena *arena)
+static bool end_number_literal(struct scanner_state *s, int64_t value,
+                               char last, bool *had_error,
+                               const char *literal_kind)
 {
-  arena_grow_char(arena, 'x');
-  for (;;) {
-    next_char(s);
-    switch (s->c) {
-    case HEX_DIGIT_CASES:
-    case '_':
-      break;
-    default:
-      return;
+  if ((('a' <= s->c && s->c <= 'z') || ('A' <= s->c && s->c <= 'Z')
+       || ('0' <= s->c && s->c <= '9'))) {
+    if (!*had_error) {
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "invalid digit for ");
+      diag_frag(s->d, literal_kind);
+      diag_frag(s->d, " literal: ");
+      diag_quoted_char(s->d, s->c);
+      diag_end(s->d);
+      *had_error = true;
     }
-    arena_grow_char(arena, (char)s->c);
+    return true;
   }
+  if (last == '_' && !*had_error) {
+    diag_begin_error(s->d, scanner_location(s));
+    diag_frag(s->d, literal_kind);
+    diag_frag(s->d, " literal cannot end with ");
+    diag_quoted_char(s->d, '_');
+    diag_end(s->d);
+    *had_error = true;
+  }
+  if (last == 0 && !*had_error) {
+    diag_begin_error(s->d, scanner_location(s));
+    diag_frag(s->d, literal_kind);
+    diag_frag(s->d, " literal had no digits");
+    diag_end(s->d);
+    *had_error = true;
+  }
+  s->token.u.object = object_intern_int(s->objects, value);
+  s->token.kind = T_INTEGER;
+  return false;
 }
 
-static void scan_octinteger(struct scanner_state *s, struct arena *arena)
+static void scan_hexadecimal_integer(struct scanner_state *s)
 {
-  (void)s;
-  (void)arena;
-  abort();
-}
-
-static void scan_bininteger(struct scanner_state *s, struct arena *arena)
-{
-  (void)s;
-  (void)arena;
-  abort();
-}
-
-static void scan_decinteger_zero(struct scanner_state *s, struct arena *arena)
-{
-  for (;;) {
+  int64_t value = 0;
+  bool    had_error = false;
+  char    last = 0;
+  for (;; last = s->c) {
+    next_char(s);
+    int64_t digit_value;
     switch (s->c) {
     case '0':
-    case '_':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+      digit_value = s->c - '0';
       break;
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+      digit_value = (s->c - 'a') + 10;
+      break;
+    case 'A':
+    case 'B':
+    case 'C':
+    case 'D':
+    case 'E':
+    case 'F':
+      digit_value = (s->c - 'A') + 10;
+      break;
+    case '_':
+      if (last == '_' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        if (last == '_') {
+          diag_frag(s->d, "hexadecimal literal cannot have consecutive ");
+          diag_quoted_char(s->d, '_');
+        }
+        diag_end(s->d);
+        had_error = true;
+      }
+      continue;
     default:
+      if (end_number_literal(s, value, last, &had_error, "hexadecimal")) {
+        continue;
+      }
       return;
     }
-    arena_grow_char(arena, (char)s->c);
-    next_char(s);
+    if (value > ((INT64_MAX - digit_value) >> 4)) {
+      /* TODO: arbitrary precision integer */
+      abort();
+    }
+    value <<= 4;
+    value |= digit_value;
   }
 }
 
-static void scan_decinteger(struct scanner_state *s, struct arena *arena)
+static void scan_octal_integer(struct scanner_state *s)
 {
-  for (;;) {
+  int64_t value = 0;
+  bool    had_error = false;
+  char    last = 0;
+  for (;; last = s->c) {
     next_char(s);
+    int64_t digit_value;
     switch (s->c) {
-    case DIGIT_CASES:
-    case '_':
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+      digit_value = s->c - '0';
       break;
+    case '_':
+      if (last == '_' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        if (last == '_') {
+          diag_frag(s->d, "octal literal cannot have consecutive ");
+          diag_quoted_char(s->d, '_');
+        }
+        diag_end(s->d);
+        had_error = true;
+      }
+      continue;
     default:
+      if (end_number_literal(s, value, last, &had_error, "octal")) {
+        continue;
+      }
+      return;
+    }
+    if (value > ((INT64_MAX - digit_value) >> 3)) {
+      /* TODO: arbitrary precision integer */
+      abort();
+    }
+    value <<= 3;
+    value |= digit_value;
+  }
+}
+
+static void scan_binary_integer(struct scanner_state *s)
+{
+  int64_t value = 0;
+  bool    had_error = false;
+  char    last = 0;
+  for (;; last = s->c) {
+    next_char(s);
+    int64_t digit_value;
+    switch (s->c) {
+    case '0':
+    case '1':
+      digit_value = s->c - '0';
+      break;
+    case '_':
+      if (last == '_' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        if (last == '_') {
+          diag_frag(s->d, "binary literal cannot have consecutive ");
+          diag_quoted_char(s->d, '_');
+        }
+        diag_end(s->d);
+        had_error = true;
+      }
+      continue;
+    default:
+      if (end_number_literal(s, value, last, &had_error, "hexadecimal")) {
+        continue;
+      }
+      return;
+    }
+    if (value > ((INT64_MAX - digit_value) >> 1)) {
+      /* TODO: arbitrary precision integer */
+      abort();
+    }
+    value <<= 1;
+    value |= digit_value;
+  }
+}
+
+static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
+                                 char first)
+{
+  arena_grow_char(arena, first);
+  bool had_nonzero = false;
+  bool had_error = false;
+  char last = first;
+  for (;; last = s->c, next_char(s)) {
+    switch (s->c) {
+    case '0':
+      break;
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+      if (!had_nonzero && first == '0' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d,
+                  "leading zeros in decimal integer literals are not permitted"
+                  "; use an 0o prefix for octal integers");
+        diag_end(s->d);
+        had_error = true;
+      }
+      had_nonzero = true;
+      break;
+    case '_':
+      if (last == '_' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "decimal literal cannot have consecutive ");
+        diag_quoted_char(s->d, '_');
+        diag_end(s->d);
+        had_error = true;
+      }
+      continue;
+    default:
+      if ((('a' <= s->c && s->c <= 'z') || ('A' <= s->c && s->c <= 'Z')
+           || ('0' <= s->c && s->c <= '9'))
+          && s->c != 'e' && s->c != 'E') {
+        if (!had_error) {
+          diag_begin_error(s->d, scanner_location(s));
+          diag_frag(s->d, "invalid digit for decimal literal: ");
+          diag_quoted_char(s->d, s->c);
+          diag_end(s->d);
+          had_error = true;
+        }
+        continue;
+      }
+      if (last == '_' && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "decimal literal cannot end with ");
+        diag_quoted_char(s->d, '_');
+        diag_end(s->d);
+        had_error = true;
+      }
       return;
     }
     arena_grow_char(arena, (char)s->c);
@@ -312,29 +502,29 @@ static void scan_float_dot(struct scanner_state *s)
 
 static void scan_number(struct scanner_state *s)
 {
-  struct arena *strings = s->strings;
-  arena_grow_begin(strings, alignof(char));
-  arena_grow_char(strings, (char)s->c);
-  if (s->c == '0') {
-    next_char(s);
+  char first = s->c;
+  next_char(s);
+  if (first == '0') {
     switch (s->c) {
     case 'x':
-    case 'X':
-      scan_hexinteger(s, strings);
-      break;
+    case 'X': {
+      scan_hexadecimal_integer(s);
+      return;
+    }
     case 'b':
-      scan_bininteger(s, strings);
-      break;
+      scan_binary_integer(s);
+      return;
     case 'o':
-      scan_octinteger(s, strings);
-      break;
+      scan_octal_integer(s);
+      return;
     default:
-      scan_decinteger_zero(s, strings);
       break;
     }
-  } else {
-    scan_decinteger(s, strings);
   }
+
+  struct arena *strings = s->strings;
+  arena_grow_begin(strings, alignof(char));
+  scan_decimal_integer(s, strings, first);
 
   if (s->c == '.') {
     arena_grow_char(strings, s->c);
@@ -519,7 +709,9 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
         break;
       }
       next_char(s);
-      if (!triplequote) goto finish_string;
+      if (!triplequote) {
+        goto finish_string;
+      }
       if (s->c != quote) {
         arena_grow_char(strings, quote);
         continue;
@@ -535,6 +727,10 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
     }
     case '\\':
       if (is_raw) {
+        /* take backslash literally, except that the next char is literal too.
+         * Which mostly means '\'' won't end the string. */
+        arena_grow_char(strings, s->c);
+        next_char(s);
         break;
       }
       scan_escape_sequence(s, strings, is_unicode);
@@ -1098,18 +1294,21 @@ struct location scanner_location(struct scanner_state *s)
 
 void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct symbol_table  *symbol_table,
-                  struct object_intern *objects, struct arena *strings)
+                  struct object_intern *objects, struct arena *strings,
+                  struct diagnostics_state *diagnostics)
 {
+  size_t read_buffer_size = 16 * 1024 - 16;
   memset(s, 0, sizeof(*s));
+  s->read_buffer = malloc(read_buffer_size);
+  s->read_buffer_size = read_buffer_size;
+  s->input = input;
   s->filename = filename;
   s->line = 1;
-  s->input = input;
-  s->at_begin_of_line = true;
-  s->read_buffer = malloc(16 * 1024 - 16);
-  s->read_buffer_size = 4096;
   s->symbol_table = symbol_table;
   s->objects = objects;
   s->strings = strings;
+  s->at_begin_of_line = true;
+  s->d = diagnostics;
   next_char(s);
 }
 

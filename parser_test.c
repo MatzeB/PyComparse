@@ -1,4 +1,6 @@
 #include "adt/arena.h"
+#include "diagnostics.h"
+#include "diagnostics_types.h"
 #include "parser.h"
 #include "parser_types.h"
 #include "scanner.h"
@@ -24,10 +26,13 @@ int main(int argc, char **argv)
   struct arena strings;
   arena_init(&strings);
 
+  struct diagnostics_state diagnostics;
+  diag_init(&diagnostics, stderr, filename);
+
   struct parser_state parser;
-  parser_init(&parser);
+  parser_init(&parser, &diagnostics);
   scanner_init(&parser.scanner, input, filename, &symbol_table,
-               &parser.cg.objects, &strings);
+               &parser.cg.objects, &strings, &diagnostics);
 
   union object *code = parse(&parser, filename);
   bool          had_errors = parser_had_errors(&parser);

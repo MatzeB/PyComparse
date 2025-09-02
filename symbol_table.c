@@ -85,6 +85,7 @@ struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
           = symbol_table_new_symbol(symbol_table, string, T_IDENTIFIER);
       bucket->symbol = symbol;
       bucket->hash = hash;
+      hash_set_increment_num_elements(&symbol_table->set);
       return symbol;
     } else if (bucket->hash == hash
                && strcmp(bucket->symbol->string, string) == 0) {

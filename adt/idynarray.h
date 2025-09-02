@@ -26,9 +26,9 @@ static void idynarray_free(struct idynarray *a)
 
 static inline char *idynarray_append_size(struct idynarray *a, unsigned size)
 {
-  unsigned a_size = a->size;
+  unsigned old_size = a->size;
   unsigned capacity = a->capacity;
-  unsigned new_size = a_size + size;
+  unsigned new_size = old_size + size;
   char    *data = a->data;
   if (new_size > capacity) {
     unsigned new_capacity = capacity << 1;
@@ -37,13 +37,14 @@ static inline char *idynarray_append_size(struct idynarray *a, unsigned size)
     if (new_data == NULL) {
       abort();
     }
-    memcpy(new_data, data, a_size);
+    memcpy(new_data, data, old_size);
     if (data != a->inline_storage) free(data);
     data = new_data;
     a->data = data;
+    a->capacity = new_capacity;
   }
-  a->size += size;
-  return data + a_size;
+  a->size = new_size;
+  return data + old_size;
 }
 
 #define idynarray_append(dynarray, type)                                      \

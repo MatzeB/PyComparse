@@ -991,7 +991,7 @@ static union ast_expression *check_assignment_target(
     diag_frag(&s->d, ". Maybe you meant ");
     diag_token_kind(&s->d, T_EQUALS_EQUALS);
     diag_frag(&s->d, ", or ");
-    diag_token_kind(&s->d, T_COLOR_EQUALS);
+    diag_token_kind(&s->d, T_COLON_EQUALS);
     diag_frag(&s->d, " instead of ");
     diag_token_kind(&s->d, '=');
     diag_frag(&s->d, "?");
@@ -1548,7 +1548,7 @@ static void parse_return(struct parser_state *s)
 
   union ast_expression *expression;
   if (peek(s) != T_NEWLINE) {
-    expression = parse_expression(s, PREC_NAMED);
+    expression = parse_star_expressions(s);
   } else {
     expression = NULL;
   }

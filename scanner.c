@@ -534,7 +534,9 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
       goto finish_string;
     }
     case '\\':
-      if (is_raw) break;
+      if (is_raw) {
+        break;
+      }
       scan_escape_sequence(s, strings, is_unicode);
       continue;
     case '\r':
@@ -543,7 +545,7 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
       goto new_line;
     case '\n':
       next_char(s);
-      /* fallthrough */
+      goto new_line;
     new_line:
       ++s->line;
       if (!triplequote) {
@@ -1031,7 +1033,7 @@ restart:
       next_char(s);
       if (s->c == '=') {
         next_char(s);
-        s->token.kind = T_COLOR_EQUALS;
+        s->token.kind = T_COLON_EQUALS;
       } else {
         s->token.kind = ':';
       }

@@ -390,15 +390,20 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
   }
 }
 
-void emit_raise_statement(struct cg_state *s, union ast_expression *expression,
+void emit_raise_statement(struct cg_state               *s,
+                          union ast_expression *nullable expression,
                           union ast_expression *nullable from)
 {
   if (unreachable(s)) return;
-  emit_expression(s, expression);
-  unsigned args = 1;
-  if (from != NULL) {
-    emit_expression(s, from);
-    args = 2;
+
+  unsigned args = 0;
+  if (expression != NULL) {
+    emit_expression(s, expression);
+    args++;
+    if (from != NULL) {
+      emit_expression(s, from);
+      args++;
+    }
   }
   /* TODO: should this be a jump and end the block?
    * cpython compiler does not seem to think so, is this on purpose? */

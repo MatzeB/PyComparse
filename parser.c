@@ -1566,10 +1566,13 @@ static void parse_raise(struct parser_state *s)
 {
   eat(s, T_raise);
 
-  union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
+  union ast_expression *expression = NULL;
   union ast_expression *from = NULL;
-  if (accept(s, T_from)) {
-    from = parse_expression(s, PREC_EXPRESSION);
+  if (is_expression_start(peek(s))) {
+    expression = parse_expression(s, PREC_EXPRESSION);
+    if (accept(s, T_from)) {
+      from = parse_expression(s, PREC_EXPRESSION);
+    }
   }
   emit_raise_statement(&s->cg, expression, from);
 }
@@ -1580,7 +1583,7 @@ static void parse_return(struct parser_state *s)
   eat(s, T_return);
 
   union ast_expression *expression;
-  if (peek(s) != T_NEWLINE) {
+  if (is_expression_start(peek(s))) {
     expression = parse_star_expressions(s);
   } else {
     expression = NULL;

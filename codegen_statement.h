@@ -146,7 +146,8 @@ void emit_if_end(struct cg_state *s, struct if_state *state);
 void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as);
 
-void emit_raise_statement(struct cg_state *s, union ast_expression *expression,
+void emit_raise_statement(struct cg_state               *s,
+                          union ast_expression *nullable expression,
                           union ast_expression *nullable from);
 
 void emit_return_statement(struct cg_state               *s,

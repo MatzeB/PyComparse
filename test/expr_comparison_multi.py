@@ -1,5 +1,5 @@
 def f(x):
-    print(f"f(" + str(x) + ")")
+    print("f(" + str(x) + ")")
     return x
 
 def compare_condjump_le(a, b, c):

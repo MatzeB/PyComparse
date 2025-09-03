@@ -119,6 +119,7 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
   size_t read_size = fread(s->read_buffer, 1, s->read_buffer_size, s->input);
   if (read_size < s->read_buffer_size) {
     if (ferror(s->input)) {
+      /* TODO: better error report */
       fprintf(stderr, "Error: Read Error! TODO: report error\n");
     }
 
@@ -156,7 +157,6 @@ static void scan_line_comment(struct scanner_state *s)
       next_char(s);
       /* fallthrough */
     new_line:
-      ++s->line;
       return;
     case C_EOF:
       return;
@@ -775,25 +775,15 @@ finish_string:;
 
 static void scan_eof(struct scanner_state *s)
 {
-  /* Add artificial newline, for EOF in the middle of a line. */
-  if (!s->at_begin_of_line) {
-    s->at_begin_of_line = true;
-    s->token.kind = T_NEWLINE;
-    return;
-  }
-
   if (s->last_line_indent > 0) {
     assert(s->indentation_stack_top > 0);
+    s->pending_dedents = s->indentation_stack_top;
     s->last_line_indent = 0;
-    s->pending_dedents = s->indentation_stack_top - 1;
-    s->token.kind = T_DEDENT;
-    if (s->pending_dedents == 0) {
-      s->at_begin_of_line = false;
-    }
-    return;
   }
 
-  s->token.kind = T_EOF;
+  /* Add artificial newline, for EOF in the middle of a line. */
+  s->at_begin_of_line = true;
+  s->token.kind = T_NEWLINE;
 }
 
 static bool scan_indentation(struct scanner_state *s)
@@ -803,7 +793,7 @@ static bool scan_indentation(struct scanner_state *s)
     assert(s->indentation_stack_top > 0);
     --s->indentation_stack_top;
     --s->pending_dedents;
-    if (s->pending_dedents == 0) {
+    if (s->pending_dedents == 0 && s->c != C_EOF) {
       s->at_begin_of_line = false;
     }
     s->token.kind = T_DEDENT;
@@ -839,10 +829,10 @@ static bool scan_indentation(struct scanner_state *s)
       continue;
     case '#':
       scan_line_comment(s);
-      column = 0;
-      continue;
+      goto new_line;
     case C_EOF:
-      scan_eof(s);
+      if (s->last_line_indent > 0) break;
+      s->token.kind = T_EOF;
       return true;
     default:
       break;
@@ -852,15 +842,22 @@ static bool scan_indentation(struct scanner_state *s)
 
   unsigned last_line_indent = s->last_line_indent;
   if (column > last_line_indent) {
-    if (s->indentation_stack_top >= MAXINDENT) {
-      s->token.kind = T_ETOODEEP;
+    s->indentation_stack[s->indentation_stack_top] = last_line_indent;
+    s->last_line_indent = column;
+    if (s->indentation_stack_top >= MAXINDENT - 1) {
+      if (s->token.kind != T_INVALID) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "too many levels of indentation");
+        diag_end(s->d);
+      }
+      s->token.kind = T_INVALID;
       s->c = C_EOF;
-    } else {
-      s->indentation_stack[s->indentation_stack_top++] = last_line_indent;
-      s->last_line_indent = column;
-      s->token.kind = T_INDENT;
-      s->at_begin_of_line = false;
+      s->at_begin_of_line = true;
+      return true;
     }
+    ++s->indentation_stack_top;
+    s->token.kind = T_INDENT;
+    s->at_begin_of_line = false;
     return true;
   }
   if (column < last_line_indent) {
@@ -877,10 +874,12 @@ static bool scan_indentation(struct scanner_state *s)
     unsigned pending_dedents = dedents - 1;
     s->pending_dedents = pending_dedents;
     s->last_line_indent = column;
-    s->at_begin_of_line = pending_dedents > 0;
+    s->at_begin_of_line = pending_dedents > 0 || s->c == C_EOF;
     if (column != target_cols) {
-      fprintf(stderr, "%d: invalid indentation\n", s->line);
-      s->token.kind = T_EDEDENT;
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "indentation level mismatch");
+      diag_end(s->d);
+      s->token.kind = T_INVALID;
     } else {
       s->indentation_stack_top--;
       s->token.kind = T_DEDENT;
@@ -893,7 +892,7 @@ static bool scan_indentation(struct scanner_state *s)
 
 void scanner_next_token(struct scanner_state *s)
 {
-restart:
+begin_new_line:
   if (s->at_begin_of_line) {
     if (scan_indentation(s)) {
       return;
@@ -913,7 +912,12 @@ restart:
     new_line:
       ++s->line;
       if (s->paren_level > 0) {
+        /* no token; continue on next line without indentation check. */
         continue;
+      }
+      if (s->at_begin_of_line) {
+        /* no token; continue on next line with indentation check. */
+        goto begin_new_line;
       }
       s->at_begin_of_line = true;
       s->token.kind = T_NEWLINE;
@@ -927,8 +931,7 @@ restart:
 
     case '#':
       scan_line_comment(s);
-      s->at_begin_of_line = true;
-      goto restart;
+      goto new_line;
 
     case IDENTIFIER_START_CASES_WITHOUT_B_F_R_U: {
       char first_char = (char)s->c;
@@ -1263,6 +1266,7 @@ restart:
       if (s->c == '\n') {
         next_char(s);
         s->line++;
+        /* no token; continue on next line without indentation check. */
         continue;
       }
       /* report error? */
@@ -1279,9 +1283,14 @@ restart:
       invalid_c = s->c;
       next_char(s);
     invalid_char:
-      fprintf(stderr, "%s:%u error: Unexpected input char '%c'\n", s->filename,
-              s->line, invalid_c);
-      return;
+      if (s->token.kind != T_INVALID) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "Unexpected input char ");
+        diag_quoted_char(s->d, invalid_c);
+        diag_end(s->d);
+      }
+      s->token.kind = T_INVALID;
+      continue;
     }
   }
 }

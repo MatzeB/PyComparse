@@ -1,2 +1,3 @@
 test/errors/indent.py:2 error: expected statement, got indent
 test/errors/indent.py:3 error: expected statement, got dedent
+test/errors/indent.py:3 error: expected new line, got end of file

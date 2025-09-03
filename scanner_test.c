@@ -38,7 +38,8 @@ int main(int argc, char **argv)
   const struct token *token = &s.token;
   do {
     scanner_next_token(&s);
-    printf("%u: ", s.line);
+    struct location location = scanner_location(&s);
+    printf("%u: ", location.line);
     print_token(stdout, token);
     fputc('\n', stdout);
   } while (token->kind != T_EOF);

@@ -70,16 +70,6 @@ enum precedence {
   PREC_EXPRESSION = PREC_TEST,
 };
 
-static void error_expected(struct parser_state *s, const char *what)
-{
-  diag_begin_error(s->d, scanner_location(&s->scanner));
-  diag_frag(s->d, "expected ");
-  diag_frag(s->d, what);
-  diag_frag(s->d, ", got ");
-  diag_token(s->d, &s->scanner.token);
-  diag_end(s->d);
-}
-
 static inline enum token_kind peek(const struct parser_state *s)
 {
   return s->scanner.token.kind;
@@ -225,6 +215,19 @@ static void eat_until_anchor(struct parser_state *s)
     }
     next_token(s);
   }
+}
+
+static void error_expected(struct parser_state *s, const char *what)
+{
+  if (peek(s) == T_INVALID) {
+    return;
+  }
+  diag_begin_error(s->d, scanner_location(&s->scanner));
+  diag_frag(s->d, "expected ");
+  diag_frag(s->d, what);
+  diag_frag(s->d, ", got ");
+  diag_token(s->d, &s->scanner.token);
+  diag_end(s->d);
 }
 
 static bool skip_till(struct parser_state *s,
@@ -1666,7 +1669,13 @@ static void parse_suite(struct parser_state *s)
   unsigned prev_stacksize = s->cg.code.stacksize;
 #endif
   if (accept(s, T_NEWLINE)) {
-    expect(s, T_INDENT);
+    if (peek(s) != T_INDENT) {
+      error_expected(s, "indent");
+      /* abort early because the following loop wouldn't terminate without a
+       * matching T_DEDENT. */
+      return;
+    }
+    eat(s, T_INDENT);
     do {
       parse_statement(s);
       assert(s->cg.code.stacksize == prev_stacksize);
@@ -2134,6 +2143,9 @@ static void parse_statement(struct parser_state *s)
     break;
   case T_with:
     parse_with(s);
+    break;
+  case T_INVALID:
+    next_token(s);
     break;
   case T_EOF:
     break;

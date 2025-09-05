@@ -14,10 +14,11 @@ struct ast_generator_expression;
 struct basic_block;
 struct cg_state;
 struct dotted_name;
+struct parameter;
 struct symbol;
 union ast_expression;
 
-struct def_state {
+struct make_function_state {
   bool annotations;
   bool defaults;
   bool keyword_defaults;
@@ -41,19 +42,6 @@ struct from_import_item {
 struct if_state {
   struct basic_block *nullable else_or_footer;
   struct basic_block *nullable footer;
-};
-
-enum parameter_variant {
-  PARAMETER_NORMAL,
-  PARAMETER_STAR,
-  PARAMETER_STAR_STAR,
-};
-
-struct parameter {
-  struct symbol                 *name;
-  union ast_expression *nullable type;
-  union ast_expression *nullable initializer;
-  enum parameter_variant         variant;
 };
 
 struct try_state {
@@ -106,11 +94,11 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
 
 bool emit_continue(struct cg_state *s);
 
-void emit_def_begin(struct cg_state *s, struct def_state *state,
+void emit_def_begin(struct cg_state *s, struct make_function_state *state,
                     unsigned num_parameters, struct parameter *parameters,
                     unsigned                       positional_only_argcount,
                     union ast_expression *nullable return_type);
-void emit_def_end(struct cg_state *s, struct def_state *state,
+void emit_def_end(struct cg_state *s, struct make_function_state *state,
                   struct symbol *symbol, unsigned num_decorators);
 
 void emit_del(struct cg_state *s, union ast_expression *targets);
@@ -145,6 +133,16 @@ void emit_if_end(struct cg_state *s, struct if_state *state);
 
 void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as);
+
+void emit_make_function_begin(struct cg_state            *s,
+                              struct make_function_state *state,
+                              unsigned                    num_parameters,
+                              struct parameter           *parameters,
+                              unsigned positional_only_argcount,
+                              union ast_expression *nullable return_type);
+void emit_make_function_end(struct cg_state            *s,
+                            struct make_function_state *state,
+                            struct symbol              *symbol);
 
 void emit_raise_statement(struct cg_state               *s,
                           union ast_expression *nullable expression,

@@ -8,7 +8,37 @@
 ASSUME_NONNULL_BEGIN
 
 union object;
-struct argument;
+union ast_expression;
+struct symbol;
+
+struct argument {
+  union ast_expression   *expression;
+  struct symbol *nullable name;
+};
+
+enum parameter_variant {
+  PARAMETER_NORMAL,
+  PARAMETER_STAR,
+  PARAMETER_STAR_STAR,
+};
+
+struct parameter {
+  struct symbol                 *name;
+  union ast_expression *nullable type;
+  union ast_expression *nullable initializer;
+  enum parameter_variant         variant;
+};
+
+enum generator_expression_part_type {
+  GENERATOR_EXPRESSION_PART_FOR,
+  GENERATOR_EXPRESSION_PART_IF,
+};
+
+struct generator_expression_part {
+  enum generator_expression_part_type type;
+  union ast_expression *nullable      targets;
+  union ast_expression               *expression;
+};
 
 struct ast_node_base {
   uint8_t type;
@@ -36,11 +66,6 @@ struct ast_comparison {
   unsigned              num_operands;
   union ast_expression *left;
   struct comparison_op  operands[];
-};
-
-struct argument {
-  union ast_expression   *expression;
-  struct symbol *nullable name;
 };
 
 struct ast_call {
@@ -83,17 +108,6 @@ struct ast_expression_list {
   union ast_expression *nonnull expressions[];
 };
 
-enum generator_expression_part_type {
-  GENERATOR_EXPRESSION_PART_FOR,
-  GENERATOR_EXPRESSION_PART_IF,
-};
-
-struct generator_expression_part {
-  enum generator_expression_part_type type;
-  union ast_expression *nullable      targets;
-  union ast_expression               *expression;
-};
-
 struct ast_generator_expression {
   struct ast_node_base             base;
   unsigned                         num_parts;
@@ -104,6 +118,14 @@ struct ast_generator_expression {
 struct ast_identifier {
   struct ast_node_base base;
   struct symbol       *symbol;
+};
+
+struct ast_lambda {
+  struct ast_node_base  base;
+  union ast_expression *expression;
+  unsigned              positional_only_argcount;
+  unsigned              num_parameters;
+  struct parameter      parameters[];
 };
 
 struct ast_slice {
@@ -132,6 +154,7 @@ union ast_expression {
   struct ast_expression_list      expression_list;
   struct ast_generator_expression generator_expression;
   struct ast_identifier           identifier;
+  struct ast_lambda               lambda;
   struct ast_slice                slice;
   struct ast_unexpr               unexpr;
 };

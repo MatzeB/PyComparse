@@ -32,16 +32,17 @@
   case '[':                                                                   \
   case '{':                                                                   \
   case '~':                                                                   \
-  case T_not:                                                                 \
-  case T_IDENTIFIER:                                                          \
-  case T_FLOAT:                                                               \
-  case T_STRING:                                                              \
-  case T_INTEGER:                                                             \
   case T_ASTERISK_ASTERISK:                                                   \
-  case T_True:                                                                \
+  case T_DOT_DOT_DOT:                                                         \
   case T_False:                                                               \
+  case T_FLOAT:                                                               \
+  case T_IDENTIFIER:                                                          \
+  case T_INTEGER:                                                             \
   case T_None:                                                                \
-  case T_DOT_DOT_DOT
+  case T_STRING:                                                              \
+  case T_True:                                                                \
+  case T_lambda:                                                              \
+  case T_not
 
 enum precedence {
   PREC_INVALID,
@@ -198,8 +199,9 @@ static void eat_until_matching_token(struct parser_state *s,
 static void eat_until_anchor(struct parser_state *s)
 {
   while (s->anchor_set[peek(s)] == 0) {
-    if (peek(s) == '(' || peek(s) == '{' || peek(s) == '[')
+    if (peek(s) == '(' || peek(s) == '{' || peek(s) == '[') {
       eat_until_matching_token(s, peek(s));
+    }
     if (peek(s) == ':') {
       next_token(s);
       if (accept(s, T_NEWLINE)) {
@@ -219,12 +221,35 @@ static void eat_until_anchor(struct parser_state *s)
 
 static void error_expected(struct parser_state *s, const char *what)
 {
-  if (peek(s) == T_INVALID) {
-    return;
-  }
+  if (peek(s) == T_INVALID) return;
   diag_begin_error(s->d, scanner_location(&s->scanner));
   diag_frag(s->d, "expected ");
   diag_frag(s->d, what);
+  diag_frag(s->d, ", got ");
+  diag_token(s->d, &s->scanner.token);
+  diag_end(s->d);
+}
+
+static void error_expected_tok1(struct parser_state *s, enum token_kind kind)
+{
+  if (peek(s) == T_INVALID) return;
+  diag_begin_error(s->d, scanner_location(&s->scanner));
+  diag_frag(s->d, "expected ");
+  diag_token_kind(s->d, kind);
+  diag_frag(s->d, ", got ");
+  diag_token(s->d, &s->scanner.token);
+  diag_end(s->d);
+}
+
+static void error_expected_tok2(struct parser_state *s, enum token_kind kind0,
+                                enum token_kind kind1)
+{
+  if (peek(s) == T_INVALID) return;
+  diag_begin_error(s->d, scanner_location(&s->scanner));
+  diag_frag(s->d, "expected ");
+  diag_token_kind(s->d, kind0);
+  diag_frag(s->d, " or ");
+  diag_token_kind(s->d, kind1);
   diag_frag(s->d, ", got ");
   diag_token(s->d, &s->scanner.token);
   diag_end(s->d);
@@ -234,19 +259,23 @@ static bool skip_till(struct parser_state *s,
                       enum token_kind      expected_token_kind)
 {
   if (UNLIKELY(peek(s) != expected_token_kind)) {
-    error_expected(s, token_kind_name(expected_token_kind));
+    error_expected_tok1(s, expected_token_kind);
 
     add_anchor(s, expected_token_kind);
     eat_until_anchor(s);
     remove_anchor(s, expected_token_kind);
-    if (peek(s) != expected_token_kind) return false;
+    if (peek(s) != expected_token_kind) {
+      return false;
+    }
   }
   return true;
 }
 
 static void expect(struct parser_state *s, enum token_kind expected_token_kind)
 {
-  if (skip_till(s, expected_token_kind)) eat(s, expected_token_kind);
+  if (skip_till(s, expected_token_kind)) {
+    eat(s, expected_token_kind);
+  }
 }
 
 static union ast_expression *
@@ -290,9 +319,6 @@ static struct symbol *invalid_symbol(struct parser_state *s)
 
 static union ast_expression *parse_expression(struct parser_state *s,
                                               enum precedence      precedence);
-static union ast_expression *parse_unexpr(struct parser_state     *s,
-                                          enum precedence          prec_op,
-                                          enum ast_expression_type type);
 
 static bool is_expression_start(enum token_kind token_kind)
 {
@@ -302,6 +328,19 @@ static bool is_expression_start(enum token_kind token_kind)
   default:
     return false;
   }
+}
+
+static inline union ast_expression *parse_unexpr(struct parser_state *s,
+                                                 enum precedence      prec_op,
+                                                 enum ast_expression_type type)
+{
+  next_token(s);
+  union ast_expression *op = parse_expression(s, prec_op);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_unexpr, type);
+  expression->unexpr.op = op;
+  return expression;
 }
 
 static union ast_expression *parse_expression_or_slice(struct parser_state *s)
@@ -416,23 +455,9 @@ parse_generator_expression(struct parser_state     *s,
       s, sizeof(struct ast_generator_expression) + parts_size, type);
   expression->generator_expression.expression = left;
   expression->generator_expression.num_parts = num_parts;
-  memcpy(&expression->generator_expression.parts, idynarray_data(&parts),
+  memcpy(expression->generator_expression.parts, idynarray_data(&parts),
          parts_size);
   idynarray_free(&parts);
-  return expression;
-}
-
-static union ast_expression *parse_attr(struct parser_state  *s,
-                                        union ast_expression *left)
-{
-  eat(s, '.');
-  if (!skip_till(s, T_IDENTIFIER)) return invalid_expression(s);
-  struct symbol *symbol = eat_identifier(s);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
-  expression->attr.expression = left;
-  expression->attr.symbol = symbol;
   return expression;
 }
 
@@ -469,8 +494,8 @@ static struct argument *parse_argument(struct parser_state *s,
   return argument;
 }
 
-static union ast_expression *parse_argument_list(struct parser_state  *s,
-                                                 union ast_expression *callee)
+static union ast_expression *parse_arguments(struct parser_state  *s,
+                                             union ast_expression *callee)
 {
   eat(s, '(');
   add_anchor(s, ')');
@@ -514,23 +539,152 @@ static union ast_expression *parse_argument_list(struct parser_state  *s,
   return expression;
 }
 
-static union ast_expression *parse_call(struct parser_state  *s,
-                                        union ast_expression *left)
+static void parse_parameters(struct parser_state *s,
+                             struct idynarray    *parameters,
+                             unsigned            *positional_only_argcount_res,
+                             enum token_kind      end)
 {
-  return parse_argument_list(s, /*callee=*/left);
+  unsigned positional_only_argcount = 0;
+  bool     had_default = false;
+  bool     had_variable_args = false;
+  bool     had_variable_keyword_args = false;
+
+  add_anchor(s, end);
+
+  for (;;) {
+    enum parameter_variant variant = PARAMETER_NORMAL;
+    switch (peek(s)) {
+    case '/':
+      if (positional_only_argcount != 0) {
+        diag_begin_error(s->d, scanner_location(&s->scanner));
+        diag_token_kind(s->d, '/');
+        diag_frag(s->d, " may appear only once");
+        diag_end(s->d);
+      } else if (had_variable_args || had_variable_keyword_args) {
+        diag_begin_error(s->d, scanner_location(&s->scanner));
+        diag_token_kind(s->d, '/');
+        diag_frag(s->d, " must be ahead of ");
+        diag_token_kind(s->d, had_variable_args ? '*' : T_ASTERISK_ASTERISK);
+        diag_frag(s->d, "-parameter");
+        diag_end(s->d);
+      } else {
+        positional_only_argcount
+            = idynarray_length(parameters, struct parameter);
+        if (positional_only_argcount == 0) {
+          diag_begin_error(s->d, scanner_location(&s->scanner));
+          diag_frag(s->d, "need at least one argument before ");
+          diag_token_kind(s->d, '/');
+          diag_end(s->d);
+        }
+      }
+      eat(s, '/');
+      break;
+    case '*':
+      if (had_variable_args) {
+        diag_begin_error(s->d, scanner_location(&s->scanner));
+        diag_token_kind(s->d, '*');
+        diag_frag(s->d, " argument may appear only once");
+        diag_end(s->d);
+      } else {
+        variant = PARAMETER_STAR;
+        had_variable_args = true;
+      }
+      eat(s, '*');
+      if (peek(s) != T_IDENTIFIER) {
+        /* TODO: report error if there isn't at least one more
+         * parameter (that is not **kwargs) following. */
+        break;
+      }
+      goto parameter;
+    case T_ASTERISK_ASTERISK:
+      if (had_variable_keyword_args) {
+        diag_begin_error(s->d, scanner_location(&s->scanner));
+        diag_token_kind(s->d, T_ASTERISK_ASTERISK);
+        diag_frag(s->d, " argument may appear only once");
+        diag_end(s->d);
+      } else {
+        variant = PARAMETER_STAR_STAR;
+        had_variable_keyword_args = true;
+      }
+      /* TODO: report error when any other parameters follow ** */
+      eat(s, T_ASTERISK_ASTERISK);
+      goto parameter;
+    case T_IDENTIFIER:
+    parameter:
+      if (!skip_till(s, T_IDENTIFIER)) break;
+      struct location location = scanner_location(&s->scanner);
+      struct symbol  *name = eat_identifier(s);
+
+      union ast_expression *type = NULL;
+      bool                  allow_type_annotations = (end != ':');
+      if (allow_type_annotations && accept(s, ':')) {
+        type = parse_expression(s, PREC_EXPRESSION);
+      }
+
+      union ast_expression *initializer = NULL;
+      if (accept(s, '=')) {
+        struct location location = scanner_location(&s->scanner);
+        initializer = parse_expression(s, PREC_NAMED);
+        had_default = true;
+        if (variant != PARAMETER_NORMAL) {
+          diag_begin_error(s->d, location);
+          diag_frag(s->d,
+                    "variable argument parameter cannot have a default value");
+          diag_end(s->d);
+          initializer = NULL;
+        }
+      } else if (had_default && !had_variable_args
+                 && variant != PARAMETER_STAR_STAR) {
+        diag_begin_error(s->d, location);
+        diag_frag(s->d,
+                  "parameter without default follows parameter with default");
+        diag_end(s->d);
+      }
+
+      bool              error_duplicate = false;
+      struct parameter *parr = idynarray_data(parameters);
+      for (unsigned p = 0, e = idynarray_length(parameters, struct parameter);
+           p < e; p++) {
+        if (parr[p].name == name) {
+          diag_begin_error(s->d, location);
+          diag_frag(s->d, "duplicate argument ");
+          diag_symbol(s->d, name);
+          diag_end(s->d);
+          error_duplicate = true;
+        }
+      }
+
+      if (!error_duplicate) {
+        struct parameter *parameter
+            = idynarray_append(parameters, struct parameter);
+        parameter->name = name;
+        parameter->type = type;
+        parameter->initializer = initializer;
+        parameter->variant = variant;
+      }
+      break;
+    default:
+      break;
+    }
+    if (!accept(s, ',')) break;
+  }
+
+  if (!accept(s, end)) {
+    error_expected_tok2(s, ',', end);
+    eat_until_anchor(s);
+    accept(s, end);
+  }
+  remove_anchor(s, end);
+
+  *positional_only_argcount_res = positional_only_argcount;
 }
 
-static inline union ast_expression *parse_unexpr(struct parser_state *s,
-                                                 enum precedence      prec_op,
-                                                 enum ast_expression_type type)
+static union ast_expression *parse_singleton(struct parser_state *s,
+                                             enum object_type     type)
 {
   next_token(s);
-  union ast_expression *op = parse_expression(s, prec_op);
-
-  union ast_expression *expression
-      = ast_allocate_expression(s, struct ast_unexpr, type);
-  expression->unexpr.op = op;
-  return expression;
+  union object *object = object_intern_singleton(&s->cg.objects, type);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_l_bracket(struct parser_state *s)
@@ -668,24 +822,21 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   return expression;
 }
 
-static union ast_expression *parse_plus(struct parser_state *s)
+static union ast_expression *parse_ellipsis(struct parser_state *s)
 {
-  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_PLUS);
+  return parse_singleton(s, OBJECT_ELLIPSIS);
 }
 
-static union ast_expression *parse_negative(struct parser_state *s)
+static union ast_expression *parse_false(struct parser_state *s)
 {
-  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_NEGATIVE);
+  return parse_singleton(s, OBJECT_FALSE);
 }
 
-static union ast_expression *parse_invert(struct parser_state *s)
+static union ast_expression *parse_float(struct parser_state *s)
 {
-  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_INVERT);
-}
-
-static union ast_expression *parse_not(struct parser_state *s)
-{
-  return parse_unexpr(s, PREC_COMPARISON, AST_UNEXPR_NOT);
+  union object *object = peek_get_object(s, T_FLOAT);
+  eat(s, T_FLOAT);
+  return ast_const_new(s, object);
 }
 
 static union ast_expression *parse_identifier(struct parser_state *s)
@@ -698,13 +849,6 @@ static union ast_expression *parse_identifier(struct parser_state *s)
   return node;
 }
 
-static union ast_expression *parse_float(struct parser_state *s)
-{
-  union object *object = peek_get_object(s, T_FLOAT);
-  eat(s, T_FLOAT);
-  return ast_const_new(s, object);
-}
-
 static union ast_expression *parse_integer(struct parser_state *s)
 {
   union object *object = peek_get_object(s, T_INTEGER);
@@ -712,12 +856,40 @@ static union ast_expression *parse_integer(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
-static union ast_expression *parse_singleton(struct parser_state *s,
-                                             enum object_type     type)
+static union ast_expression *parse_invert(struct parser_state *s)
 {
-  next_token(s);
-  union object *object = object_intern_singleton(&s->cg.objects, type);
-  return ast_const_new(s, object);
+  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_INVERT);
+}
+
+static union ast_expression *parse_lambda(struct parser_state *s)
+{
+  eat(s, T_lambda);
+
+  struct parameter inline_storage[8];
+  struct idynarray parameters;
+  idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
+
+  unsigned positional_only_argcount;
+  parse_parameters(s, &parameters, &positional_only_argcount, /*end=*/':');
+  union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
+
+  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
+  size_t   parameters_size = num_parameters * sizeof(struct parameter);
+  union ast_expression *lambda = ast_allocate_expression_(
+      s, sizeof(struct ast_lambda) + parameters_size, AST_LAMBDA);
+  lambda->lambda.expression = expression;
+  lambda->lambda.positional_only_argcount = positional_only_argcount;
+  lambda->lambda.num_parameters = num_parameters;
+  memcpy(lambda->lambda.parameters, idynarray_data(&parameters),
+         parameters_size);
+  idynarray_free(&parameters);
+
+  return lambda;
+}
+
+static union ast_expression *parse_plus(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_PLUS);
 }
 
 static union ast_expression *parse_string(struct parser_state *s)
@@ -778,14 +950,9 @@ static union ast_expression *parse_string(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
-static union ast_expression *parse_true(struct parser_state *s)
+static union ast_expression *parse_negative(struct parser_state *s)
 {
-  return parse_singleton(s, OBJECT_TRUE);
-}
-
-static union ast_expression *parse_false(struct parser_state *s)
-{
-  return parse_singleton(s, OBJECT_FALSE);
+  return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_NEGATIVE);
 }
 
 static union ast_expression *parse_none(struct parser_state *s)
@@ -793,9 +960,14 @@ static union ast_expression *parse_none(struct parser_state *s)
   return parse_singleton(s, OBJECT_NONE);
 }
 
-static union ast_expression *parse_ellipsis(struct parser_state *s)
+static union ast_expression *parse_not(struct parser_state *s)
 {
-  return parse_singleton(s, OBJECT_ELLIPSIS);
+  return parse_unexpr(s, PREC_COMPARISON, AST_UNEXPR_NOT);
+}
+
+static union ast_expression *parse_true(struct parser_state *s)
+{
+  return parse_singleton(s, OBJECT_TRUE);
 }
 
 typedef union ast_expression *(*prefix_parser_func)(struct parser_state *s);
@@ -817,9 +989,10 @@ static const struct prefix_expression_parser prefix_parsers[] = {
   [T_IDENTIFIER]        = { .func = parse_identifier        },
   [T_INTEGER]           = { .func = parse_integer           },
   [T_None]              = { .func = parse_none              },
-  [T_not]               = { .func = parse_not               },
   [T_STRING]            = { .func = parse_string            },
   [T_True]              = { .func = parse_true              },
+  [T_lambda]            = { .func = parse_lambda            },
+  [T_not]               = { .func = parse_not               },
   /* clang-format on */
 };
 
@@ -962,46 +1135,24 @@ static union ast_expression *parse_and_assign(struct parser_state  *s,
   return parse_binexpr_assign(s, AST_BINEXPR_AND_ASSIGN, left);
 }
 
-static union ast_expression *check_assignment_target(
-    struct parser_state *s, union ast_expression *expression,
-    struct location location, bool is_del, bool show_equal_hint)
+static union ast_expression *parse_attr(struct parser_state  *s,
+                                        union ast_expression *left)
 {
-  enum ast_expression_type type = ast_expression_type(expression);
-  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
-      || type == AST_ATTR)
-    return expression;
-  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
-    unsigned num_expressions = expression->expression_list.num_expressions;
-    union ast_expression **expressions
-        = expression->expression_list.expressions;
-    for (unsigned i = 0; i < num_expressions; i++) {
-      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
-        continue;
-      }
-      expressions[i] = check_assignment_target(s, expressions[i], location,
-                                               is_del, show_equal_hint);
-    }
-    return expression;
-  }
-  if (type == AST_INVALID) {
-    return expression;
-  }
-  diag_begin_error(s->d, location);
-  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
-  diag_expression(s->d, expression);
-  if (show_equal_hint) {
-    /* TODO: only show ':=' suggestion where it makes sense (like cpython)...
-     */
-    diag_frag(s->d, ". Maybe you meant ");
-    diag_token_kind(s->d, T_EQUALS_EQUALS);
-    diag_frag(s->d, ", or ");
-    diag_token_kind(s->d, T_COLON_EQUALS);
-    diag_frag(s->d, " instead of ");
-    diag_token_kind(s->d, '=');
-    diag_frag(s->d, "?");
-  }
-  diag_end(s->d);
-  return invalid_expression(s);
+  eat(s, '.');
+  if (!skip_till(s, T_IDENTIFIER)) return invalid_expression(s);
+  struct symbol *symbol = eat_identifier(s);
+
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
+  expression->attr.expression = left;
+  expression->attr.symbol = symbol;
+  return expression;
+}
+
+static union ast_expression *parse_call(struct parser_state  *s,
+                                        union ast_expression *left)
+{
+  return parse_arguments(s, /*callee=*/left);
 }
 
 static union ast_expression *
@@ -1330,6 +1481,48 @@ static union ast_expression *parse_star_expressions(struct parser_state *s)
                                        PREC_NAMED, /*allow_slices=*/false);
   }
   return expression;
+}
+
+static union ast_expression *check_assignment_target(
+    struct parser_state *s, union ast_expression *expression,
+    struct location location, bool is_del, bool show_equal_hint)
+{
+  enum ast_expression_type type = ast_expression_type(expression);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR)
+    return expression;
+  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
+    unsigned num_expressions = expression->expression_list.num_expressions;
+    union ast_expression **expressions
+        = expression->expression_list.expressions;
+    for (unsigned i = 0; i < num_expressions; i++) {
+      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
+        continue;
+      }
+      expressions[i] = check_assignment_target(s, expressions[i], location,
+                                               is_del, show_equal_hint);
+    }
+    return expression;
+  }
+  if (type == AST_INVALID) {
+    return expression;
+  }
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
+  diag_expression(s->d, expression);
+  if (show_equal_hint) {
+    /* TODO: only show ':=' suggestion where it makes sense (like cpython)...
+     */
+    diag_frag(s->d, ". Maybe you meant ");
+    diag_token_kind(s->d, T_EQUALS_EQUALS);
+    diag_frag(s->d, ", or ");
+    diag_token_kind(s->d, T_COLON_EQUALS);
+    diag_frag(s->d, " instead of ");
+    diag_token_kind(s->d, '=');
+    diag_frag(s->d, "?");
+  }
+  diag_end(s->d);
+  return invalid_expression(s);
 }
 
 static void parse_assignment(struct parser_state  *s,
@@ -1673,7 +1866,7 @@ static void parse_suite(struct parser_state *s)
 #endif
   if (accept(s, T_NEWLINE)) {
     if (peek(s) != T_INDENT) {
-      error_expected(s, "indent");
+      error_expected_tok1(s, T_INDENT);
       /* abort early because the following loop wouldn't terminate without a
        * matching T_DEDENT. */
       return;
@@ -1706,7 +1899,7 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 
   union ast_expression *call;
   if (peek(s) == '(') {
-    call = parse_argument_list(s, /*callee=*/NULL);
+    call = parse_arguments(s, /*callee=*/NULL);
   } else {
     call = ast_allocate_expression_(s, sizeof(struct ast_call), AST_CALL);
     call->call.has_star_argument = false;
@@ -1723,143 +1916,6 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
   emit_class_end(&s->cg, name, &call->call, num_decorators);
 }
 
-static void parse_def_parameters(struct parser_state *s,
-                                 struct idynarray    *parameters,
-                                 unsigned *positional_only_argcount_res)
-{
-  expect(s, '(');
-  add_anchor(s, ')');
-
-  unsigned positional_only_argcount = 0;
-  bool     had_default = false;
-  bool     had_variable_args = false;
-  bool     had_variable_keyword_args = false;
-
-  for (;;) {
-    enum parameter_variant variant = PARAMETER_NORMAL;
-    switch (peek(s)) {
-    case ')':
-      break;
-    case '/':
-      if (positional_only_argcount != 0) {
-        diag_begin_error(s->d, scanner_location(&s->scanner));
-        diag_token_kind(s->d, '/');
-        diag_frag(s->d, " may appear only once");
-        diag_end(s->d);
-      } else if (had_variable_args || had_variable_keyword_args) {
-        diag_begin_error(s->d, scanner_location(&s->scanner));
-        diag_token_kind(s->d, '/');
-        diag_frag(s->d, " must be ahead of ");
-        diag_token_kind(s->d, had_variable_args ? '*' : T_ASTERISK_ASTERISK);
-        diag_frag(s->d, "-parameter");
-        diag_end(s->d);
-      } else {
-        positional_only_argcount
-            = idynarray_length(parameters, struct parameter);
-        if (positional_only_argcount == 0) {
-          diag_begin_error(s->d, scanner_location(&s->scanner));
-          diag_frag(s->d, "need at least one argument before ");
-          diag_token_kind(s->d, '/');
-          diag_end(s->d);
-        }
-      }
-      eat(s, '/');
-      break;
-    case '*':
-      if (had_variable_args) {
-        diag_begin_error(s->d, scanner_location(&s->scanner));
-        diag_token_kind(s->d, '*');
-        diag_frag(s->d, " argument may appear only once");
-        diag_end(s->d);
-      } else {
-        variant = PARAMETER_STAR;
-        had_variable_args = true;
-      }
-      eat(s, '*');
-      if (peek(s) != T_IDENTIFIER) {
-        /* TODO: report error if there isn't at least one more
-         * parameter (that is not **kwargs) following. */
-        break;
-      }
-      goto parameter;
-    case T_ASTERISK_ASTERISK:
-      if (had_variable_keyword_args) {
-        diag_begin_error(s->d, scanner_location(&s->scanner));
-        diag_token_kind(s->d, T_ASTERISK_ASTERISK);
-        diag_frag(s->d, " argument may appear only once");
-        diag_end(s->d);
-      } else {
-        variant = PARAMETER_STAR_STAR;
-        had_variable_keyword_args = true;
-      }
-      /* TODO: report error when any other parameters follow ** */
-      eat(s, T_ASTERISK_ASTERISK);
-      goto parameter;
-    case T_EOF:
-      break;
-    default:
-    parameter:
-      if (!skip_till(s, T_IDENTIFIER)) break;
-      struct location location = scanner_location(&s->scanner);
-      struct symbol  *name = eat_identifier(s);
-
-      union ast_expression *type = NULL;
-      if (accept(s, ':')) {
-        type = parse_expression(s, PREC_EXPRESSION);
-      }
-
-      union ast_expression *initializer = NULL;
-      if (accept(s, '=')) {
-        struct location location = scanner_location(&s->scanner);
-        initializer = parse_expression(s, PREC_NAMED);
-        had_default = true;
-        if (variant != PARAMETER_NORMAL) {
-          diag_begin_error(s->d, location);
-          diag_frag(s->d,
-                    "variable argument parameter cannot have a default value");
-          diag_end(s->d);
-          initializer = NULL;
-        }
-      } else if (had_default && !had_variable_args
-                 && variant != PARAMETER_STAR_STAR) {
-        diag_begin_error(s->d, location);
-        diag_frag(s->d,
-                  "parameter without default follows parameter with default");
-        diag_end(s->d);
-      }
-
-      bool              error_duplicate = false;
-      struct parameter *parr = idynarray_data(parameters);
-      for (unsigned p = 0, e = idynarray_length(parameters, struct parameter);
-           p < e; p++) {
-        if (parr[p].name == name) {
-          diag_begin_error(s->d, location);
-          diag_frag(s->d, "duplicate argument ");
-          diag_symbol(s->d, name);
-          diag_end(s->d);
-          error_duplicate = true;
-        }
-      }
-
-      if (!error_duplicate) {
-        struct parameter *parameter
-            = idynarray_append(parameters, struct parameter);
-        parameter->name = name;
-        parameter->type = type;
-        parameter->initializer = initializer;
-        parameter->variant = variant;
-      }
-      break;
-    }
-    if (peek(s) == ')' || peek(s) == T_EOF) break;
-    expect(s, ',');
-  }
-
-  remove_anchor(s, ')');
-  expect(s, ')');
-  *positional_only_argcount_res = positional_only_argcount;
-}
-
 static void parse_def(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_def);
@@ -1871,7 +1927,10 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
   idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
   unsigned positional_only_argcount;
 
-  parse_def_parameters(s, &parameters, &positional_only_argcount);
+  expect(s, '(');
+
+  parse_parameters(s, &parameters, &positional_only_argcount,
+                   /*end=*/')');
 
   unsigned num_parameters = idynarray_length(&parameters, struct parameter);
   struct parameter *parameter_arr = idynarray_data(&parameters);
@@ -1882,7 +1941,7 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
   }
   expect(s, ':');
 
-  struct def_state state;
+  struct make_function_state state;
   emit_def_begin(&s->cg, &state, num_parameters, parameter_arr,
                  positional_only_argcount, return_type);
   idynarray_free(&parameters);
@@ -1910,7 +1969,16 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
     parse_def(s, num_decorators + 1);
     return;
   default:
-    error_expected(s, "@, class or def after decorator");
+    diag_begin_error(s->d, scanner_location(&s->scanner));
+    diag_frag(s->d, "expected ");
+    diag_token_kind(s->d, '@');
+    diag_frag(s->d, ", ");
+    diag_token_kind(s->d, T_class);
+    diag_frag(s->d, " or ");
+    diag_token_kind(s->d, T_def);
+    diag_frag(s->d, " after decorator, got ");
+    diag_token(s->d, &s->scanner.token);
+    diag_end(s->d);
     return;
   }
 }

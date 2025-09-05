@@ -204,6 +204,21 @@ static void emit_dictionary_display(struct cg_state           *s,
                  /*push=*/1);
 }
 
+static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
+{
+  struct make_function_state state;
+  emit_make_function_begin(s, &state, lambda->num_parameters,
+                           lambda->parameters,
+                           lambda->positional_only_argcount,
+                           /*return_type=*/NULL);
+  emit_expression(s, lambda->expression);
+  cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
+
+  struct symbol *symbol
+      = symbol_table_get_or_insert(s->symbol_table, "<lambda>");
+  emit_make_function_end(s, &state, symbol);
+}
+
 static void
 emit_list_comprehension(struct cg_state                 *s,
                         struct ast_generator_expression *generator_expression)
@@ -712,6 +727,9 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     return;
   case AST_IDENTIFIER:
     cg_load(s, expression->identifier.symbol);
+    return;
+  case AST_LAMBDA:
+    emit_lambda(s, &expression->lambda);
     return;
   case AST_LIST_COMPREHENSION:
     emit_list_comprehension(s, &expression->generator_expression);

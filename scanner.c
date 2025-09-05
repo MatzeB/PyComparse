@@ -667,8 +667,7 @@ static void scan_escape_sequence(struct scanner_state *s,
     ++s->line;
     return;
   case C_EOF:
-    /* TODO: report error */
-    abort();
+    return;
   default:
     /* TODO: report error */
     arena_grow_char(strings, '\\');
@@ -1269,8 +1268,8 @@ begin_new_line:
         /* no token; continue on next line without indentation check. */
         continue;
       }
-      /* report error? */
-      abort();
+      invalid_c = '\\';
+      goto invalid_char;
 
     case C_EOF:
       scan_eof(s);
@@ -1279,6 +1278,7 @@ begin_new_line:
     default:
       if (s->c >= 128) {
         // TODO: unicode caracters
+        abort();
       }
       invalid_c = s->c;
       next_char(s);

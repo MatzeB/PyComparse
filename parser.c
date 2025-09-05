@@ -1416,7 +1416,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   [T_LESS_THAN_LESS_THAN_EQUALS]
     = { .func = parse_shift_left_assign,  .precedence = PREC_ASSIGN     },
   [T_LESS_THAN_LESS_THAN]
-    = { .func = parse_shift_left,         .precedence = PREC_ASSIGN     },
+    = { .func = parse_shift_left,         .precedence = PREC_SHIFT      },
   [T_MINUS_EQUALS]
     = { .func = parse_sub_assign,         .precedence = PREC_ASSIGN     },
   [T_PERCENT_EQUALS]

@@ -24,26 +24,6 @@
 
 #define UNLIKELY(x) __builtin_expect((x), 0)
 
-/* Keep this in sync with prefix_parsers below */
-#define EXPRESSION_START_CASES                                                \
-  '(' : case '*':                                                             \
-  case '+':                                                                   \
-  case '-':                                                                   \
-  case '[':                                                                   \
-  case '{':                                                                   \
-  case '~':                                                                   \
-  case T_ASTERISK_ASTERISK:                                                   \
-  case T_DOT_DOT_DOT:                                                         \
-  case T_False:                                                               \
-  case T_FLOAT:                                                               \
-  case T_IDENTIFIER:                                                          \
-  case T_INTEGER:                                                             \
-  case T_None:                                                                \
-  case T_STRING:                                                              \
-  case T_True:                                                                \
-  case T_lambda:                                                              \
-  case T_not
-
 enum precedence {
   PREC_INVALID,
   PREC_ASSIGN,      /* +=, -=, ... */
@@ -317,18 +297,17 @@ static struct symbol *invalid_symbol(struct parser_state *s)
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
+static struct symbol *parse_identifier(struct parser_state *s)
+{
+  if (!skip_till(s, T_IDENTIFIER)) {
+    return invalid_symbol(s);
+  }
+  return eat_identifier(s);
+}
+
 static union ast_expression *parse_expression(struct parser_state *s,
                                               enum precedence      precedence);
-
-static bool is_expression_start(enum token_kind token_kind)
-{
-  switch (token_kind) {
-  case EXPRESSION_START_CASES:
-    return true;
-  default:
-    return false;
-  }
-}
+static bool                  is_expression_start(enum token_kind token_kind);
 
 static inline union ast_expression *parse_unexpr(struct parser_state *s,
                                                  enum precedence      prec_op,
@@ -610,10 +589,9 @@ static void parse_parameters(struct parser_state *s,
       eat(s, T_ASTERISK_ASTERISK);
       goto parameter;
     case T_IDENTIFIER:
-    parameter:
-      if (!skip_till(s, T_IDENTIFIER)) break;
+    parameter: {
       struct location location = scanner_location(&s->scanner);
-      struct symbol  *name = eat_identifier(s);
+      struct symbol  *name = parse_identifier(s);
 
       union ast_expression *type = NULL;
       bool                  allow_type_annotations = (end != ':');
@@ -663,6 +641,7 @@ static void parse_parameters(struct parser_state *s,
         parameter->variant = variant;
       }
       break;
+    }
     default:
       break;
     }
@@ -839,7 +818,7 @@ static union ast_expression *parse_float(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
-static union ast_expression *parse_identifier(struct parser_state *s)
+static union ast_expression *parse_prefix_identifier(struct parser_state *s)
 {
   struct symbol *symbol = eat_identifier(s);
 
@@ -970,31 +949,84 @@ static union ast_expression *parse_true(struct parser_state *s)
   return parse_singleton(s, OBJECT_TRUE);
 }
 
-typedef union ast_expression *(*prefix_parser_func)(struct parser_state *s);
-struct prefix_expression_parser {
-  prefix_parser_func func;
-};
+/* Keep this in sync with parse_prefix_expression() below */
+#define EXPRESSION_START_CASES                                                \
+  '(' : case '*':                                                             \
+  case '+':                                                                   \
+  case '-':                                                                   \
+  case '[':                                                                   \
+  case '{':                                                                   \
+  case '~':                                                                   \
+  case T_ASTERISK_ASTERISK:                                                   \
+  case T_DOT_DOT_DOT:                                                         \
+  case T_False:                                                               \
+  case T_FLOAT:                                                               \
+  case T_IDENTIFIER:                                                          \
+  case T_INTEGER:                                                             \
+  case T_None:                                                                \
+  case T_STRING:                                                              \
+  case T_True:                                                                \
+  case T_lambda:                                                              \
+  case T_not
 
-static const struct prefix_expression_parser prefix_parsers[] = {
-  /* clang-format off */
-  ['(']                 = { .func = parse_l_paren           },
-  ['+']                 = { .func = parse_plus              },
-  ['-']                 = { .func = parse_negative          },
-  ['[']                 = { .func = parse_l_bracket         },
-  ['{']                 = { .func = parse_l_curly           },
-  ['~']                 = { .func = parse_invert            },
-  [T_DOT_DOT_DOT]       = { .func = parse_ellipsis          },
-  [T_FLOAT]             = { .func = parse_float             },
-  [T_False]             = { .func = parse_false             },
-  [T_IDENTIFIER]        = { .func = parse_identifier        },
-  [T_INTEGER]           = { .func = parse_integer           },
-  [T_None]              = { .func = parse_none              },
-  [T_STRING]            = { .func = parse_string            },
-  [T_True]              = { .func = parse_true              },
-  [T_lambda]            = { .func = parse_lambda            },
-  [T_not]               = { .func = parse_not               },
-  /* clang-format on */
-};
+static bool is_expression_start(enum token_kind token_kind)
+{
+  switch (token_kind) {
+  case EXPRESSION_START_CASES:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static union ast_expression *parse_prefix_expression(struct parser_state *s)
+{
+  switch (peek(s)) {
+  case '(':
+    return parse_l_paren(s);
+  case '+':
+    return parse_plus(s);
+  case '-':
+    return parse_negative(s);
+  case '[':
+    return parse_l_bracket(s);
+  case '{':
+    return parse_l_curly(s);
+  case '~':
+    return parse_invert(s);
+  case T_DOT_DOT_DOT:
+    return parse_ellipsis(s);
+  case T_FLOAT:
+    return parse_float(s);
+  case T_False:
+    return parse_false(s);
+  case T_IDENTIFIER:
+    return parse_prefix_identifier(s);
+  case T_INTEGER:
+    return parse_integer(s);
+  case T_None:
+    return parse_none(s);
+  case T_STRING:
+    return parse_string(s);
+  case T_True:
+    return parse_true(s);
+  case T_lambda:
+    return parse_lambda(s);
+  case T_not:
+    return parse_not(s);
+  default:
+    if (peek(s) == '*' || peek(s) == T_ASTERISK_ASTERISK) {
+      struct location location = scanner_location(&s->scanner);
+      parse_unexpr(s, PREC_NAMED, AST_UNEXPR_STAR);
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "starred expression not allowed here");
+      diag_end(s->d);
+      return invalid_expression(s);
+    }
+    error_expected(s, "expression");
+    return invalid_expression(s);
+  }
+}
 
 static inline union ast_expression *
 parse_binexpr(struct parser_state *s, enum precedence prec_right,
@@ -1139,8 +1171,7 @@ static union ast_expression *parse_attr(struct parser_state  *s,
                                         union ast_expression *left)
 {
   eat(s, '.');
-  if (!skip_till(s, T_IDENTIFIER)) return invalid_expression(s);
-  struct symbol *symbol = eat_identifier(s);
+  struct symbol *symbol = parse_identifier(s);
 
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_attr, AST_ATTR);
@@ -1435,26 +1466,7 @@ static const struct postfix_expression_parser postfix_parsers[] = {
 union ast_expression *parse_expression(struct parser_state *s,
                                        enum precedence      precedence)
 {
-  enum token_kind token_kind = peek(s);
-  if (token_kind >= sizeof(prefix_parsers) / sizeof(prefix_parsers[0])) {
-    error_expected(s, "expression");
-    return invalid_expression(s);
-  }
-  const struct prefix_expression_parser *prefix_parser
-      = &prefix_parsers[token_kind];
-  if (prefix_parser->func == NULL) {
-    if (peek(s) == '*' || peek(s) == T_ASTERISK_ASTERISK) {
-      struct location location = scanner_location(&s->scanner);
-      parse_unexpr(s, precedence, AST_UNEXPR_STAR);
-      diag_begin_error(s->d, location);
-      diag_frag(s->d, "starred expression not allowed here");
-      diag_end(s->d);
-      return invalid_expression(s);
-    }
-    error_expected(s, "expression");
-    return invalid_expression(s);
-  }
-  union ast_expression *result = prefix_parser->func(s);
+  union ast_expression *result = parse_prefix_expression(s);
 
   for (;;) {
     enum token_kind postifx_token_kind = peek(s);
@@ -1662,13 +1674,7 @@ static struct dotted_name *parse_dotted_name(struct parser_state *s)
   arena_grow(&s->ast, sizeof(struct dotted_name));
   unsigned num_symbols = 0;
   do {
-    if (!skip_till(s, T_IDENTIFIER)) {
-      void *begin = arena_grow_finish(&s->ast);
-      arena_free_to(&s->ast, begin);
-      return NULL;
-    }
-    struct symbol *symbol = eat_identifier(s);
-
+    struct symbol  *symbol = parse_identifier(s);
     struct symbol **ptr = (struct symbol **)arena_grow(&s->ast, sizeof(*ptr));
     *ptr = symbol;
     ++num_symbols;
@@ -1706,19 +1712,10 @@ static void parse_from_import_statement(struct parser_state *s)
 
   bool braced = accept(s, '(');
   for (;;) {
-    struct symbol *name;
-    if (skip_till(s, T_IDENTIFIER)) {
-      name = eat_identifier(s);
-    } else {
-      name = invalid_symbol(s);
-    }
+    struct symbol *name = parse_identifier(s);
     struct symbol *as = NULL;
     if (accept(s, T_as)) {
-      if (skip_till(s, T_IDENTIFIER)) {
-        as = eat_identifier(s);
-      } else {
-        as = invalid_symbol(s);
-      }
+      as = parse_identifier(s);
     }
     struct from_import_item *item
         = idynarray_append(&pairs, struct from_import_item);
@@ -1736,6 +1733,21 @@ static void parse_from_import_statement(struct parser_state *s)
                              idynarray_data(&pairs));
 }
 
+static void parse_global_statement(struct parser_state *s)
+{
+  eat(s, T_global);
+  do {
+    struct symbol *name = parse_identifier(s);
+    if (!emit_global_statement(&s->cg, name)) {
+      diag_begin_error(s->d, scanner_location(&s->scanner));
+      diag_frag(s->d, "name ");
+      diag_symbol(s->d, name);
+      diag_frag(s->d, " is assigned to before global declaration");
+      diag_end(s->d);
+    }
+  } while (accept(s, ','));
+}
+
 static void parse_import_statement(struct parser_state *s)
 {
   eat(s, T_import);
@@ -1743,10 +1755,25 @@ static void parse_import_statement(struct parser_state *s)
   do {
     struct dotted_name *dotted_name = parse_dotted_name(s);
     struct symbol      *as = NULL;
-    if (accept(s, T_as) && skip_till(s, T_IDENTIFIER)) {
-      as = eat_identifier(s);
+    if (accept(s, T_as)) {
+      as = parse_identifier(s);
     }
     emit_import_statement(&s->cg, dotted_name, as);
+  } while (accept(s, ','));
+}
+
+static void parse_nonlocal_statement(struct parser_state *s)
+{
+  eat(s, T_nonlocal);
+  do {
+    struct symbol *name = parse_identifier(s);
+    if (!emit_nonlocal_statement(&s->cg, name)) {
+      diag_begin_error(s->d, scanner_location(&s->scanner));
+      diag_frag(s->d, "name ");
+      diag_symbol(s->d, name);
+      diag_frag(s->d, " is assigned to before nonlocal declaration");
+      diag_end(s->d);
+    }
   } while (accept(s, ','));
 }
 
@@ -1805,7 +1832,7 @@ static void parse_yield(struct parser_state *s)
   }
 }
 
-static void parse_small_statement(struct parser_state *s)
+static void parse_simple_statement(struct parser_state *s)
 {
   switch (peek(s)) {
   case EXPRESSION_START_CASES:
@@ -1826,8 +1853,14 @@ static void parse_small_statement(struct parser_state *s)
   case T_from:
     parse_from_import_statement(s);
     break;
+  case T_global:
+    parse_global_statement(s);
+    break;
   case T_import:
     parse_import_statement(s);
+    break;
+  case T_nonlocal:
+    parse_nonlocal_statement(s);
     break;
   case T_pass:
     parse_pass(s);
@@ -1847,11 +1880,11 @@ static void parse_small_statement(struct parser_state *s)
   }
 }
 
-static void parse_simple_statement(struct parser_state *s)
+static void parse_simple_statements(struct parser_state *s)
 {
   add_anchor(s, T_NEWLINE);
   do {
-    parse_small_statement(s);
+    parse_simple_statement(s);
   } while (accept(s, ';') && peek(s) != T_NEWLINE);
   remove_anchor(s, T_NEWLINE);
   expect(s, T_NEWLINE);
@@ -1877,7 +1910,7 @@ static void parse_suite(struct parser_state *s)
       assert(s->cg.code.stacksize == prev_stacksize);
     } while (!accept(s, T_DEDENT));
   } else {
-    parse_simple_statement(s);
+    parse_simple_statements(s);
     assert(s->cg.code.stacksize == prev_stacksize);
   }
 }
@@ -1892,8 +1925,7 @@ static void parse_type_parameters(struct parser_state *s)
 static void parse_class(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_class);
-  if (!skip_till(s, T_IDENTIFIER)) return;
-  struct symbol *name = eat_identifier(s);
+  struct symbol *name = parse_identifier(s);
 
   parse_type_parameters(s);
 
@@ -1919,8 +1951,7 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 static void parse_def(struct parser_state *s, unsigned num_decorators)
 {
   eat(s, T_def);
-  if (!skip_till(s, T_IDENTIFIER)) return;
-  struct symbol *name = eat_identifier(s);
+  struct symbol *name = parse_identifier(s);
 
   struct parameter inline_storage[16];
   struct idynarray parameters;
@@ -2067,8 +2098,8 @@ static void parse_try(struct parser_state *s)
     struct symbol        *as = NULL;
     if (peek(s) != ':') {
       match = parse_expression(s, PREC_TEST);
-      if (accept(s, T_as) && skip_till(s, T_IDENTIFIER)) {
-        as = eat_identifier(s);
+      if (accept(s, T_as)) {
+        as = parse_identifier(s);
       }
     }
     expect(s, ':');
@@ -2221,7 +2252,7 @@ static void parse_statement(struct parser_state *s)
   case T_EOF:
     break;
   default:
-    parse_simple_statement(s);
+    parse_simple_statements(s);
     break;
   }
   remove_anchor(s, T_NEWLINE);

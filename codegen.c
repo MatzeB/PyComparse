@@ -11,6 +11,7 @@
 #include "object_types.h"
 #include "opcodes.h"
 #include "symbol_types.h"
+#include "util.h"
 
 #define INVALID_BLOCK_OFFSET (~0u)
 
@@ -173,6 +174,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   code->consts = object_new_list(arena);
   code->names = object_new_list(arena);
   code->varnames = object_new_list(arena);
+  code->freevars = object_new_list(arena);
   if (s->next_scope_id == UINT16_MAX) {
     abort();
   }
@@ -447,7 +449,6 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
                                             code_length, code_bytes);
-  union object *freevars = object_intern_empty_tuple(&s->objects);
   union object *cellvars = object_intern_empty_tuple(&s->objects);
   union object *filename = object_intern_cstring(&s->objects, s->filename);
   union object *name_string = object_intern_cstring(&s->objects, name);
@@ -458,14 +459,14 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.argcount = s->code.argcount;
   object->code.posonlyargcount = s->code.positional_only_argcount;
   object->code.kwonlyargcount = s->code.keyword_only_argcount;
-  object->code.nlocals = s->code.varnames->list.length;
+  object->code.nlocals = object_list_length(s->code.varnames);
   object->code.stacksize = s->code.max_stacksize;
   object->code.flags = s->code.flags;
   object->code.code = code;
   object->code.consts = s->code.consts;
   object->code.names = s->code.names;
   object->code.varnames = s->code.varnames;
-  object->code.freevars = freevars;
+  object->code.freevars = s->code.freevars;
   object->code.cellvars = cellvars;
   object->code.filename = filename;
   object->code.name = name_string;
@@ -539,15 +540,16 @@ static unsigned cg_append_name_from_cstring(struct cg_state *s,
   union object *names = s->code.names;
   union object *string = object_intern_cstring(&s->objects, cstring);
   object_list_append(names, string);
-  return names->list.length - 1;
+  return object_list_length(names) - 1;
 }
 
 unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
 {
   union object *names = s->code.names;
   unsigned      length = strlen(cstring);
-  for (unsigned i = 0; i < names->list.length; ++i) {
-    const union object *object = names->list.items[i];
+  for (unsigned i = 0, num_names = object_list_length(names); i < num_names;
+       ++i) {
+    const union object *object = object_list_at(names, i);
     if (object->type != OBJECT_ASCII) continue;
     const struct object_string *string = &object->string;
     if (string->length == length
@@ -558,21 +560,31 @@ unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
   return cg_append_name_from_cstring(s, cstring);
 }
 
-unsigned cg_register_name(struct cg_state *s, struct symbol *symbol)
+unsigned cg_register_name(struct cg_state *s, struct symbol *name)
 {
-  return cg_register_name_from_cstring(s, symbol->string);
+  return cg_register_name_from_cstring(s, name->string);
 }
 
-unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol)
+static unsigned cg_append_varname(struct cg_state *s, struct symbol *name)
 {
-  const char   *cstring = symbol->string;
+  const char   *cstring = name->string;
   union object *varnames = s->code.varnames;
   union object *string = object_intern_cstring(&s->objects, cstring);
   object_list_append(varnames, string);
-  return varnames->list.length - 1;
+  return object_list_length(varnames) - 1;
 }
 
-struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol *symbol)
+static unsigned cg_append_freevar(struct cg_state *s, struct symbol *name)
+{
+  const char   *cstring = name->string;
+  union object *freevars = s->code.freevars;
+  union object *string = object_intern_cstring(&s->objects, cstring);
+  object_list_append(freevars, string);
+  return object_list_length(freevars) - 1;
+}
+
+static struct symbol_info *cg_symbol_info(struct cg_state *s,
+                                          struct symbol   *symbol)
 {
   if (symbol->info.scope_id != s->code.scope_id) {
     return NULL;
@@ -580,8 +592,8 @@ struct symbol_info *cg_symbol_info(struct cg_state *s, struct symbol *symbol)
   return &symbol->info;
 }
 
-struct symbol_info *cg_new_symbol_info(struct cg_state *s,
-                                       struct symbol   *symbol)
+static struct symbol_info *cg_new_symbol_info(struct cg_state *s,
+                                              struct symbol   *symbol)
 {
   assert(symbol->info.scope_id != s->code.scope_id);
 
@@ -618,6 +630,26 @@ static struct symbol_info *get_or_init_info(struct cg_state *s,
   return info;
 }
 
+bool cg_declare(struct cg_state *s, struct symbol *name,
+                enum symbol_info_type type)
+{
+  struct symbol_info *info = cg_symbol_info(s, name);
+  if (info != NULL) {
+    return info->type == type;
+  }
+  info = cg_new_symbol_info(s, name);
+  info->type = type;
+  if (type == SYMBOL_GLOBAL) {
+    info->index = cg_register_name(s, name);
+  } else if (type == SYMBOL_LOCAL) {
+    info->index = cg_append_varname(s, name);
+  } else {
+    assert(type == SYMBOL_NONLOCAL);
+    info->index = cg_append_freevar(s, name);
+  }
+  return true;
+}
+
 void cg_load(struct cg_state *s, struct symbol *name)
 {
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/false);
@@ -631,6 +663,8 @@ void cg_load(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op_push1(s, OPCODE_LOAD_FAST, info->index);
     return;
+  case SYMBOL_NONLOCAL:
+    unimplemented();
   }
   abort();
 }
@@ -648,6 +682,8 @@ void cg_store(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op_pop1(s, OPCODE_STORE_FAST, info->index);
     return;
+  case SYMBOL_NONLOCAL:
+    unimplemented();
   }
   abort();
 }
@@ -665,6 +701,8 @@ void cg_delete(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
+  case SYMBOL_NONLOCAL:
+    unimplemented();
   }
   abort();
 }

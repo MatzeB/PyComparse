@@ -173,7 +173,7 @@ static void write_code(struct writer_state *s, const struct object_code *code)
   write_list_as_tuple(s, code->consts);
   write_list_as_tuple(s, code->names);
   write_list_as_tuple(s, code->varnames);
-  write_object(s, code->freevars);
+  write_list_as_tuple(s, code->freevars);
   write_object(s, code->cellvars);
   write_object(s, code->filename);
   write_object(s, code->name);

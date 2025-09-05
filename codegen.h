@@ -5,6 +5,7 @@
 
 #include "nullable.h"
 #include "opcodes.h"
+#include "symbol_info_types.h"
 
 ASSUME_NONNULL_BEGIN
 
@@ -21,14 +22,8 @@ unsigned cg_register_unique_object(struct cg_state *s, union object *object);
 unsigned cg_register_name_from_cstring(struct cg_state *s,
                                        const char      *cstring);
 unsigned cg_register_name(struct cg_state *s, struct symbol *symbol);
-unsigned cg_append_varname(struct cg_state *s, struct symbol *symbol);
 
 bool cg_in_function(struct cg_state *s);
-
-struct symbol_info *nullable cg_symbol_info(struct cg_state *s,
-                                            struct symbol   *symbol);
-struct symbol_info          *cg_new_symbol_info(struct cg_state *s,
-                                                struct symbol   *symbol);
 
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
@@ -63,8 +58,10 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
              const char *filename);
 void cg_free(struct cg_state *s);
 
-void cg_load(struct cg_state *s, struct symbol *symbol);
-void cg_store(struct cg_state *s, struct symbol *symbol);
-void cg_delete(struct cg_state *s, struct symbol *symbol);
+bool cg_declare(struct cg_state *s, struct symbol *name,
+                enum symbol_info_type type);
+void cg_load(struct cg_state *s, struct symbol *name);
+void cg_store(struct cg_state *s, struct symbol *name);
+void cg_delete(struct cg_state *s, struct symbol *name);
 
 ASSUME_NONNULL_END

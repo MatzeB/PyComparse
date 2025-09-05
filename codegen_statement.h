@@ -124,6 +124,8 @@ void emit_from_import_star_statement(struct cg_state    *s,
 void emit_generator_expression_code(
     struct cg_state *s, struct ast_generator_expression *generator_expression);
 
+bool emit_global_statement(struct cg_state *s, struct symbol *name);
+
 void emit_if_begin(struct cg_state *s, struct if_state *state,
                    union ast_expression *expression);
 void emit_if_elif(struct cg_state *s, struct if_state *state,
@@ -143,6 +145,8 @@ void emit_make_function_begin(struct cg_state            *s,
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,
                             struct symbol              *symbol);
+
+bool emit_nonlocal_statement(struct cg_state *s, struct symbol *name);
 
 void emit_raise_statement(struct cg_state               *s,
                           union ast_expression *nullable expression,

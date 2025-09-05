@@ -361,6 +361,11 @@ void emit_from_import_star_statement(struct cg_state    *s,
   emit_from_import_statement(s, num_prefix_dots, module, 0, NULL);
 }
 
+bool emit_global_statement(struct cg_state *s, struct symbol *name)
+{
+  return cg_declare(s, name, SYMBOL_GLOBAL);
+}
+
 void emit_import_statement(struct cg_state *s, struct dotted_name *module,
                            struct symbol *as)
 {
@@ -388,14 +393,6 @@ void emit_import_statement(struct cg_state *s, struct dotted_name *module,
       cg_op_pop1(s, OPCODE_POP_TOP, 0);
     }
   }
-}
-
-static void emit_parameter_variable(struct cg_state *s, struct symbol *name)
-{
-  assert(cg_symbol_info(s, name) == NULL);
-  struct symbol_info *info = cg_new_symbol_info(s, name);
-  info->type = SYMBOL_LOCAL;
-  info->index = cg_append_varname(s, name);
 }
 
 static void emit_parameter_defaults(struct cg_state            *s,
@@ -558,7 +555,7 @@ void emit_make_function_begin(struct cg_state            *s,
       continue;
     }
 
-    emit_parameter_variable(s, name);
+    cg_declare(s, name, SYMBOL_LOCAL);
     if (i < keyword_only_idx) {
       ++s->code.argcount;
     } else {
@@ -566,11 +563,11 @@ void emit_make_function_begin(struct cg_state            *s,
     }
   }
   if (variable_arguments_name) {
-    emit_parameter_variable(s, variable_arguments_name);
+    cg_declare(s, variable_arguments_name, SYMBOL_LOCAL);
     s->code.flags |= CO_VARARGS;
   }
   if (variable_keyword_arguments_name != NULL) {
-    emit_parameter_variable(s, variable_keyword_arguments_name);
+    cg_declare(s, variable_keyword_arguments_name, SYMBOL_LOCAL);
     s->code.flags |= CO_VARKEYWORDS;
   }
   s->code.positional_only_argcount = positional_only_argcount;
@@ -600,6 +597,11 @@ void emit_make_function_end(struct cg_state            *s,
   }
   cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags,
                  /*pop=*/operands, /*push=*/1);
+}
+
+bool emit_nonlocal_statement(struct cg_state *s, struct symbol *name)
+{
+  return cg_declare(s, name, SYMBOL_NONLOCAL);
 }
 
 void emit_raise_statement(struct cg_state               *s,
@@ -1270,8 +1272,8 @@ static void emit_generator_expression_part(
 void emit_generator_expression_code(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  emit_parameter_variable(s,
-                          symbol_table_get_or_insert(s->symbol_table, ".0"));
+  struct symbol *dot_zero = symbol_table_get_or_insert(s->symbol_table, ".0");
+  cg_declare(s, dot_zero, SYMBOL_LOCAL);
   s->code.argcount = 1;
 
   enum ast_expression_type type = generator_expression->base.type;

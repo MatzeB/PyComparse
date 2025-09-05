@@ -8,12 +8,13 @@ enum symbol_info_type {
   SYMBOL_GLOBAL,
   SYMBOL_LOCAL,
   SYMBOL_NAME,
+  SYMBOL_NONLOCAL,
 };
 
 struct symbol_info {
-  char     type;
-  uint16_t scope_id;
-  unsigned index;
+  unsigned char type;
+  uint16_t      scope_id;
+  unsigned      index;
 };
 
 ASSUME_NONNULL_END

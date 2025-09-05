@@ -393,10 +393,10 @@ static union ast_expression *parse_expression_list_helper(
 
 static union ast_expression *
 parse_generator_expression(struct parser_state     *s,
-                           enum ast_expression_type type,
-                           union ast_expression    *left)
+                           enum ast_expression_type type)
 {
-  assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION);
+  assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION
+         || type == AST_SET_COMPREHENSION || type == AST_DICT_COMPREHENSION);
   struct generator_expression_part inline_storage[4];
   struct idynarray                 parts;
   idynarray_init(&parts, inline_storage, sizeof(inline_storage));
@@ -432,7 +432,6 @@ parse_generator_expression(struct parser_state     *s,
   size_t parts_size = num_parts * sizeof(struct generator_expression_part);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_generator_expression) + parts_size, type);
-  expression->generator_expression.expression = left;
   expression->generator_expression.num_parts = num_parts;
   memcpy(expression->generator_expression.parts, idynarray_data(&parts),
          parts_size);
@@ -464,8 +463,9 @@ static struct argument *parse_argument(struct parser_state *s,
   }
 
   if (peek(s) == T_for) {
-    expression
-        = parse_generator_expression(s, AST_GENERATOR_EXPRESSION, expression);
+    union ast_expression *item = expression;
+    expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
+    expression->generator_expression.expression = item;
   }
 
   argument->name = name;
@@ -684,7 +684,8 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
 
   union ast_expression *expression;
   if (peek(s) == T_for) {
-    expression = parse_generator_expression(s, AST_LIST_COMPREHENSION, first);
+    expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
+    expression->generator_expression.expression = first;
   } else {
     expression = parse_expression_list_helper(
         s, AST_LIST_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false);
@@ -707,50 +708,63 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   }
 
   add_anchor(s, '}');
-  add_anchor(s, ',');
 
   union ast_expression *first = parse_expression(s, PREC_NAMED);
+  union ast_expression *expression;
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
-    union ast_expression *expression = parse_expression_list_helper(
+    add_anchor(s, ',');
+    expression = parse_expression_list_helper(
         s, AST_SET_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false);
-
     remove_anchor(s, ',');
-    remove_anchor(s, '}');
-    expect(s, '}');
-    return expression;
+  } else if (peek(s) == T_for) {
+    /* set comprehension */
+    expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
+    expression->generator_expression.expression = first;
+  } else {
+    union ast_expression *key = first;
+    expect(s, ':'); /* TODO: say that we expected `,`, `:` or `}` on error? */
+    union ast_expression *value = parse_expression(s, PREC_NAMED);
+
+    /* dict comprehension */
+    if (peek(s) == T_for) {
+      expression = parse_generator_expression(s, AST_DICT_COMPREHENSION);
+      expression->generator_expression.expression = key;
+      expression->generator_expression.item_value = value;
+    } else {
+      /* dict display */
+      struct dict_item inline_storage[16];
+      struct idynarray items;
+      idynarray_init(&items, inline_storage, sizeof(inline_storage));
+
+      add_anchor(s, ',');
+      for (;;) {
+        struct dict_item *item = idynarray_append(&items, struct dict_item);
+        item->key = key;
+        item->expression = value;
+
+        if (!accept(s, ',')) break;
+        if (peek(s) == '}') break;
+
+        key = parse_expression(s, PREC_NAMED);
+        expect(s, ':');
+        value = parse_expression(s, PREC_NAMED);
+      }
+      remove_anchor(s, ',');
+
+      unsigned num_items = idynarray_length(&items, struct dict_item);
+      size_t   items_size = num_items * sizeof(struct dict_item);
+      expression = ast_allocate_expression_(
+          s, sizeof(struct ast_dict_item_list) + items_size, AST_DICT_DISPLAY);
+      expression->dict_item_list.num_items = num_items;
+      memcpy(expression->dict_item_list.items, idynarray_data(&items),
+             items_size);
+      idynarray_free(&items);
+    }
   }
 
-  struct dict_item inline_storage[16];
-  struct idynarray items;
-  idynarray_init(&items, inline_storage, sizeof(inline_storage));
-
-  union ast_expression *key = first;
-  for (;;) {
-    expect(s, ':');
-    union ast_expression *expression = parse_expression(s, PREC_NAMED);
-
-    struct dict_item *item = idynarray_append(&items, struct dict_item);
-    item->key = key;
-    item->expression = expression;
-
-    if (peek(s) == '}' || peek(s) == T_EOF) break;
-    expect(s, ',');
-    if (peek(s) == '}' || peek(s) == T_EOF) break;
-    key = parse_expression(s, PREC_NAMED);
-  }
-
-  remove_anchor(s, ',');
   remove_anchor(s, '}');
-  eat(s, '}');
-
-  unsigned              num_items = idynarray_length(&items, struct dict_item);
-  size_t                items_size = num_items * sizeof(struct dict_item);
-  union ast_expression *expression = ast_allocate_expression_(
-      s, sizeof(struct ast_dict_item_list) + items_size, AST_DICT_DISPLAY);
-  expression->dict_item_list.num_items = num_items;
-  memcpy(expression->dict_item_list.items, idynarray_data(&items), items_size);
-  idynarray_free(&items);
+  expect(s, '}');
   return expression;
 }
 
@@ -790,8 +804,9 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
                                          PREC_NAMED, /*allow_slices=*/false);
     }
     if (peek(s) == T_for) {
-      expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION,
-                                              expression);
+      union ast_expression *item = expression;
+      expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
+      expression->generator_expression.expression = item;
     }
   }
 

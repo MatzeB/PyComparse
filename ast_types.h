@@ -112,6 +112,7 @@ struct ast_generator_expression {
   struct ast_node_base             base;
   unsigned                         num_parts;
   union ast_expression            *expression;
+  union ast_expression *nullable   item_value;
   struct generator_expression_part parts[];
 };
 

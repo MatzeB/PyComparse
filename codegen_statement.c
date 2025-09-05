@@ -1224,8 +1224,10 @@ static void emit_generator_expression_part(
 {
   if (part_index >= generator_expression->num_parts) {
     emit_expression(s, generator_expression->expression);
-    if (generator_expression->base.type == AST_LIST_COMPREHENSION) {
-      /* Need to compute position of list in stack...
+    enum ast_expression_type type = generator_expression->base.type;
+    if (type == AST_LIST_COMPREHENSION || type == AST_SET_COMPREHENSION
+        || type == AST_DICT_COMPREHENSION) {
+      /* Need to compute position of list/set in stack...
        * using "number of for" + 1 for now but this feels sketchy... */
       unsigned num_for = 0;
       unsigned num_parts = generator_expression->num_parts;
@@ -1235,8 +1237,17 @@ static void emit_generator_expression_part(
           num_for++;
         }
       }
-      cg_op_pop1(s, OPCODE_LIST_APPEND, num_for + 1);
+      if (type == AST_LIST_COMPREHENSION) {
+        cg_op_pop1(s, OPCODE_LIST_APPEND, num_for + 1);
+      } else if (type == AST_SET_COMPREHENSION) {
+        cg_op_pop1(s, OPCODE_SET_ADD, num_for + 1);
+      } else {
+        assert(type == AST_DICT_COMPREHENSION);
+        emit_expression(s, generator_expression->item_value);
+        cg_op_pop_push(s, OPCODE_MAP_ADD, num_for + 1, /*pop=*/2, /*push=*/0);
+      }
     } else {
+      assert(type == AST_GENERATOR_EXPRESSION);
       s->code.flags |= CO_GENERATOR;
       cg_op(s, OPCODE_YIELD_VALUE, 0);
       cg_op_pop1(s, OPCODE_POP_TOP, 0);
@@ -1277,9 +1288,19 @@ void emit_generator_expression_code(
   s->code.argcount = 1;
 
   enum ast_expression_type type = generator_expression->base.type;
-  assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION);
+  bool                     return_value;
   if (type == AST_LIST_COMPREHENSION) {
-    cg_op_pop_push(s, OPCODE_BUILD_LIST, 0, /*pop=*/0, /*push=*/1);
+    cg_op_push1(s, OPCODE_BUILD_LIST, 0);
+    return_value = true;
+  } else if (type == AST_SET_COMPREHENSION) {
+    cg_op_push1(s, OPCODE_BUILD_SET, 0);
+    return_value = true;
+  } else if (type == AST_DICT_COMPREHENSION) {
+    cg_op_push1(s, OPCODE_BUILD_MAP, 0);
+    return_value = true;
+  } else {
+    assert(type == AST_GENERATOR_EXPRESSION);
+    return_value = false;
   }
 
   struct generator_expression_part *part = generator_expression->parts;
@@ -1292,7 +1313,7 @@ void emit_generator_expression_code(
   emit_for_else(s, &state);
   emit_for_end(s, &state);
 
-  if (type == AST_LIST_COMPREHENSION) {
+  if (return_value) {
     cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
     cg_block_end(s);
   }

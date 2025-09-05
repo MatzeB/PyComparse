@@ -19,6 +19,27 @@
 #include "symbol_types.h"
 #include "util.h"
 
+static void
+emit_generator_helper(struct cg_state                 *s,
+                      struct ast_generator_expression *generator_expression,
+                      const char                      *name)
+{
+  cg_push_code(s);
+  cg_code_begin(s, /*in_function=*/true);
+  emit_generator_expression_code(s, generator_expression);
+  emit_code_end(s);
+
+  union object *code = cg_pop_code(s, name);
+  cg_load_const(s, code);
+  cg_load_const(s, object_intern_cstring(&s->objects, name));
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
+
+  struct generator_expression_part *part = &generator_expression->parts[0];
+  emit_expression(s, part->expression);
+  cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
+  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
+}
+
 static enum opcode ast_binexpr_to_opcode(enum ast_expression_type type)
 {
   static const enum opcode opcodes[] = {
@@ -191,6 +212,12 @@ static void emit_unexpr(struct cg_state *s, struct ast_unexpr *unexpr,
   cg_op_pop_push(s, opcode, 0, /*pop=*/1, /*push=*/1);
 }
 
+static void emit_dictionary_comprehension(
+    struct cg_state *s, struct ast_generator_expression *generator_expression)
+{
+  emit_generator_helper(s, generator_expression, "<dictcomp>");
+}
+
 static void emit_dictionary_display(struct cg_state           *s,
                                     struct ast_dict_item_list *list)
 {
@@ -223,20 +250,7 @@ static void
 emit_list_comprehension(struct cg_state                 *s,
                         struct ast_generator_expression *generator_expression)
 {
-  cg_push_code(s);
-  cg_code_begin(s, /*in_function=*/true);
-  emit_generator_expression_code(s, generator_expression);
-  emit_code_end(s);
-
-  union object *code = cg_pop_code(s, "<listcomp>");
-  cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, "<listcomp>"));
-  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
-
-  struct generator_expression_part *part = &generator_expression->parts[0];
-  emit_expression(s, part->expression);
-  cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
-  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
+  emit_generator_helper(s, generator_expression, "<listcomp>");
 }
 
 static void emit_list_display(struct cg_state            *s,
@@ -248,6 +262,13 @@ static void emit_list_display(struct cg_state            *s,
   }
   cg_op_pop_push(s, OPCODE_BUILD_LIST, num_expressions,
                  /*pop=*/num_expressions, /*push=*/1);
+}
+
+static void
+emit_set_comprehension(struct cg_state                 *s,
+                       struct ast_generator_expression *generator_expression)
+{
+  emit_generator_helper(s, generator_expression, "<setcomp>");
 }
 
 static void emit_set_display(struct cg_state            *s,
@@ -622,20 +643,7 @@ static void emit_conditional(struct cg_state        *s,
 static void emit_generator_expression(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  cg_push_code(s);
-  cg_code_begin(s, /*in_function=*/true);
-  emit_generator_expression_code(s, generator_expression);
-  emit_code_end(s);
-
-  union object *code = cg_pop_code(s, "<genexpr>");
-  cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, "<genexpr>"));
-  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
-
-  struct generator_expression_part *part = &generator_expression->parts[0];
-  emit_expression(s, part->expression);
-  cg_op(s, OPCODE_GET_ITER, 0);
-  cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
+  emit_generator_helper(s, generator_expression, "<genexpr>");
 }
 
 void emit_yield(struct cg_state *s, union ast_expression *value)
@@ -716,6 +724,9 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_INVALID:
     cg_load_const(s, expression->cnst.object);
     return;
+  case AST_DICT_COMPREHENSION:
+    emit_dictionary_comprehension(s, &expression->generator_expression);
+    return;
   case AST_DICT_DISPLAY:
     emit_dictionary_display(s, &expression->dict_item_list);
     return;
@@ -736,6 +747,9 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     return;
   case AST_LIST_DISPLAY:
     emit_list_display(s, &expression->expression_list);
+    return;
+  case AST_SET_COMPREHENSION:
+    emit_set_comprehension(s, &expression->generator_expression);
     return;
   case AST_SET_DISPLAY:
     emit_set_display(s, &expression->expression_list);

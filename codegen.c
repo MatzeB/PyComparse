@@ -491,13 +491,14 @@ union object *cg_pop_code(struct cg_state *s, const char *name)
 }
 
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
-             const char *filename)
+             const char *filename, struct diagnostics_state *diagnostics)
 {
   memset(s, 0, sizeof(*s));
   object_intern_init(&s->objects);
   s->symbol_table = symbol_table;
   s->next_scope_id = 1;
   s->filename = filename;
+  s->d = diagnostics;
 }
 
 void cg_free(struct cg_state *s)

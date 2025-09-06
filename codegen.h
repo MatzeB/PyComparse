@@ -11,6 +11,7 @@ ASSUME_NONNULL_BEGIN
 
 struct basic_block;
 struct cg_state;
+struct diagnostics_state;
 struct symbol;
 struct symbol_table;
 union object;
@@ -58,7 +59,7 @@ void cg_store(struct cg_state *s, struct symbol *name);
 void cg_delete(struct cg_state *s, struct symbol *name);
 
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
-             const char *filename);
+             const char *filename, struct diagnostics_state *d);
 void cg_free(struct cg_state *s);
 
 ASSUME_NONNULL_END

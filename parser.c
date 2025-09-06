@@ -42,6 +42,7 @@ enum precedence {
 
   PREC_FACTOR, /* prefix +, -, ~ */
   PREC_POWER,  /* ** */
+  PREC_AWAIT,  /* await */
 
   PREC_PRIMARY, /* .attr  [subscript]   (call) */
   PREC_ATOM,    /* name, number, string, ..., None, True, False */
@@ -666,6 +667,11 @@ static union ast_expression *parse_singleton(struct parser_state *s,
   return ast_const_new(s, object);
 }
 
+static union ast_expression *parse_await(struct parser_state *s)
+{
+  return parse_unexpr(s, PREC_AWAIT, AST_UNEXPR_AWAIT);
+}
+
 static union ast_expression *parse_l_bracket(struct parser_state *s)
 {
   eat(s, '[');
@@ -984,6 +990,7 @@ static union ast_expression *parse_true(struct parser_state *s)
   case T_None:                                                                \
   case T_STRING:                                                              \
   case T_True:                                                                \
+  case T_await:                                                               \
   case T_lambda:                                                              \
   case T_not
 
@@ -1028,6 +1035,8 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
     return parse_string(s);
   case T_True:
     return parse_true(s);
+  case T_await:
+    return parse_await(s);
   case T_lambda:
     return parse_lambda(s);
   case T_not:
@@ -2287,7 +2296,7 @@ static void parse_statement(struct parser_state *s)
 
 union object *parse(struct parser_state *s, const char *filename)
 {
-  cg_init(&s->cg, s->scanner.symbol_table, filename);
+  cg_init(&s->cg, s->scanner.symbol_table, filename, s->d);
   emit_module_begin(&s->cg);
 
   next_token(s);

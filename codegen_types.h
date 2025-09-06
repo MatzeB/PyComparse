@@ -59,11 +59,12 @@ struct code_state {
 };
 
 struct cg_state {
-  struct object_intern objects;
-  struct code_state    code;
-  struct stack         stack;
-  struct symbol_table *symbol_table;
-  const char          *filename;
+  struct object_intern      objects;
+  struct code_state         code;
+  struct stack              stack;
+  struct symbol_table      *symbol_table;
+  const char               *filename;
+  struct diagnostics_state *d;
 
   uint16_t next_scope_id;
 };

@@ -11,6 +11,7 @@
 #include "codegen.h"
 #include "codegen_statement.h"
 #include "codegen_types.h"
+#include "diagnostics.h"
 #include "object.h"
 #include "object_types.h"
 #include "opcodes.h"
@@ -401,6 +402,23 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
   cg_op(s, OPCODE_LOAD_ATTR, index);
 }
 
+static void emit_await(struct cg_state *s, struct ast_unexpr *unexpr)
+{
+  if (!cg_in_function(s)) {
+    struct location location = { 12345 };
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_await);
+    diag_frag(s->d, " outside of function");
+    diag_end(s->d);
+  }
+  /* TODO: check inside async function */
+
+  emit_expression(s, unexpr->op);
+  cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
+  emit_none(s);
+  cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+}
+
 static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
                                 unsigned num_extra_args)
 {
@@ -657,6 +675,14 @@ static void emit_generator_expression(
 
 void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 {
+  if (!cg_in_function(s)) {
+    struct location location = { 12345 };
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_yield);
+    diag_frag(s->d, " outside function");
+    diag_end(s->d);
+  }
+
   if (value != NULL) {
     emit_expression(s, value);
   } else {
@@ -667,6 +693,13 @@ void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 
 void emit_yield_from(struct cg_state *s, union ast_expression *value)
 {
+  if (!cg_in_function(s)) {
+    struct location location = { 12345 };
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`yield from` outside function");
+    diag_end(s->d);
+  }
+
   emit_expression(s, value);
   cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
@@ -769,6 +802,9 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     return;
   case AST_SLICE:
     emit_slice(s, &expression->slice);
+    return;
+  case AST_UNEXPR_AWAIT:
+    emit_await(s, &expression->unexpr);
     return;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);

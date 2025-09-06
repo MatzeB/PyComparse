@@ -99,7 +99,7 @@ void emit_def_begin(struct cg_state *s, struct make_function_state *state,
                     unsigned                       positional_only_argcount,
                     union ast_expression *nullable return_type);
 void emit_def_end(struct cg_state *s, struct make_function_state *state,
-                  struct symbol *symbol, unsigned num_decorators);
+                  struct symbol *symbol, unsigned num_decorators, bool async);
 
 void emit_del(struct cg_state *s, union ast_expression *targets);
 
@@ -178,8 +178,8 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
 void emit_while_else(struct cg_state *s, struct for_while_state *state);
 void emit_while_end(struct cg_state *s, struct for_while_state *state);
 
-void emit_yield_statement(struct cg_state      *s,
-                          union ast_expression *expression);
+void emit_yield_statement(struct cg_state               *s,
+                          union ast_expression *nullable expression);
 void emit_yield_from_statement(struct cg_state      *s,
                                union ast_expression *expression);
 

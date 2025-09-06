@@ -19,3 +19,9 @@ def unreachable_yield():
 
 for y in unreachable_yield():
     print(y)
+
+def noarg_yield():
+    yield
+
+for y in noarg_yield():
+    print(y)

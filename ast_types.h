@@ -141,6 +141,11 @@ struct ast_unexpr {
   union ast_expression *op;
 };
 
+struct ast_yield {
+  struct ast_node_base           base;
+  union ast_expression *nullable value;
+};
+
 union ast_expression {
   uint8_t              type;
   struct ast_node_base base;
@@ -158,6 +163,7 @@ union ast_expression {
   struct ast_lambda               lambda;
   struct ast_slice                slice;
   struct ast_unexpr               unexpr;
+  struct ast_yield                yield;
 };
 
 ASSUME_NONNULL_END

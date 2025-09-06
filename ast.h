@@ -63,8 +63,8 @@ enum ast_expression_type {
   AST_UNEXPR_PLUS,
   AST_UNEXPR_STAR,
   AST_UNEXPR_STAR_STAR,
-  AST_UNEXPR_YIELD,
-  AST_UNEXPR_YIELD_FROM,
+  AST_YIELD,
+  AST_YIELD_FROM,
 };
 
 enum ast_expression_type ast_expression_type(union ast_expression *expression);

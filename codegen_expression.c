@@ -90,8 +90,8 @@ static void emit_binexpr_logical(struct cg_state    *s,
                                  enum opcode         opcode)
 {
   emit_expression(s, binexpr->left);
-  struct basic_block *target = cg_allocate_block(s);
-  struct basic_block *fallthrough = cg_allocate_block(s);
+  struct basic_block *target = cg_block_allocate(s);
+  struct basic_block *fallthrough = cg_block_allocate(s);
   assert(opcode == OPCODE_JUMP_IF_TRUE_OR_POP
          || opcode == OPCODE_JUMP_IF_FALSE_OR_POP);
   cg_pop(s, 1);
@@ -407,14 +407,21 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
   unsigned         num_tuple_elements = 0;
   unsigned         num_arguments = call->num_arguments;
   struct argument *arguments = call->arguments;
-  unsigned         idx = 0;
 
-  while (idx < num_arguments) {
+  /* Emit positional arguments */
+  for (unsigned idx = 0; idx < num_arguments;) {
     struct argument *argument = &arguments[idx];
-    if (argument->name != NULL) break;
+    /* Ignore keyword arguments */
+    if (argument->name != NULL) {
+      ++idx;
+      continue;
+    }
     union ast_expression    *expression = argument->expression;
     enum ast_expression_type type = ast_expression_type(expression);
-    if (type == AST_UNEXPR_STAR_STAR) break;
+    if (type == AST_UNEXPR_STAR_STAR) {
+      ++idx;
+      continue;
+    }
     if (type == AST_UNEXPR_STAR) {
       if (num_extra_args > 0) {
         cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_extra_args,
@@ -477,16 +484,18 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
                    /*pop=*/num_tuple_elements, /*push=*/1);
   }
 
+  /* Emit keyword arguments */
   unsigned num_maps = 0;
-  while (idx < num_arguments) {
+  for (unsigned idx = 0; idx < num_arguments;) {
     struct argument *argument = &arguments[idx];
     struct symbol   *name = argument->name;
 
     if (name == NULL) {
       union ast_expression *expression = argument->expression;
-      assert(ast_expression_type(expression) == AST_UNEXPR_STAR_STAR);
-      emit_expression(s, expression->unexpr.op);
-      ++num_maps;
+      if (ast_expression_type(expression) == AST_UNEXPR_STAR_STAR) {
+        emit_expression(s, expression->unexpr.op);
+        ++num_maps;
+      }
       ++idx;
       continue;
     }
@@ -622,9 +631,9 @@ static void emit_comparison(struct cg_state       *s,
 static void emit_conditional(struct cg_state        *s,
                              struct ast_conditional *conditional)
 {
-  struct basic_block *true_block = cg_allocate_block(s);
-  struct basic_block *false_block = cg_allocate_block(s);
-  struct basic_block *footer = cg_allocate_block(s);
+  struct basic_block *true_block = cg_block_allocate(s);
+  struct basic_block *false_block = cg_block_allocate(s);
+  struct basic_block *footer = cg_block_allocate(s);
 
   emit_condjump_expr(s, conditional->condition, /*true_block=*/true_block,
                      /*false_block=*/false_block, /*next=*/true_block);
@@ -646,9 +655,13 @@ static void emit_generator_expression(
   emit_generator_helper(s, generator_expression, "<genexpr>");
 }
 
-void emit_yield(struct cg_state *s, union ast_expression *value)
+void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 {
-  emit_expression(s, value);
+  if (value != NULL) {
+    emit_expression(s, value);
+  } else {
+    emit_none(s);
+  }
   cg_op(s, OPCODE_YIELD_VALUE, 0);
 }
 
@@ -773,11 +786,11 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_UNEXPR_STAR_STAR:
     /* not allowed in generic contexts */
     abort();
-  case AST_UNEXPR_YIELD:
-    emit_yield(s, expression->unexpr.op);
+  case AST_YIELD:
+    emit_yield(s, expression->yield.value);
     return;
-  case AST_UNEXPR_YIELD_FROM:
-    emit_yield_from(s, expression->unexpr.op);
+  case AST_YIELD_FROM:
+    emit_yield_from(s, expression->yield.value);
     return;
   }
 }

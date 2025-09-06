@@ -26,3 +26,6 @@ x(f0)
 x(f1)
 x(f2)
 x(f3)
+
+l = [1,2,3]
+foo(named="jo dawg", *l)

@@ -11,6 +11,13 @@ next(g)
 print(g.send("send0"))
 print(g.send("SeNt1"))
 
+def noarg_yield():
+    print((yield))
+    yield 44
+
+for x in noarg_yield():
+    print(x)
+
 def unreachable_yield():
     return
     print((yield ...))

@@ -85,7 +85,7 @@ void cg_op_push1(struct cg_state *s, enum opcode opcode, uint32_t arg)
   cg_push(s, 1);
 }
 
-struct basic_block *cg_allocate_block(struct cg_state *s)
+struct basic_block *cg_block_allocate(struct cg_state *s)
 {
   struct arena       *arena = object_intern_arena(&s->objects);
   struct basic_block *block = arena_allocate_type(arena, struct basic_block);
@@ -186,7 +186,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
   }
 
-  struct basic_block *first = cg_allocate_block(s);
+  struct basic_block *first = cg_block_allocate(s);
   code->first_block = first;
   cg_block_begin(s, first);
 }

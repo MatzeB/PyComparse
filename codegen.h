@@ -23,19 +23,15 @@ unsigned cg_register_name_from_cstring(struct cg_state *s,
                                        const char      *cstring);
 unsigned cg_register_name(struct cg_state *s, struct symbol *symbol);
 
-bool cg_in_function(struct cg_state *s);
-
+void cg_op(struct cg_state *s, enum opcode opcoode, uint32_t arg);
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
-
-void cg_op(struct cg_state *s, enum opcode opcoode, uint32_t arg);
 void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
                     unsigned pop, unsigned push);
 void cg_op_pop1(struct cg_state *s, enum opcode opcode, uint32_t arg);
 void cg_op_push1(struct cg_state *s, enum opcode opcode, uint32_t arg);
 
-struct basic_block *cg_allocate_block(struct cg_state *s);
-
+struct basic_block *cg_block_allocate(struct cg_state *s);
 void cg_block_begin(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_block_end(struct cg_state *s);
 bool                cg_in_block(struct cg_state *s);
@@ -46,22 +42,23 @@ void                cg_jump(struct cg_state *s, struct basic_block *target);
 void cg_block_insert_delayed(struct cg_state *s, struct basic_block *block);
 void cg_block_begin_delayed(struct cg_state *s, struct basic_block *block);
 
-void          cg_code_begin(struct cg_state *s, bool use_locals);
+void          cg_code_begin(struct cg_state *s, bool in_function);
 union object *cg_code_end(struct cg_state *s, const char *name);
+bool          cg_in_function(struct cg_state *s);
 
 void          cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_load_const(struct cg_state *s, union object *object);
 
-void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
-             const char *filename);
-void cg_free(struct cg_state *s);
-
 bool cg_declare(struct cg_state *s, struct symbol *name,
                 enum symbol_info_type type);
 void cg_load(struct cg_state *s, struct symbol *name);
 void cg_store(struct cg_state *s, struct symbol *name);
 void cg_delete(struct cg_state *s, struct symbol *name);
+
+void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
+             const char *filename);
+void cg_free(struct cg_state *s);
 
 ASSUME_NONNULL_END

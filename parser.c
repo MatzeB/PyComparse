@@ -787,10 +787,13 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   if (peek(s) == T_yield) {
     eat(s, T_yield);
     enum ast_expression_type type
-        = accept(s, T_from) ? AST_UNEXPR_YIELD_FROM : AST_UNEXPR_YIELD;
-    union ast_expression *yield_expression = parse_expression(s, PREC_NAMED);
-    expression = ast_allocate_expression(s, struct ast_unexpr, type);
-    expression->unexpr.op = yield_expression;
+        = accept(s, T_from) ? AST_YIELD_FROM : AST_YIELD;
+    union ast_expression *yield_expression = NULL;
+    if (peek(s) != ')') {
+      yield_expression = parse_expression(s, PREC_NAMED);
+    }
+    expression = ast_allocate_expression(s, struct ast_yield, type);
+    expression->yield.value = yield_expression;
     had_yield(&s->cg);
   } else {
     if (peek(s) == '*') {
@@ -1834,17 +1837,20 @@ static void parse_return(struct parser_state *s)
   emit_return_statement(&s->cg, expression);
 }
 
-static void parse_yield(struct parser_state *s)
+static void parse_yield_statement(struct parser_state *s)
 {
   eat(s, T_yield);
 
   if (accept(s, T_from)) {
     union ast_expression *expression = parse_expression(s, PREC_NAMED);
     emit_yield_from_statement(&s->cg, expression);
-  } else {
-    union ast_expression *expression = parse_star_expressions(s);
-    emit_yield_statement(&s->cg, expression);
+    return;
   }
+  union ast_expression *expression = NULL;
+  if (is_expression_start(peek(s))) {
+    expression = parse_star_expressions(s);
+  }
+  emit_yield_statement(&s->cg, expression);
 }
 
 static void parse_simple_statement(struct parser_state *s)
@@ -1887,7 +1893,7 @@ static void parse_simple_statement(struct parser_state *s)
     parse_return(s);
     break;
   case T_yield:
-    parse_yield(s);
+    parse_yield_statement(s);
     break;
   default:
     error_expected(s, "statement");
@@ -1965,7 +1971,11 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
 
 static void parse_def(struct parser_state *s, unsigned num_decorators)
 {
-  eat(s, T_def);
+  bool async = false;
+  if (accept(s, T_async)) {
+    async = true;
+  }
+  expect(s, T_def);
   struct symbol *name = parse_identifier(s);
 
   struct parameter inline_storage[16];
@@ -1994,7 +2004,7 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
 
   parse_suite(s);
 
-  emit_def_end(&s->cg, &state, name, num_decorators);
+  emit_def_end(&s->cg, &state, name, num_decorators, async);
 }
 
 static void parse_decorator(struct parser_state *s, unsigned num_decorators)
@@ -2011,6 +2021,7 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
   case T_class:
     parse_class(s, num_decorators + 1);
     return;
+  case T_async:
   case T_def:
     parse_def(s, num_decorators + 1);
     return;
@@ -2243,6 +2254,7 @@ static void parse_statement(struct parser_state *s)
   case T_class:
     parse_class(s, /*num_decorators=*/0);
     break;
+  case T_async:
   case T_def:
     parse_def(s, /*num_decorators=*/0);
     break;

@@ -47,7 +47,7 @@ static void emit_comparison_multi(struct cg_state             *s,
     if (last) {
       if (produce_value) {
         assert(op_false_block != NULL);
-        struct basic_block *footer = cg_allocate_block(s);
+        struct basic_block *footer = cg_block_allocate(s);
         cg_jump(s, footer);
 
         cg_block_begin(s, op_false_block);
@@ -73,9 +73,9 @@ static void emit_comparison_multi(struct cg_state             *s,
       }
       break;
     }
-    struct basic_block *op_true_block = cg_allocate_block(s);
+    struct basic_block *op_true_block = cg_block_allocate(s);
     if (op_false_block == NULL) {
-      op_false_block = cg_allocate_block(s);
+      op_false_block = cg_block_allocate(s);
     }
     cg_pop(s, 1);
     cg_condjump(s,
@@ -127,7 +127,7 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
                        /*next=*/next);
     return;
   case AST_BINEXPR_LOGICAL_AND: {
-    struct basic_block *middle_block = cg_allocate_block(s);
+    struct basic_block *middle_block = cg_block_allocate(s);
     emit_condjump_expr(s, expression->binexpr.left,
                        /*true_block=*/middle_block,
                        /*false_block=*/false_block,
@@ -139,7 +139,7 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
     return;
   }
   case AST_BINEXPR_LOGICAL_OR: {
-    struct basic_block *middle_block = cg_allocate_block(s);
+    struct basic_block *middle_block = cg_block_allocate(s);
     emit_condjump_expr(s, expression->binexpr.left,
                        /*true_block=*/true_block, /*false_block=*/middle_block,
                        /*next=*/middle_block);
@@ -234,8 +234,8 @@ void emit_assert(struct cg_state *s, union ast_expression *expression,
 {
   if (unreachable(s)) return;
 
-  struct basic_block *fail = cg_allocate_block(s);
-  struct basic_block *continue_block = cg_allocate_block(s);
+  struct basic_block *fail = cg_block_allocate(s);
+  struct basic_block *continue_block = cg_block_allocate(s);
 
   emit_condjump_expr(s, expression, /*true_block=*/continue_block,
                      /*false_block=*/fail, /*next=*/fail);
@@ -643,8 +643,8 @@ void emit_try_body_begin(struct cg_state *s, struct try_state *state)
   if (unreachable(s)) return;
   state->try_reachable = true;
 
-  struct basic_block *setup_finally = cg_allocate_block(s);
-  struct basic_block *setup_except = cg_allocate_block(s);
+  struct basic_block *setup_finally = cg_block_allocate(s);
+  struct basic_block *setup_except = cg_block_allocate(s);
   state->setup_finally = setup_finally;
   state->setup_except = setup_except;
 
@@ -652,7 +652,7 @@ void emit_try_body_begin(struct cg_state *s, struct try_state *state)
   cg_block_insert_delayed(s, setup_finally);
   cg_block_insert_delayed(s, setup_except);
 
-  struct basic_block *body = cg_allocate_block(s);
+  struct basic_block *body = cg_block_allocate(s);
   cg_block_begin(s, body);
 }
 
@@ -662,7 +662,7 @@ void emit_try_body_end(struct cg_state *s, struct try_state *state)
   if (unreachable(s)) return;
 
   /* if there was an except, then we need to insert a POP_BLOCK here */
-  struct basic_block *body_exit = cg_allocate_block(s);
+  struct basic_block *body_exit = cg_block_allocate(s);
   state->body_exit = body_exit;
 
   cg_jump(s, body_exit);
@@ -676,7 +676,7 @@ void emit_try_except_begin(struct cg_state *s, struct try_state *state,
 
   struct basic_block *excepts;
   if (!state->had_except) {
-    excepts = cg_allocate_block(s);
+    excepts = cg_block_allocate(s);
 
     struct basic_block *setup_except = state->setup_except;
     cg_block_begin_delayed(s, setup_except);
@@ -694,8 +694,8 @@ void emit_try_except_begin(struct cg_state *s, struct try_state *state,
   cg_push(s, 3); /* runtime pushes traceback, value, type when entering */
 
   if (match != NULL) {
-    struct basic_block *excepts_next = cg_allocate_block(s);
-    struct basic_block *except_match = cg_allocate_block(s);
+    struct basic_block *excepts_next = cg_block_allocate(s);
+    struct basic_block *except_match = cg_block_allocate(s);
     cg_op_push1(s, OPCODE_DUP_TOP, 0);
     emit_expression(s, match);
     cg_op_pop_push(s, OPCODE_COMPARE_OP, COMPARE_OP_EXC_MATCH,
@@ -717,8 +717,8 @@ void emit_try_except_begin(struct cg_state *s, struct try_state *state,
   }
   cg_op_pop1(s, OPCODE_POP_TOP, 0);
   if (as != NULL) {
-    struct basic_block *except_unassign_as = cg_allocate_block(s);
-    struct basic_block *except_body = cg_allocate_block(s);
+    struct basic_block *except_unassign_as = cg_block_allocate(s);
+    struct basic_block *except_body = cg_block_allocate(s);
     assert(state->except_unassign_as == NULL);
     state->except_unassign_as = except_unassign_as;
     cg_condjump(s, OPCODE_SETUP_FINALLY,
@@ -755,7 +755,7 @@ void emit_try_except_end(struct cg_state *s, struct try_state *state,
 
   struct basic_block *enter_finally = state->enter_finally;
   if (enter_finally == NULL) {
-    enter_finally = cg_allocate_block(s);
+    enter_finally = cg_block_allocate(s);
     state->enter_finally = enter_finally;
   }
   cg_jump(s, enter_finally);
@@ -768,7 +768,7 @@ void emit_try_else_begin(struct cg_state *s, struct try_state *state)
 
   struct basic_block *else_block = state->else_block;
   if (else_block == NULL) {
-    else_block = cg_allocate_block(s);
+    else_block = cg_block_allocate(s);
     state->else_block = else_block;
   }
 
@@ -791,7 +791,7 @@ void emit_try_else_end(struct cg_state *s, struct try_state *state)
   if (!unreachable(s)) {
     struct basic_block *enter_finally = state->enter_finally;
     if (enter_finally == NULL) {
-      enter_finally = cg_allocate_block(s);
+      enter_finally = cg_block_allocate(s);
       state->enter_finally = enter_finally;
     }
     cg_jump(s, enter_finally);
@@ -803,7 +803,7 @@ void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   if (!state->try_reachable) return;
   state->had_finally = true;
 
-  struct basic_block *finally_body = cg_allocate_block(s);
+  struct basic_block *finally_body = cg_block_allocate(s);
 
   struct basic_block *setup_finally = state->setup_finally;
   cg_block_begin_delayed(s, setup_finally);
@@ -814,7 +814,7 @@ void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   struct basic_block *enter_finally = state->enter_finally;
   struct basic_block *excepts = state->excepts;
   if (enter_finally == NULL && (state->body_exit != NULL || excepts != NULL)) {
-    enter_finally = cg_allocate_block(s);
+    enter_finally = cg_block_allocate(s);
     state->enter_finally = enter_finally;
   }
 
@@ -845,7 +845,7 @@ void emit_try_finally_end(struct cg_state *s, struct try_state *state)
 
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
-    footer = cg_allocate_block(s);
+    footer = cg_block_allocate(s);
     state->footer = footer;
   }
   cg_jump(s, footer);
@@ -857,7 +857,7 @@ void emit_try_end(struct cg_state *s, struct try_state *state)
 
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
-    footer = cg_allocate_block(s);
+    footer = cg_block_allocate(s);
     state->footer = footer;
   }
 
@@ -867,7 +867,7 @@ void emit_try_end(struct cg_state *s, struct try_state *state)
     struct basic_block *excepts = state->excepts;
     if (excepts != NULL) {
       if (footer == NULL) {
-        footer = cg_allocate_block(s);
+        footer = cg_block_allocate(s);
       }
       cg_block_begin(s, excepts);
       cg_op(s, OPCODE_END_FINALLY, 0);
@@ -918,8 +918,8 @@ void emit_if_begin(struct cg_state *s, struct if_state *state,
     return;
   }
 
-  struct basic_block *then_block = cg_allocate_block(s);
-  struct basic_block *else_or_footer = cg_allocate_block(s);
+  struct basic_block *then_block = cg_block_allocate(s);
+  struct basic_block *else_or_footer = cg_block_allocate(s);
   emit_condjump_expr(s, expression,
                      /*true_block=*/then_block,
                      /*false_block=*/else_or_footer,
@@ -937,15 +937,15 @@ void emit_if_elif(struct cg_state *s, struct if_state *state,
   if (else_block == NULL) return;
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
-    footer = cg_allocate_block(s);
+    footer = cg_block_allocate(s);
     state->footer = footer;
   }
   if (!unreachable(s)) {
     cg_jump(s, footer);
   }
 
-  struct basic_block *new_else = cg_allocate_block(s);
-  struct basic_block *then_block = cg_allocate_block(s);
+  struct basic_block *new_else = cg_block_allocate(s);
+  struct basic_block *then_block = cg_block_allocate(s);
   state->else_or_footer = new_else;
   cg_block_begin(s, else_block);
   emit_condjump_expr(s, expression, /*true_block=*/then_block,
@@ -960,7 +960,7 @@ void emit_if_else(struct cg_state *s, struct if_state *state)
   if (else_block == NULL) return;
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
-    footer = cg_allocate_block(s);
+    footer = cg_block_allocate(s);
     state->footer = footer;
   }
   state->else_or_footer = NULL;
@@ -993,10 +993,10 @@ static void emit_for_begin_impl(struct cg_state        *s,
                                 struct for_while_state *state,
                                 union ast_expression   *targets)
 {
-  struct basic_block *header = cg_allocate_block(s);
-  struct basic_block *footer = cg_allocate_block(s);
-  struct basic_block *else_block = cg_allocate_block(s);
-  struct basic_block *body = cg_allocate_block(s);
+  struct basic_block *header = cg_block_allocate(s);
+  struct basic_block *footer = cg_block_allocate(s);
+  struct basic_block *else_block = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
 
   cg_jump(s, header);
 
@@ -1097,10 +1097,10 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
     memset(state, 0, sizeof(*state));
     return;
   }
-  struct basic_block *header = cg_allocate_block(s);
-  struct basic_block *body = cg_allocate_block(s);
-  struct basic_block *else_block = cg_allocate_block(s);
-  struct basic_block *footer = cg_allocate_block(s);
+  struct basic_block *header = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
+  struct basic_block *else_block = cg_block_allocate(s);
+  struct basic_block *footer = cg_block_allocate(s);
 
   cg_jump(s, header);
   cg_block_begin(s, header);
@@ -1175,8 +1175,15 @@ void emit_def_begin(struct cg_state *s, struct make_function_state *state,
 }
 
 void emit_def_end(struct cg_state *s, struct make_function_state *state,
-                  struct symbol *symbol, unsigned num_decorators)
+                  struct symbol *symbol, unsigned num_decorators, bool async)
 {
+  if (async) {
+    if (s->code.flags & CO_GENERATOR) {
+      s->code.flags = (s->code.flags & ~CO_GENERATOR) | CO_ASYNC_GENERATOR;
+    } else {
+      s->code.flags |= CO_COROUTINE;
+    }
+  }
   emit_make_function_end(s, state, symbol);
   emit_decorator_calls(s, num_decorators);
   cg_store(s, symbol);
@@ -1269,7 +1276,7 @@ static void emit_generator_expression_part(
     return;
   }
   assert(part->type == GENERATOR_EXPRESSION_PART_IF);
-  struct basic_block *false_block = cg_allocate_block(s);
+  struct basic_block *false_block = cg_block_allocate(s);
 
   emit_expression(s, part->expression);
   struct basic_block *loop_header = s->code.loop_state.continue_block;
@@ -1328,8 +1335,8 @@ void emit_with_begin(struct cg_state *s, struct with_state *state,
     return;
   }
 
-  struct basic_block *cleanup = cg_allocate_block(s);
-  struct basic_block *body = cg_allocate_block(s);
+  struct basic_block *cleanup = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
   state->cleanup = cleanup;
 
   emit_expression(s, expression);

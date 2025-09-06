@@ -90,8 +90,8 @@ struct ast_const {
 };
 
 struct dict_item {
-  union ast_expression *key;
-  union ast_expression *expression;
+  union ast_expression *nullable key;
+  union ast_expression          *value;
 };
 
 struct ast_dict_item_list {

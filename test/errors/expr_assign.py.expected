@@ -1,5 +1,5 @@
 test/errors/expr_assign.py:1 error: cannot assign to literal. Maybe you meant `==`, or `:=` instead of `=`?
 test/errors/expr_assign.py:2 error: cannot assign to expression. Maybe you meant `==`, or `:=` instead of `=`?
-test/errors/expr_assign.py:3 error: starred expression not allowed here
+test/errors/expr_assign.py:3 error: cannot assign to expression. Maybe you meant `==`, or `:=` instead of `=`?
 test/errors/expr_assign.py:4 error: cannot assign to literal. Maybe you meant `==`, or `:=` instead of `=`?
 test/errors/expr_assign.py:5 error: cannot assign to literal. Maybe you meant `==`, or `:=` instead of `=`?

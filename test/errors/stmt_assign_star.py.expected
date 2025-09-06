@@ -1,0 +1,1 @@
+test/errors/stmt_assign_star.py:12345 error: too many expressions in star-unpacking assignment

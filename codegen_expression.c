@@ -41,6 +41,70 @@ emit_generator_helper(struct cg_state                 *s,
   cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
 }
 
+static void emit_expression_list_helper(
+    struct cg_state *s, struct ast_expression_list *expression_list,
+    enum opcode opcode_build, enum opcode opcode_build_unpack)
+{
+  unsigned               num_expressions = expression_list->num_expressions;
+  union ast_expression **expressions = expression_list->expressions;
+  unsigned               num_unpack_items = 0;
+  bool                   need_unpack = false;
+  for (unsigned idx = 0; idx < num_expressions;) {
+    union ast_expression *expression = expressions[idx];
+    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+      emit_expression(s, expression->unexpr.op);
+      ++idx;
+      ++num_unpack_items;
+      need_unpack = true;
+      continue;
+    }
+    unsigned non_star_begin = idx;
+    unsigned non_star_end = idx + 1;
+    bool     tuple_const = ast_expression_as_constant(expression) != NULL;
+    while (non_star_end < num_expressions) {
+      union ast_expression *expression = expressions[non_star_end];
+      if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+        break;
+      }
+      if (ast_expression_as_constant(expression) == NULL) {
+        tuple_const = false;
+      }
+      ++non_star_end;
+    }
+
+    bool everything = (non_star_begin == 0 && non_star_end == num_expressions);
+    unsigned tuple_length = non_star_end - non_star_begin;
+    if (!tuple_const || (everything && opcode_build != OPCODE_BUILD_TUPLE)) {
+      for (unsigned i = non_star_begin; i < non_star_end; i++) {
+        emit_expression(s, expressions[i]);
+      }
+      cg_op_pop_push(s, everything ? opcode_build : OPCODE_BUILD_TUPLE,
+                     tuple_length,
+                     /*pop=*/tuple_length, /*push=*/1);
+    } else {
+      struct tuple_prep *tuple_prep
+          = object_intern_tuple_begin(&s->objects, tuple_length);
+      for (unsigned i = 0; i < tuple_length; i++) {
+        union ast_expression *expression = expressions[non_star_begin + i];
+        union object *as_const = ast_expression_as_constant(expression);
+        object_new_tuple_set_at(tuple_prep, i, as_const);
+      }
+      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+                                                    /*may_free_arena=*/true);
+      cg_load_const(s, tuple);
+    }
+    ++num_unpack_items;
+    idx += tuple_length;
+  }
+
+  if (need_unpack) {
+    cg_op_pop_push(s, opcode_build_unpack, num_unpack_items,
+                   /*pop=*/num_unpack_items, /*push=*/1);
+  } else if (num_expressions == 0) {
+    cg_op_push1(s, opcode_build, 0);
+  }
+}
+
 static enum opcode ast_binexpr_to_opcode(enum ast_expression_type type)
 {
   static const enum opcode opcodes[] = {
@@ -128,7 +192,23 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     struct ast_expression_list *list = &target->expression_list;
     unsigned                    num_expressions = list->num_expressions;
     if (list->has_star_expression) {
-      cg_op_pop_push(s, OPCODE_UNPACK_EX, num_expressions - 1, /*pop=*/1,
+      if (num_expressions > 256) {
+        struct location location = { 12345 };
+        diag_begin_error(s->d, location);
+        diag_frag(s->d, "too many expressions in star-unpacking assignment");
+        diag_end(s->d);
+        /* continue; it will just produce an invalid argument for UNPACK_EX */
+      }
+      unsigned star_index = ~0u;
+      for (unsigned i = 0; i < num_expressions; i++) {
+        if (ast_expression_type(list->expressions[i]) == AST_UNEXPR_STAR) {
+          star_index = i;
+          break;
+        }
+      }
+      assert(star_index != ~0u);
+      uint32_t arg = (num_expressions - star_index - 1) << 8 | star_index;
+      cg_op_pop_push(s, OPCODE_UNPACK_EX, arg, /*pop=*/1,
                      /*push=*/num_expressions);
     } else {
       cg_op_pop_push(s, OPCODE_UNPACK_SEQUENCE, num_expressions, /*pop=*/1,
@@ -222,14 +302,46 @@ static void emit_dictionary_comprehension(
 static void emit_dictionary_display(struct cg_state           *s,
                                     struct ast_dict_item_list *list)
 {
-  unsigned num_items = list->num_items;
-  for (unsigned i = 0; i < num_items; i++) {
-    struct dict_item *item = &list->items[i];
-    emit_expression(s, item->key);
-    emit_expression(s, item->expression);
+  struct dict_item *items = list->items;
+  unsigned          num_items = list->num_items;
+  unsigned          num_maps = 0;
+  bool              need_map_unpack = false;
+  for (unsigned idx = 0; idx < num_items;) {
+    struct dict_item              *item = &items[idx];
+    union ast_expression *nullable key = item->key;
+    union ast_expression          *value = item->value;
+
+    if (key == NULL) {
+      assert(ast_expression_type(value) == AST_UNEXPR_STAR_STAR);
+      emit_expression(s, value->unexpr.op);
+      need_map_unpack = true;
+      ++num_maps;
+      ++idx;
+      continue;
+    }
+
+    unsigned non_star_star_end = idx + 1;
+    while (non_star_star_end < num_items
+           && items[non_star_star_end].key != NULL) {
+      ++non_star_star_end;
+    }
+    unsigned num_build_map_items = non_star_star_end - idx;
+    for (unsigned i = idx; i < non_star_star_end; i++) {
+      item = &items[i];
+      emit_expression(s, item->key);
+      emit_expression(s, item->value);
+    }
+    cg_op_pop_push(s, OPCODE_BUILD_MAP, num_build_map_items,
+                   /*pop=*/num_build_map_items * 2, /*push=*/1);
+    ++num_maps;
+    idx = non_star_star_end;
   }
-  cg_op_pop_push(s, OPCODE_BUILD_MAP, num_items, /*pop=*/num_items * 2,
-                 /*push=*/1);
+  if (need_map_unpack) {
+    cg_op_pop_push(s, OPCODE_BUILD_MAP_UNPACK, num_maps, /*pop=*/num_maps,
+                   /*push=*/1);
+  } else if (num_items == 0) {
+    cg_op_push1(s, OPCODE_BUILD_MAP, 0);
+  }
 }
 
 static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
@@ -257,12 +369,8 @@ emit_list_comprehension(struct cg_state                 *s,
 static void emit_list_display(struct cg_state            *s,
                               struct ast_expression_list *list)
 {
-  unsigned num_expressions = list->num_expressions;
-  for (unsigned i = 0; i < num_expressions; i++) {
-    emit_expression(s, list->expressions[i]);
-  }
-  cg_op_pop_push(s, OPCODE_BUILD_LIST, num_expressions,
-                 /*pop=*/num_expressions, /*push=*/1);
+  emit_expression_list_helper(s, list, OPCODE_BUILD_LIST,
+                              OPCODE_BUILD_LIST_UNPACK);
 }
 
 static void
@@ -313,77 +421,6 @@ static void emit_slice(struct cg_state *s, struct ast_slice *slice)
   cg_op_pop_push(s, OPCODE_BUILD_SLICE, arg, /*pop=*/arg, /*push=*/1);
 }
 
-static void
-emit_expression_list_helper_unpack(struct cg_state            *s,
-                                   struct ast_expression_list *tuple)
-{
-  unsigned               num_expressions = tuple->num_expressions;
-  unsigned               num_unpack_expressions = 0;
-  unsigned               idx = 0;
-  union ast_expression **expressions = tuple->expressions;
-  while (idx < num_expressions) {
-    union ast_expression *expression = expressions[idx];
-    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
-      emit_expression(s, expression->unexpr.op);
-      ++idx;
-      ++num_unpack_expressions;
-      continue;
-    }
-    unsigned tuple_begin_idx = idx;
-    unsigned tuple_end_idx = idx + 1;
-    bool     tuple_const = true;
-    while (tuple_end_idx < num_expressions) {
-      union ast_expression *expression = expressions[tuple_end_idx];
-      if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
-        break;
-      }
-      if (ast_expression_as_constant(expression) == NULL) {
-        tuple_const = false;
-      }
-      ++tuple_end_idx;
-    }
-
-    unsigned tuple_length = tuple_end_idx - tuple_begin_idx;
-    if (!tuple_const) {
-      for (unsigned i = tuple_begin_idx; i < tuple_end_idx; i++) {
-        emit_expression(s, expressions[i]);
-      }
-      cg_op_pop_push(s, OPCODE_BUILD_TUPLE, tuple_length,
-                     /*pop=*/tuple_length, /*push=*/1);
-    } else {
-      struct tuple_prep *tuple_prep
-          = object_intern_tuple_begin(&s->objects, tuple_length);
-      for (unsigned i = 0; i < tuple_length; i++) {
-        union ast_expression *expression = expressions[tuple_begin_idx + i];
-        union object *as_const = ast_expression_as_constant(expression);
-        object_new_tuple_set_at(tuple_prep, i, as_const);
-      }
-      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
-                                                    /*may_free_arena=*/true);
-      cg_load_const(s, tuple);
-    }
-    ++num_unpack_expressions;
-    idx += tuple_length;
-  }
-  cg_op_pop_push(s, OPCODE_BUILD_TUPLE_UNPACK, num_unpack_expressions,
-                 /*pop=*/num_unpack_expressions, /*push=*/1);
-}
-
-static void emit_expression_list_helper(struct cg_state            *s,
-                                        struct ast_expression_list *tuple)
-{
-  unsigned num_expressions = tuple->num_expressions;
-  if (tuple->has_star_expression) {
-    emit_expression_list_helper_unpack(s, tuple);
-  } else {
-    for (unsigned i = 0; i < num_expressions; i++) {
-      emit_expression(s, tuple->expressions[i]);
-    }
-    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_expressions,
-                   /*pop=*/num_expressions, /*push=*/1);
-  }
-}
-
 static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
 {
   union object *object = tuple->as_constant;
@@ -392,7 +429,8 @@ static void emit_tuple(struct cg_state *s, struct ast_expression_list *tuple)
     return;
   }
 
-  emit_expression_list_helper(s, tuple);
+  emit_expression_list_helper(s, tuple, OPCODE_BUILD_TUPLE,
+                              OPCODE_BUILD_TUPLE_UNPACK);
 }
 
 static void emit_attr(struct cg_state *s, struct ast_attr *attr)

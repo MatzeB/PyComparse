@@ -142,5 +142,7 @@ union object *object_intern_tuple_end(struct object_intern *s,
       return object;
     }
   }
+
+  object_list_append(s->objects, tuple_obj);
   return tuple_obj;
 }

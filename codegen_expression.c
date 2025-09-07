@@ -227,7 +227,7 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     cg_pop(s, 1);
     return;
   default:
-    abort();
+    internal_error("invalid assignment target");
   }
 }
 
@@ -282,7 +282,7 @@ static void emit_binexpr_assign(struct cg_state    *s,
     return;
   }
   default:
-    abort();
+    internal_error("invalid assignment target in binexpr-assign");
   }
 }
 
@@ -858,8 +858,7 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     return;
   case AST_UNEXPR_STAR:
   case AST_UNEXPR_STAR_STAR:
-    /* not allowed in generic contexts */
-    abort();
+    internal_error("attempted to emit `*`/`**` as value");
   case AST_YIELD:
     emit_yield(s, expression->yield.value);
     return;

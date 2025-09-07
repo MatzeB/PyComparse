@@ -6,6 +6,7 @@
 
 #include "adt/arena.h"
 #include "adt/dynmemory.h"
+#include "util.h"
 
 #define OBJECT_TUPLE_CONSTRUCTION '\1'
 
@@ -32,7 +33,7 @@ static void object_list_grow(struct object_list *olist, unsigned size)
   olist->items = (union object **)dynmemory_grow(
       olist->items, &olist->capacity, size, sizeof(olist->items[0]));
   if (olist->items == NULL) {
-    abort();
+    internal_error("out of memory");
   }
 }
 
@@ -209,30 +210,4 @@ int64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
   return object->int_obj.value;
-}
-
-bool objects_equal(const union object *object0, const union object *object1)
-{
-  if (object0 == NULL) {
-    return object1 == NULL;
-  }
-  char type = object0->type;
-  if (type != object1->type) {
-    return false;
-  }
-  switch (type) {
-  case OBJECT_NONE:
-  case OBJECT_TRUE:
-  case OBJECT_FALSE:
-    return true;
-
-  case OBJECT_STRING:
-  case OBJECT_ASCII: {
-    return object_string_equals(object0, object1->string.length,
-                                object1->string.chars);
-  }
-
-  default:
-    abort();
-  }
 }

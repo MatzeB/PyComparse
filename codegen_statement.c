@@ -224,8 +224,7 @@ void emit_annotation(struct cg_state *s, union ast_expression *target,
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
     return;
   default:
-    /* expression type not allowed for annotation */
-    abort();
+    internal_error("invalid annotation target");
   }
 }
 
@@ -526,7 +525,7 @@ void emit_make_function_begin(struct cg_state            *s,
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) {
-    unimplemented(); /* TODO: unreachable def-statement... */
+    unimplemented("unreachable def");
   }
 
   emit_parameter_defaults(s, state, num_parameters, parameters);
@@ -1221,7 +1220,7 @@ void emit_del(struct cg_state *s, union ast_expression *targets)
   case AST_INVALID:
     return;
   default:
-    abort();
+    internal_error("invalid del target");
   }
 }
 

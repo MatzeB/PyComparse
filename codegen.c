@@ -176,7 +176,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   code->varnames = object_new_list(arena);
   code->freevars = object_new_list(arena);
   if (s->next_scope_id == UINT16_MAX) {
-    abort();
+    internal_error("Ran out of scope identifiers");
   }
   code->scope_id = s->next_scope_id++;
   code->cg_stack_begin = stack_size(&s->stack);
@@ -665,9 +665,9 @@ void cg_load(struct cg_state *s, struct symbol *name)
     cg_op_push1(s, OPCODE_LOAD_FAST, info->index);
     return;
   case SYMBOL_NONLOCAL:
-    unimplemented();
+    unimplemented("nonlocal load");
   }
-  abort();
+  internal_error("load from invalid symbol type");
 }
 
 void cg_store(struct cg_state *s, struct symbol *name)
@@ -684,9 +684,9 @@ void cg_store(struct cg_state *s, struct symbol *name)
     cg_op_pop1(s, OPCODE_STORE_FAST, info->index);
     return;
   case SYMBOL_NONLOCAL:
-    unimplemented();
+    unimplemented("nonlocal store");
   }
-  abort();
+  internal_error("store to invalid symbol type");
 }
 
 void cg_delete(struct cg_state *s, struct symbol *name)
@@ -703,7 +703,7 @@ void cg_delete(struct cg_state *s, struct symbol *name)
     cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
   case SYMBOL_NONLOCAL:
-    unimplemented();
+    unimplemented("nonlocal del");
   }
-  abort();
+  internal_error("del invalid symbol type");
 }

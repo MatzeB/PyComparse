@@ -969,7 +969,9 @@ static union ast_expression *parse_string(struct parser_state *s)
     }
 
     unsigned num_strings = idynarray_length(&strings, union object *);
-    if (combined_length > UINT32_MAX) abort();
+    if (combined_length > UINT32_MAX) {
+      internal_error("combined string literal too long");
+    }
 
     char *combined = arena_allocate(s->scanner.strings, combined_length, 1);
     char *dest = combined;
@@ -1979,7 +1981,7 @@ static void parse_suite(struct parser_state *s)
 static void parse_type_parameters(struct parser_state *s)
 {
   if (accept(s, '[')) {
-    unimplemented();
+    unimplemented("generic type syntax");
   }
 }
 
@@ -2340,9 +2342,7 @@ union object *parse(struct parser_state *s, const char *filename)
   for (uint16_t i = 0; i < sizeof(s->anchor_set) / sizeof(s->anchor_set[0]);
        ++i) {
     if (s->anchor_set[i] != 0) {
-      fprintf(stderr, "Internal error: Anchor for token %s not removed\n",
-              token_kind_name(i));
-      abort();
+      internal_error("Anchor token not removed");
     }
   }
 #endif

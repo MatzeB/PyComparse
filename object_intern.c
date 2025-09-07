@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "object_intern_types.h"
+#include "util.h"
 
 void object_intern_init(struct object_intern *s)
 {
@@ -41,7 +42,7 @@ union object *object_intern_singleton(struct object_intern *s,
   case OBJECT_ELLIPSIS:
     return s->singleton_ellipsis;
   default:
-    abort();
+    internal_error("object_intern_singleton called with non-singleton");
   }
 }
 

@@ -10,6 +10,7 @@
 #include "object.h"
 #include "object_types.h"
 #include "opcodes.h"
+#include "util.h"
 
 struct writer_state {
   FILE *out;
@@ -145,7 +146,8 @@ static void write_int(struct writer_state *s, const struct object_int *int_obj)
   if (value < 0) {
     negative = true;
     if (value == INT64_MIN) {
-      abort(); /* TODO, overflows -value */
+      /* overflow would produce long integer */
+      unimplemented("writing long integers");
     }
     value = -value;
   }
@@ -215,7 +217,7 @@ static void write_object(struct writer_state *s, const union object *object)
     break;
   case OBJECT_NULL:
   default:
-    abort();
+    internal_error("invalid object in write_object");
   }
 }
 

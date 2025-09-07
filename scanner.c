@@ -19,6 +19,7 @@
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "util.h"
 
 #define UNLIKELY(x) __builtin_expect((x), 0)
 
@@ -289,8 +290,7 @@ static void scan_hexadecimal_integer(struct scanner_state *s)
       return;
     }
     if (value > ((INT64_MAX - digit_value) >> 4)) {
-      /* TODO: arbitrary precision integer */
-      abort();
+      unimplemented("arbitrary precision integer");
     }
     value <<= 4;
     value |= digit_value;
@@ -334,8 +334,7 @@ static void scan_octal_integer(struct scanner_state *s)
       return;
     }
     if (value > ((INT64_MAX - digit_value) >> 3)) {
-      /* TODO: arbitrary precision integer */
-      abort();
+      unimplemented("arbitrary precision integer");
     }
     value <<= 3;
     value |= digit_value;
@@ -373,8 +372,7 @@ static void scan_binary_integer(struct scanner_state *s)
       return;
     }
     if (value > ((INT64_MAX - digit_value) >> 1)) {
-      /* TODO: arbitrary precision integer */
-      abort();
+      unimplemented("arbitrary precision integer");
     }
     value <<= 1;
     value |= digit_value;
@@ -612,8 +610,7 @@ static void scan_escape_sequence(struct scanner_state *s,
       abort();
     }
     if (num > 127 && is_unicode) {
-      /* TODO: encode utf-8 in string */
-      abort();
+      unimplemented("non-ASCII escape sequences");
     }
     arena_grow_char(strings, (char)num);
     return;
@@ -648,14 +645,11 @@ static void scan_escape_sequence(struct scanner_state *s,
     return;
   }
   case 'N':
-    /* TODO */
-    abort();
+    unimplemented("\\N escape sequence");
   case 'u':
-    /* TODO */
-    abort();
+    unimplemented("\\u escape sequence");
   case 'U':
-    /* TODO */
-    abort();
+    unimplemented("\\U escape sequence");
   case '\r':
     next_char(s);
     if (s->c == '\n') next_char(s);
@@ -973,6 +967,7 @@ begin_new_line:
       if (s->c == '"' || s->c == '\'') {
         scan_string_literal(s, T_FORMAT_STRING, /*is_unicode=*/true,
                             /*is_raw=*/false);
+        unimplemented("f-strings");
         return;
       } else {
         scan_identifier(s, first_char, /*second_char=*/0);
@@ -1277,8 +1272,7 @@ begin_new_line:
 
     default:
       if (s->c >= 128) {
-        // TODO: unicode caracters
-        abort();
+        unimplemented("non-ASCII characters in input");
       }
       invalid_c = s->c;
       next_char(s);

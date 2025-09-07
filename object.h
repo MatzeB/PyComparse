@@ -71,7 +71,6 @@ void          object_new_tuple_set_at(struct tuple_prep *tuple, uint32_t index,
 union object *object_new_tuple_end(struct tuple_prep *tuple_prep);
 
 enum object_type object_type(const union object *object);
-bool objects_equal(const union object *object0, const union object *object1);
 
 bool object_string_equals(const union object *object, uint32_t length,
                           const char *nullable chars);

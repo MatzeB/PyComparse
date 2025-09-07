@@ -37,6 +37,8 @@ add_executable(scanner_test
   symbol_table.h
   symbol_table_types.h
   symbol_types.h
+  util.c
+  util.h
 )
 target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}")
 add_executable(parser_test

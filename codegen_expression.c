@@ -705,6 +705,31 @@ static void emit_conditional(struct cg_state        *s,
   cg_block_begin(s, footer);
 }
 
+static void emit_fstring(struct cg_state *s, struct ast_fstring *fstring)
+{
+  struct fstring_element *elements = fstring->elements;
+  unsigned                num_elements = fstring->num_elements;
+  for (unsigned i = 0; i < num_elements; i++) {
+    struct fstring_element *element = &elements[i];
+    if (element->is_expression) {
+      emit_expression(s, element->u.expression);
+      uint32_t argument = element->conversion;
+      if (element->format_spec != NULL) {
+        emit_expression(s, element->format_spec);
+        argument |= FORMAT_VALUE_FMT_SPEC;
+      }
+      cg_op_pop_push(s, OPCODE_FORMAT_VALUE, argument, /*pop=*/1,
+                     /*push=*/1);
+    } else {
+      cg_load_const(s, element->u.string);
+    }
+  }
+  if (num_elements > 1) {
+    cg_op_pop_push(s, OPCODE_BUILD_STRING, num_elements,
+                   /*pop=*/num_elements, /*push=*/1);
+  }
+}
+
 static void emit_generator_expression(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
@@ -816,6 +841,9 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     return;
   case AST_EXPRESSION_LIST:
     emit_tuple(s, &expression->expression_list);
+    return;
+  case AST_FSTRING:
+    emit_fstring(s, &expression->fstring);
     return;
   case AST_GENERATOR_EXPRESSION:
     emit_generator_expression(s, &expression->generator_expression);

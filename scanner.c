@@ -107,6 +107,13 @@
   case 'r':                                                                   \
   case 'u'
 
+struct scan_string_flags {
+  uint8_t unicode : 1;
+  uint8_t raw : 1;
+  uint8_t format : 1;
+  uint8_t continue_format : 1;
+};
+
 static const unsigned TABSIZE = 8;
 static const int      C_EOF = -1;
 
@@ -673,60 +680,126 @@ static void scan_escape_sequence(struct scanner_state *s,
   arena_grow_char(strings, decoded_single);
 }
 
-static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
-                                bool is_unicode, bool is_raw)
+static void error_unterminated_string(struct scanner_state *s)
 {
-  assert(s->c == '"' || s->c == '\'');
-  int quote = s->c;
-  next_char(s);
+  diag_begin_error(s->d, scanner_location(s));
+  diag_frag(s->d, "unterminated string literal");
+  diag_end(s->d);
+}
 
+static void scan_fstring_format_spec(struct scanner_state *s)
+{
   struct arena *strings = s->strings;
-  s->token.kind = token_kind;
   arena_grow_begin(strings, alignof(char));
-  bool triplequote = false;
-  if (s->c == quote) {
+  while (s->c != '}') {
+    if (s->c == C_EOF) {
+      error_unterminated_string(s);
+      break;
+    }
+    arena_grow_char(strings, s->c);
     next_char(s);
-    if (s->c == quote) {
+  }
+
+  size_t           length = arena_grow_current_size(strings);
+  char            *chars = (char *)arena_grow_finish(strings);
+  enum object_type type = OBJECT_ASCII;
+  union object *object = object_intern_string(s->objects, type, length, chars);
+  if (object->string.chars != chars) {
+    arena_free_to(strings, chars);
+  }
+  s->token.u.object = object;
+  s->token.kind = T_FSTRING_FRAGMENT;
+}
+
+static void fstring_push(struct scanner_state *s, enum string_quote quote)
+{
+  assert(s->fstring_stack_top < MAX_FSTRING_NESTING);
+  s->fstring_stack[s->fstring_stack_top++] = s->fstring;
+  memset(&s->fstring, 0, sizeof(s->fstring));
+  s->fstring.paren_level = s->paren_level;
+  s->fstring.quote = quote;
+}
+
+static void fstring_pop(struct scanner_state *s)
+{
+  assert(s->fstring_stack_top > 0);
+  s->fstring = s->fstring_stack[--s->fstring_stack_top];
+}
+
+static void scan_string_literal(struct scanner_state    *s,
+                                struct scan_string_flags flags)
+{
+  struct arena *strings = s->strings;
+  arena_grow_begin(strings, alignof(char));
+
+  if (flags.format && s->fstring_stack_top >= MAX_FSTRING_NESTING) {
+    diag_begin_error(s->d, scanner_location(s));
+    diag_frag(s->d, "too may nested f-strings");
+    diag_end(s->d);
+    flags.format = false;
+  }
+
+  enum token_kind kind;
+  char            quote_char;
+  uint8_t         quote;
+  if (flags.continue_format) {
+    eat(s, '}');
+    quote = s->fstring.quote;
+    quote_char = (quote & QUOTE_QUOTATION_MARK) ? '"' : '\'';
+    assert(quote != 0);
+    kind = T_FSTRING_END;
+  } else {
+    assert(s->c == '"' || s->c == '\'');
+    quote_char = s->c;
+    quote = s->c == '"' ? QUOTE_QUOTATION_MARK : QUOTE_APOSTROPHE;
+    next_char(s);
+    kind = T_STRING;
+
+    if (s->c == quote_char) {
       next_char(s);
-      triplequote = true;
-    } else {
-      goto finish_string;
+      if (s->c == quote_char) {
+        next_char(s);
+        quote |= QUOTE_TRIPLE;
+      } else {
+        goto quote_finish_string;
+      }
     }
   }
+
   for (;;) {
     /* vectorize this search? */
     switch (s->c) {
     case '"':
     case '\'': {
-      if (s->c != quote) {
+      if (s->c != quote_char) {
         break;
       }
       next_char(s);
-      if (!triplequote) {
-        goto finish_string;
+      if ((quote & QUOTE_TRIPLE) == 0) {
+        goto quote_finish_string;
       }
-      if (s->c != quote) {
+      if (s->c != quote_char) {
         arena_grow_char(strings, quote);
         continue;
       }
       next_char(s);
-      if (s->c != quote) {
+      if (s->c != quote_char) {
         arena_grow_char(strings, quote);
         arena_grow_char(strings, quote);
         continue;
       }
       next_char(s);
-      goto finish_string;
+      goto quote_finish_string;
     }
     case '\\':
-      if (is_raw) {
+      if (flags.raw) {
         /* take backslash literally, except that the next char is literal too.
          * Which mostly means '\'' won't end the string. */
         arena_grow_char(strings, s->c);
         next_char(s);
         break;
       }
-      scan_escape_sequence(s, strings, is_unicode);
+      scan_escape_sequence(s, strings, flags.unicode);
       continue;
     case '\r':
       next_char(s);
@@ -735,18 +808,33 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
     case '\n':
       next_char(s);
       goto new_line;
+    case '{':
+      if (!flags.format) break;
+      next_char(s);
+      if (s->c == '{') break;
+      fstring_push(s, quote);
+      kind = flags.continue_format ? T_FSTRING_FRAGMENT : T_FSTRING_START;
+      goto finish_string;
+    case '}':
+      if (!flags.format) break;
+      next_char(s);
+      if (s->c == '}') break;
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "single `}` not allowed in f-string");
+      diag_end(s->d);
+      arena_grow_char(strings, '}');
+      continue;
     new_line:
       ++s->line;
-      if (!triplequote) {
-        fprintf(stderr, "TODO: error unterminated string literal\n");
-        abort();
+      if ((quote & QUOTE_TRIPLE) == 0) {
+        error_unterminated_string(s);
+        goto finish_string;
       }
       arena_grow_char(strings, '\n');
       continue;
     case C_EOF:
-      // TODO: complain
-      fprintf(stderr, "TODO\n");
-      abort();
+      error_unterminated_string(s);
+      goto finish_string;
     default:
       break;
     }
@@ -754,20 +842,32 @@ static void scan_string_literal(struct scanner_state *s, uint16_t token_kind,
     next_char(s);
   }
 
+quote_finish_string:
+  if (kind == T_FSTRING_END) {
+    fstring_pop(s);
+  }
+
 finish_string:;
   size_t           length = arena_grow_current_size(strings);
   char            *chars = (char *)arena_grow_finish(strings);
-  enum object_type type = is_unicode ? OBJECT_ASCII : OBJECT_BYTES;
+  enum object_type type = flags.unicode ? OBJECT_ASCII : OBJECT_BYTES;
   union object *object = object_intern_string(s->objects, type, length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);
   }
   s->token.u.object = object;
-  s->token.kind = T_STRING;
+  s->token.kind = kind;
 }
 
 static void scan_eof(struct scanner_state *s)
 {
+  if (s->fstring_stack_top > 0) {
+    error_unterminated_string(s);
+    fstring_pop(s);
+    s->token.u.object = object_intern_cstring(s->objects, "");
+    s->token.kind = T_FSTRING_END;
+    return;
+  }
   if (s->last_line_indent > 0) {
     assert(s->indentation_stack_top > 0);
     s->pending_dedents = s->indentation_stack_top;
@@ -904,6 +1004,14 @@ begin_new_line:
       /* fallthrough */
     new_line:
       ++s->line;
+      if (s->fstring.quote != 0 && (s->fstring.quote & QUOTE_TRIPLE) == 0) {
+        error_unterminated_string(s);
+        fstring_pop(s);
+        /* TODO: avoid multiple errors when exiting nested fstrings? */
+        s->token.u.object = object_intern_cstring(s->objects, "");
+        s->token.kind = T_FSTRING_END;
+        return;
+      }
       if (s->paren_level > 0) {
         /* no token; continue on next line without indentation check. */
         continue;
@@ -942,17 +1050,16 @@ begin_new_line:
     case 'B': {
       char first_char = (char)s->c;
       next_char(s);
-      bool is_raw = false;
-      char second_char = (char)s->c;
+      struct scan_string_flags flags = { .unicode = false };
+      char                     second_char = (char)s->c;
       if (second_char == 'r' || second_char == 'R') {
         next_char(s);
-        is_raw = true;
+        flags.raw = true;
       } else {
         second_char = 0;
       }
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_BYTE_STRING, /*is_unicode=*/false,
-                            /*is_raw=*/is_raw);
+        scan_string_literal(s, flags);
         return;
       } else {
         scan_identifier(s, first_char, second_char);
@@ -965,9 +1072,11 @@ begin_new_line:
       char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_FORMAT_STRING, /*is_unicode=*/true,
-                            /*is_raw=*/false);
-        unimplemented("f-strings");
+        struct scan_string_flags flags = {
+          .unicode = true,
+          .format = true,
+        };
+        scan_string_literal(s, flags);
         return;
       } else {
         scan_identifier(s, first_char, /*second_char=*/0);
@@ -979,17 +1088,19 @@ begin_new_line:
     case 'R': {
       char first_char = (char)s->c;
       next_char(s);
-      bool is_unicode = true;
+      struct scan_string_flags flags = {
+        .raw = true,
+        .unicode = true,
+      };
       char second_char = (char)s->c;
       if (second_char == 'b' || second_char == 'B') {
         next_char(s);
-        is_unicode = false;
+        flags.unicode = false;
       } else {
         second_char = 0;
       }
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_RAW_STRING, /*is_unicode=*/is_unicode,
-                            /*is_raw=*/true);
+        scan_string_literal(s, flags);
         return;
       } else {
         scan_identifier(s, first_char, second_char);
@@ -1002,8 +1113,8 @@ begin_new_line:
       char first_char = (char)s->c;
       next_char(s);
       if (s->c == '"' || s->c == '\'') {
-        scan_string_literal(s, T_UNICODE_STRING, /*is_unicode=*/true,
-                            /*is_raw=*/false);
+        struct scan_string_flags flags = { .unicode = true };
+        scan_string_literal(s, flags);
         return;
       } else {
         scan_identifier(s, first_char, /*second_char=*/0);
@@ -1012,9 +1123,11 @@ begin_new_line:
     }
 
     case '\'':
-    case '"':
-      scan_string_literal(s, T_STRING, /*is_unicode=*/true, /*is_raw=*/false);
+    case '"': {
+      struct scan_string_flags flags = { .unicode = true };
+      scan_string_literal(s, flags);
       return;
+    }
 
     case '=':
       next_char(s);
@@ -1027,13 +1140,12 @@ begin_new_line:
       return;
 
     case '!':
-      invalid_c = s->c;
       next_char(s);
       if (s->c == '=') {
         next_char(s);
         s->token.kind = T_EXCLAMATIONMARK_EQUALS;
       } else {
-        goto invalid_char;
+        s->token.kind = T_EXCLAMATIONMARK;
       }
       return;
 
@@ -1224,6 +1336,11 @@ begin_new_line:
 
     case ':':
       next_char(s);
+      if (s->fstring.quote != 0 && s->fstring.paren_level == s->paren_level) {
+        scan_fstring_format_spec(s);
+        return;
+      }
+
       if (s->c == '=') {
         next_char(s);
         s->token.kind = T_COLON_EQUALS;
@@ -1238,9 +1355,16 @@ begin_new_line:
       ++s->paren_level;
       goto single_char_token;
 
+    case '}':
+      if (s->fstring.quote != 0 && s->fstring.paren_level == s->paren_level) {
+        struct scan_string_flags flags
+            = { .unicode = true, .format = true, .continue_format = true };
+        scan_string_literal(s, flags);
+        return;
+      }
+      /* fallthrough */
     case ')':
     case ']':
-    case '}':
       --s->paren_level;
       goto single_char_token;
 
@@ -1341,23 +1465,24 @@ const char *token_kind_name(enum token_kind token_kind)
 
 void print_token(FILE *out, const struct token *token)
 {
-  switch (token->kind) {
-  case T_FORMAT_STRING:
-    fputc('f', out);
-    goto string;
-  case T_RAW_STRING:
-    fputc('r', out);
-    goto string;
-  case T_UNICODE_STRING:
-    fputc('u', out);
-    goto string;
-  case T_BYTE_STRING:
-    fputc('b', out);
-    goto string;
-  case T_STRING:
-  string:
-    fputc('"', out);
-    struct object_string *string = &token->u.object->string;
+  enum token_kind kind = token->kind;
+  switch (kind) {
+  case T_FSTRING_START:
+  case T_FSTRING_FRAGMENT:
+  case T_FSTRING_END:
+  case T_STRING: {
+    union object *object = token->u.object;
+    if (kind == T_STRING) {
+      if (object->type == OBJECT_BYTES) {
+        fputs("b\"", out);
+      } else {
+        fputs("\"", out);
+      }
+    } else {
+      fputs(token_kind_name(kind), out);
+      fputs(" \"", out);
+    }
+    struct object_string *string = &object->string;
     for (const char *c = string->chars, *e = c + string->length; c != e; ++c) {
       /* TODO: more escaping... */
       if (isprint(*c)) {
@@ -1368,6 +1493,7 @@ void print_token(FILE *out, const struct token *token)
     }
     fputc('"', out);
     break;
+  }
   case T_FLOAT:
     fprintf(out, "%f", token->u.object->float_obj.value);
     break;
@@ -1378,7 +1504,7 @@ void print_token(FILE *out, const struct token *token)
     fprintf(out, "`%s`", token->u.symbol->string);
     break;
   default:
-    fprintf(out, "%s", token_kind_name(token->kind));
+    fprintf(out, "%s", token_kind_name(kind));
     break;
   }
 }

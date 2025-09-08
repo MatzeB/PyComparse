@@ -187,6 +187,12 @@ bool object_string_equals(const union object *object, uint32_t length,
   return memcmp(object->string.chars, chars, length) == 0;
 }
 
+uint32_t object_string_length(const union object *object)
+{
+  assert(object_type_is_string(object->type));
+  return object->string.length;
+}
+
 uint32_t object_tuple_length(const union object *object)
 {
   assert(object->type == OBJECT_TUPLE);

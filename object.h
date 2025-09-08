@@ -72,8 +72,9 @@ union object *object_new_tuple_end(struct tuple_prep *tuple_prep);
 
 enum object_type object_type(const union object *object);
 
-bool object_string_equals(const union object *object, uint32_t length,
-                          const char *nullable chars);
+bool     object_string_equals(const union object *object, uint32_t length,
+                              const char *nullable chars);
+uint32_t object_string_length(const union object *object);
 
 uint32_t      object_tuple_length(const union object *object);
 union object *object_tuple_at(union object *object, uint32_t index);

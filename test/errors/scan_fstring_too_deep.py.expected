@@ -1,0 +1,2 @@
+test/errors/scan_fstring_too_deep.py:2 error: too may nested f-strings
+test/errors/scan_fstring_too_deep.py:2 error: too may nested f-strings

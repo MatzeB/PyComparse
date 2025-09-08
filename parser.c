@@ -81,7 +81,8 @@ static inline union object *peek_get_object(struct parser_state *s,
                                             enum token_kind      token_kind)
 {
   assert(token_kind == T_STRING || token_kind == T_INTEGER
-         || token_kind == T_FLOAT);
+         || token_kind == T_FLOAT || token_kind == T_FSTRING_START
+         || token_kind == T_FSTRING_FRAGMENT || token_kind == T_FSTRING_END);
   assert(peek(s) == token_kind);
   return s->scanner.token.u.object;
 }
@@ -882,6 +883,71 @@ static union ast_expression *parse_float(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
+static union ast_expression *parse_fstring(struct parser_state *s)
+{
+  struct fstring_element inline_storage[8];
+  struct idynarray       elements;
+  idynarray_init(&elements, inline_storage, sizeof(inline_storage));
+
+  for (;;) {
+    assert(peek(s) == T_FSTRING_START || peek(s) == T_FSTRING_FRAGMENT
+           || peek(s) == T_FSTRING_END);
+    union object *string = peek_get_object(s, peek(s));
+    if (object_string_length(string) > 0) {
+      struct fstring_element *element
+          = idynarray_append(&elements, struct fstring_element);
+      memset(element, 0, sizeof(*element));
+      element->u.string = string;
+      element->is_expression = false;
+    }
+    if (peek(s) == T_FSTRING_END) {
+      next_token(s);
+      break;
+    }
+    next_token(s);
+
+    union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
+    uint8_t               conversion = FORMAT_VALUE_NONE;
+    if (accept(s, '!')) {
+      struct location location = scanner_location(&s->scanner);
+      struct symbol  *symbol = parse_identifier(s);
+      const char     *symbol_str = symbol->string;
+      if (strcmp(symbol_str, "r") == 0) {
+        conversion = FORMAT_VALUE_REPR;
+      } else if (strcmp(symbol_str, "s") == 0) {
+        conversion = FORMAT_VALUE_STR;
+      } else if (strcmp(symbol_str, "a") == 0) {
+        conversion = FORMAT_VALUE_ASCII;
+      } else if (strcmp(symbol_str, "<invalid>") != 0) {
+        diag_begin_error(s->d, location);
+        diag_frag(s->d, "f-string conversion should be `r`, `s` or `a`");
+        diag_end(s->d);
+      }
+    }
+    if (accept(s, ':')) {
+      unimplemented("f-string `:`");
+    }
+
+    struct fstring_element *element
+        = idynarray_append(&elements, struct fstring_element);
+    memset(element, 0, sizeof(*element));
+    element->u.expression = expression;
+    element->is_expression = true;
+    element->conversion = conversion;
+  }
+
+  unsigned num_elements = idynarray_length(&elements, struct fstring_element);
+  size_t   elements_size = num_elements * sizeof(struct fstring_element);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_fstring) + elements_size, AST_FSTRING);
+  expression->fstring.num_elements = num_elements;
+  memcpy(expression->fstring.elements, idynarray_data(&elements),
+         elements_size);
+  idynarray_free(&elements);
+
+  return expression;
+}
+
 static union ast_expression *parse_prefix_identifier(struct parser_state *s)
 {
   struct symbol *symbol = eat_identifier(s);
@@ -946,7 +1012,7 @@ static union ast_expression *parse_string(struct parser_state *s)
     struct idynarray strings;
     idynarray_init(&strings, inline_storage, sizeof(inline_storage));
     *((union object **)idynarray_append(&strings, union object *)) = object;
-    size_t combined_length = object->string.length;
+    size_t combined_length = object_string_length(object);
 
     bool            mixed_types = false;
     struct location location;
@@ -959,7 +1025,7 @@ static union ast_expression *parse_string(struct parser_state *s)
       eat(s, T_STRING);
       *((union object **)idynarray_append(&strings, union object *)) = object;
 
-      combined_length += object->string.length;
+      combined_length += object_string_length(object);
     } while (peek(s) == T_STRING);
 
     if (mixed_types) {
@@ -978,7 +1044,7 @@ static union ast_expression *parse_string(struct parser_state *s)
     union object **strings_arr = idynarray_data(&strings);
     for (unsigned i = 0; i < num_strings; i++) {
       union object *string = strings_arr[i];
-      unsigned      string_length = string->string.length;
+      uint32_t      string_length = object_string_length(string);
       memcpy(dest, string->string.chars, string_length);
       dest += string_length;
     }
@@ -1025,8 +1091,9 @@ static union ast_expression *parse_true(struct parser_state *s)
   case '~':                                                                   \
   case T_ASTERISK_ASTERISK:                                                   \
   case T_DOT_DOT_DOT:                                                         \
-  case T_False:                                                               \
   case T_FLOAT:                                                               \
+  case T_FSTRING_START:                                                       \
+  case T_False:                                                               \
   case T_IDENTIFIER:                                                          \
   case T_INTEGER:                                                             \
   case T_None:                                                                \
@@ -1075,6 +1142,8 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
     return parse_none(s);
   case T_STRING:
     return parse_string(s);
+  case T_FSTRING_START:
+    return parse_fstring(s);
   case T_True:
     return parse_true(s);
   case T_await:

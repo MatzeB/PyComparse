@@ -19,8 +19,8 @@ struct basic_block {
   uint8_t                      jump_opcode;
   uint8_t                      jump_size;
   uint8_t                      default_jump_size;
-  bool                         jump_backwards : 1;
-  bool                         default_jump_backwards : 1;
+  uint8_t                      jump_backwards : 1;
+  uint8_t                      default_jump_backwards : 1;
   struct basic_block *nullable jump_target;
   struct basic_block *nullable default_target;
   struct basic_block *nullable next;

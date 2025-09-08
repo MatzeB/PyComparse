@@ -29,6 +29,16 @@ struct parameter {
   enum parameter_variant         variant;
 };
 
+struct fstring_element {
+  union {
+    union ast_expression *expression;
+    union object         *string;
+  } u;
+  union ast_expression *nullable format_spec;
+  uint8_t                        is_expression : 1;
+  uint8_t                        conversion : 3;
+};
+
 enum generator_expression_part_type {
   GENERATOR_EXPRESSION_PART_FOR,
   GENERATOR_EXPRESSION_PART_IF,
@@ -87,6 +97,12 @@ struct ast_conditional {
 struct ast_const {
   struct ast_node_base base;
   union object        *object;
+};
+
+struct ast_fstring {
+  struct ast_node_base   base;
+  unsigned               num_elements;
+  struct fstring_element elements[];
 };
 
 struct dict_item {
@@ -158,6 +174,7 @@ union ast_expression {
   struct ast_const                cnst;
   struct ast_dict_item_list       dict_item_list;
   struct ast_expression_list      expression_list;
+  struct ast_fstring              fstring;
   struct ast_generator_expression generator_expression;
   struct ast_identifier           identifier;
   struct ast_lambda               lambda;

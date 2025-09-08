@@ -149,6 +149,14 @@ enum compare_op_arg {
   COMPARE_OP_EXC_MATCH = 10,
 };
 
+enum format_value_arg {
+  FORMAT_VALUE_NONE = 0,
+  FORMAT_VALUE_STR = 1,
+  FORMAT_VALUE_REPR = 2,
+  FORMAT_VALUE_ASCII = 3,
+  FORMAT_VALUE_FMT_SPEC = 0x04,
+};
+
 static inline bool is_absjump(uint32_t opcode)
 {
   switch (opcode) {

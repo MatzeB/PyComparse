@@ -1,1 +1,1 @@
-test/errors/scan_invalid_char0.py:1 error: Unexpected input char `!`
+test/errors/scan_invalid_char0.py:1 error: Unexpected input char `$`

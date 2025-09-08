@@ -8,7 +8,8 @@
 
 ASSUME_NONNULL_BEGIN
 
-#define MAXINDENT 100
+#define MAXINDENT           100
+#define MAX_FSTRING_NESTING 149
 
 struct arena;
 struct diagnostics_state;
@@ -26,6 +27,17 @@ struct token {
     struct symbol *symbol;
     union object  *object;
   } u;
+};
+
+enum string_quote {
+  QUOTE_APOSTROPHE = 1 << 0,
+  QUOTE_QUOTATION_MARK = 1 << 1,
+  QUOTE_TRIPLE = 1 << 2,
+};
+
+struct fstring_state {
+  unsigned paren_level;
+  uint8_t  quote;
 };
 
 struct scanner_state {
@@ -47,13 +59,17 @@ struct scanner_state {
   struct object_intern *objects;
   struct arena         *strings;
 
-  bool     at_begin_of_line;
-  unsigned pending_dedents;
-  unsigned last_line_indent;
-  unsigned indentation_stack_top;
-  unsigned indentation_stack[MAXINDENT];
+  struct fstring_state fstring;
+  bool                 at_begin_of_line;
+  uint8_t              fstring_stack_top;
+  unsigned             pending_dedents;
+  unsigned             last_line_indent;
+  unsigned             indentation_stack_top;
 
   struct diagnostics_state *d;
+
+  unsigned             indentation_stack[MAXINDENT];
+  struct fstring_state fstring_stack[MAX_FSTRING_NESTING];
 };
 
 ASSUME_NONNULL_END

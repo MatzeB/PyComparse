@@ -1,0 +1,1 @@
+test/errors/scan_fstring_single_rcurly.py:1 error: single `}` not allowed in f-string

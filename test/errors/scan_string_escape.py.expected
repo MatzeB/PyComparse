@@ -1,0 +1,2 @@
+test/errors/scan_string_escape.py:1 error: invalid unicode codepoint: must be smaller than 10ffff
+test/errors/scan_string_escape.py:2 error: invalid unicode codepoint: must be smaller than 10ffff

@@ -121,13 +121,7 @@ static bool object_type_is_singleton(enum object_type type)
 
 static bool object_type_is_string(enum object_type type)
 {
-  switch (type) {
-  case OBJECT_ASCII:
-  case OBJECT_STRING:
-    return true;
-  default:
-    return false;
-  }
+  return type == OBJECT_STRING || type == OBJECT_BYTES;
 }
 
 enum object_type object_type(const union object *object)
@@ -168,12 +162,6 @@ union object *object_new_int(struct arena *arena, int64_t value)
       = object_allocate_zero(arena, struct object_int, OBJECT_INT);
   object->int_obj.value = value;
   return object;
-}
-
-union object *object_new_ascii(struct arena *arena, const char *str)
-{
-  uint32_t length = strlen(str);
-  return object_new_string(arena, OBJECT_ASCII, length, str);
 }
 
 bool object_string_equals(const union object *object, uint32_t length,

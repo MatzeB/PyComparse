@@ -38,24 +38,15 @@ enum object_type {
   OBJECT_TRUE = 'T',
   OBJECT_FALSE = 'F',
   OBJECT_FLOAT = 'g',
-  OBJECT_STRING = 's',
-  OBJECT_UNICODE = 'u',
+  OBJECT_BYTES = 's',
+  OBJECT_STRING = 'u',
   OBJECT_CODE = 'c',
   OBJECT_TUPLE = '(',
   OBJECT_LIST = '[',
   OBJECT_ELLIPSIS = '.',
-
-  OBJECT_ASCII = 'a',
   OBJECT_INT = 'i',
-
-  OBJECT_SHORT_ASCII = 'z',
-  OBJECT_SMALL_TUPLE = ')',
-
-  /* convenience/make up for confusing python names... */
-  OBJECT_BYTES = OBJECT_STRING,
 };
 
-union object *object_new_ascii(struct arena *arena, const char *cstring);
 union object *object_new_singleton(struct arena *arena, enum object_type type);
 union object *object_new_code(struct arena *arena);
 union object *object_new_list(struct arena *arena);

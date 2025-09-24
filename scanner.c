@@ -152,6 +152,26 @@ static void eat(struct scanner_state *s, int c)
   next_char(s);
 }
 
+static void arena_grow_utf8_codepoint(struct arena *strings,
+                                      uint32_t      codepoint)
+{
+  if (codepoint <= 0x7F) {
+    arena_grow_char(strings, (char)codepoint);
+  } else if (codepoint <= 0x7FF) {
+    arena_grow_char(strings, (char)(0xC0 | (codepoint >> 6)));
+    arena_grow_char(strings, (char)(0x80 | (codepoint & 0x3F)));
+  } else if (codepoint <= 0xFFFF) {
+    arena_grow_char(strings, (char)(0xE0 | (codepoint >> 12)));
+    arena_grow_char(strings, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+    arena_grow_char(strings, (char)(0x80 | (codepoint & 0x3F)));
+  } else if (codepoint <= 0x10FFFF) {
+    arena_grow_char(strings, (char)(0xF0 | (codepoint >> 18)));
+    arena_grow_char(strings, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
+    arena_grow_char(strings, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+    arena_grow_char(strings, (char)(0x80 | (codepoint & 0x3F)));
+  }
+}
+
 static void scan_line_comment(struct scanner_state *s)
 {
   eat(s, '#');
@@ -567,7 +587,9 @@ static void scan_escape_sequence(struct scanner_state *s,
   assert(s->c == '\\');
   next_char(s);
 
-  char decoded_single;
+  char     decoded_single;
+  uint32_t codepoint;
+  int      expected_hex_digits;
   switch (s->c) {
   case '\\':
   case '\'':
@@ -602,30 +624,50 @@ static void scan_escape_sequence(struct scanner_state *s,
   case '4':
   case '5':
   case '6':
-  case '7': {
-    int num = s->c - '0';
+  case '7':
+    codepoint = s->c - '0';
     int num_digits = 1;
     for (;;) {
       next_char(s);
       if (s->c < '0' || s->c > '7' || ++num_digits > 3) {
         break;
       }
-      num = (num * 8) + (s->c - '0');
+      codepoint <<= 3;
+      codepoint |= s->c - '0';
     }
-    if (num > 0377) {
+    if (codepoint > 0377) {
       /* TODO report warning */
       abort();
     }
-    if (num > 127 && is_unicode) {
-      unimplemented("non-ASCII escape sequences");
-    }
-    arena_grow_char(strings, (char)num);
-    return;
-  }
-  case 'x': {
+    goto append_codepoint;
+  case 'x':
     next_char(s);
-    int number = 0;
-    int num_digits = 0;
+    expected_hex_digits = 2;
+    goto parse_hex;
+  case 'N':
+    unimplemented("\\N escape sequence");
+  case 'u':
+    next_char(s);
+    expected_hex_digits = 4;
+    goto parse_hex;
+  case 'U':
+    next_char(s);
+    expected_hex_digits = 8;
+    goto parse_hex;
+  case '\r':
+    next_char(s);
+    if (s->c == '\n') next_char(s);
+    goto new_line;
+  case '\n':
+    next_char(s);
+    /* fallthrough */
+  new_line:
+    ++s->line;
+    return;
+  case C_EOF:
+    return;
+  parse_hex:
+    codepoint = 0;
     do {
       int digit;
       if ('0' <= s->c && s->c <= '9') {
@@ -640,34 +682,24 @@ static void scan_escape_sequence(struct scanner_state *s,
         break;
       }
       next_char(s);
-      number *= 16;
-      number += digit;
-      ++num_digits;
-    } while (num_digits < 2);
-    if (is_unicode && number > 127) {
-      abort(); /* TODO: encode */
+      codepoint <<= 4;
+      codepoint |= digit;
+      --expected_hex_digits;
+    } while (expected_hex_digits > 0);
+    goto append_codepoint;
+  append_codepoint:
+    if (is_unicode && codepoint > 127) {
+      if (codepoint > 0x10ffff) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d,
+                  "invalid unicode codepoint: must be smaller than 10ffff");
+        diag_end(s->d);
+        codepoint = 0xfffc;
+      }
+      arena_grow_utf8_codepoint(strings, codepoint);
     } else {
-      arena_grow_char(strings, (char)number);
+      arena_grow_char(strings, (char)codepoint);
     }
-    return;
-  }
-  case 'N':
-    unimplemented("\\N escape sequence");
-  case 'u':
-    unimplemented("\\u escape sequence");
-  case 'U':
-    unimplemented("\\U escape sequence");
-  case '\r':
-    next_char(s);
-    if (s->c == '\n') next_char(s);
-    goto new_line;
-  case '\n':
-    next_char(s);
-    /* fallthrough */
-  new_line:
-    ++s->line;
-    return;
-  case C_EOF:
     return;
   default:
     /* TODO: report error */
@@ -702,7 +734,7 @@ static void scan_fstring_format_spec(struct scanner_state *s)
 
   size_t           length = arena_grow_current_size(strings);
   char            *chars = (char *)arena_grow_finish(strings);
-  enum object_type type = OBJECT_ASCII;
+  enum object_type type = OBJECT_STRING;
   union object *object = object_intern_string(s->objects, type, length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);
@@ -850,7 +882,7 @@ quote_finish_string:
 finish_string:;
   size_t           length = arena_grow_current_size(strings);
   char            *chars = (char *)arena_grow_finish(strings);
-  enum object_type type = flags.unicode ? OBJECT_ASCII : OBJECT_BYTES;
+  enum object_type type = flags.unicode ? OBJECT_STRING : OBJECT_BYTES;
   union object *object = object_intern_string(s->objects, type, length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);

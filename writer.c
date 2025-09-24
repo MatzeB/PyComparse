@@ -12,6 +12,12 @@
 #include "opcodes.h"
 #include "util.h"
 
+enum write_types {
+  OBJECT_ASCII = 'a',
+  OBJECT_SHORT_ASCII = 'z',
+  OBJECT_SMALL_TUPLE = ')',
+};
+
 struct writer_state {
   FILE *out;
 };
@@ -103,24 +109,34 @@ static void write_list_as_tuple(struct writer_state *s,
   write_tuple_(s, list->list.length, list->list.items);
 }
 
+static bool is_ascii(const char *chars, uint32_t length)
+{
+  for (uint32_t i = 0; i < length; i++) {
+    if (((uint8_t)chars[i]) > 127) return false;
+  }
+  return true;
+}
+
 static void write_string(struct writer_state        *s,
                          const struct object_string *string)
 {
   char type = string->base.type;
-  assert(type == OBJECT_STRING || type == OBJECT_ASCII);
-  uint32_t length = string->length;
-  if (length < 256 && type == OBJECT_ASCII) {
-    write_char(s, OBJECT_SHORT_ASCII);
-    write_uint8(s, (uint8_t)length);
+  assert(type == OBJECT_STRING || type == OBJECT_BYTES);
+  uint32_t    length = string->length;
+  const char *chars = string->chars;
+  if (type == OBJECT_STRING && is_ascii(chars, length)) {
+    if (length < 256) {
+      write_char(s, OBJECT_SHORT_ASCII);
+      write_uint8(s, (uint8_t)length);
+    } else {
+      write_char(s, OBJECT_ASCII);
+      write_uint32(s, length);
+    }
   } else {
     write_char(s, type);
     write_uint32(s, length);
   }
-  for (uint32_t i = 0; i < length; ++i) {
-    assert(type == OBJECT_STRING
-           || (((uint8_t)string->chars[i]) < 128 && "TODO: non-ascii"));
-    write_char(s, string->chars[i]);
-  }
+  fwrite(chars, 1, length, s->out);
 }
 
 static void write_float(struct writer_state       *s,
@@ -205,7 +221,7 @@ static void write_object(struct writer_state *s, const union object *object)
   case OBJECT_CODE:
     write_code(s, &object->code);
     break;
-  case OBJECT_ASCII:
+  case OBJECT_BYTES:
   case OBJECT_STRING:
     write_string(s, &object->string);
     break;

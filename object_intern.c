@@ -55,7 +55,7 @@ union object *object_intern_string(struct object_intern *s,
                                    enum object_type type, uint32_t length,
                                    const char *chars)
 {
-  assert(type == OBJECT_STRING || type == OBJECT_ASCII);
+  assert(type == OBJECT_STRING || type == OBJECT_BYTES);
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
@@ -75,7 +75,7 @@ union object *object_intern_cstring(struct object_intern *s,
 {
   size_t length = strlen(cstring);
   assert(length == (uint32_t)length);
-  return object_intern_string(s, OBJECT_ASCII, (uint32_t)length, cstring);
+  return object_intern_string(s, OBJECT_STRING, (uint32_t)length, cstring);
 }
 
 union object *object_intern_float(struct object_intern *s, double value)

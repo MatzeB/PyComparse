@@ -551,7 +551,7 @@ unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
   for (unsigned i = 0, num_names = object_list_length(names); i < num_names;
        ++i) {
     const union object *object = object_list_at(names, i);
-    if (object->type != OBJECT_ASCII) continue;
+    if (object->type != OBJECT_STRING) continue;
     const struct object_string *string = &object->string;
     if (string->length == length
         && memcmp(string->chars, cstring, length) == 0) {

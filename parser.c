@@ -883,71 +883,6 @@ static union ast_expression *parse_float(struct parser_state *s)
   return ast_const_new(s, object);
 }
 
-static union ast_expression *parse_fstring(struct parser_state *s)
-{
-  struct fstring_element inline_storage[8];
-  struct idynarray       elements;
-  idynarray_init(&elements, inline_storage, sizeof(inline_storage));
-
-  for (;;) {
-    assert(peek(s) == T_FSTRING_START || peek(s) == T_FSTRING_FRAGMENT
-           || peek(s) == T_FSTRING_END);
-    union object *string = peek_get_object(s, peek(s));
-    if (object_string_length(string) > 0) {
-      struct fstring_element *element
-          = idynarray_append(&elements, struct fstring_element);
-      memset(element, 0, sizeof(*element));
-      element->u.string = string;
-      element->is_expression = false;
-    }
-    if (peek(s) == T_FSTRING_END) {
-      next_token(s);
-      break;
-    }
-    next_token(s);
-
-    union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
-    uint8_t               conversion = FORMAT_VALUE_NONE;
-    if (accept(s, '!')) {
-      struct location location = scanner_location(&s->scanner);
-      struct symbol  *symbol = parse_identifier(s);
-      const char     *symbol_str = symbol->string;
-      if (strcmp(symbol_str, "r") == 0) {
-        conversion = FORMAT_VALUE_REPR;
-      } else if (strcmp(symbol_str, "s") == 0) {
-        conversion = FORMAT_VALUE_STR;
-      } else if (strcmp(symbol_str, "a") == 0) {
-        conversion = FORMAT_VALUE_ASCII;
-      } else if (strcmp(symbol_str, "<invalid>") != 0) {
-        diag_begin_error(s->d, location);
-        diag_frag(s->d, "f-string conversion should be `r`, `s` or `a`");
-        diag_end(s->d);
-      }
-    }
-    if (accept(s, ':')) {
-      unimplemented("f-string `:`");
-    }
-
-    struct fstring_element *element
-        = idynarray_append(&elements, struct fstring_element);
-    memset(element, 0, sizeof(*element));
-    element->u.expression = expression;
-    element->is_expression = true;
-    element->conversion = conversion;
-  }
-
-  unsigned num_elements = idynarray_length(&elements, struct fstring_element);
-  size_t   elements_size = num_elements * sizeof(struct fstring_element);
-  union ast_expression *expression = ast_allocate_expression_(
-      s, sizeof(struct ast_fstring) + elements_size, AST_FSTRING);
-  expression->fstring.num_elements = num_elements;
-  memcpy(expression->fstring.elements, idynarray_data(&elements),
-         elements_size);
-  idynarray_free(&elements);
-
-  return expression;
-}
-
 static union ast_expression *parse_prefix_identifier(struct parser_state *s)
 {
   struct symbol *symbol = eat_identifier(s);
@@ -1001,64 +936,191 @@ static union ast_expression *parse_plus(struct parser_state *s)
   return parse_unexpr(s, PREC_FACTOR, AST_UNEXPR_PLUS);
 }
 
-static union ast_expression *parse_string(struct parser_state *s)
+static union object *concat_strings(struct parser_state *s,
+                                    struct idynarray    *strings,
+                                    enum object_type     type,
+                                    size_t               combined_length)
 {
-  union object *object = peek_get_object(s, T_STRING);
-  eat(s, T_STRING);
-
-  if (peek(s) == T_STRING) {
-    enum object_type type = object_type(object);
-    union object   **inline_storage[8];
-    struct idynarray strings;
-    idynarray_init(&strings, inline_storage, sizeof(inline_storage));
-    *((union object **)idynarray_append(&strings, union object *)) = object;
-    size_t combined_length = object_string_length(object);
-
-    bool            mixed_types = false;
-    struct location location;
-    do {
-      object = peek_get_object(s, T_STRING);
-      if (object_type(object) != type && !mixed_types) {
-        location = scanner_location(&s->scanner);
-        mixed_types = true;
-      }
-      eat(s, T_STRING);
-      *((union object **)idynarray_append(&strings, union object *)) = object;
-
-      combined_length += object_string_length(object);
-    } while (peek(s) == T_STRING);
-
-    if (mixed_types) {
-      diag_begin_error(s->d, location);
-      diag_frag(s->d, "cannot mix bytes and str literals");
-      diag_end(s->d);
-    }
-
-    unsigned num_strings = idynarray_length(&strings, union object *);
-    if (combined_length > UINT32_MAX) {
-      internal_error("combined string literal too long");
-    }
-
-    char *combined = arena_allocate(s->scanner.strings, combined_length, 1);
-    char *dest = combined;
-    union object **strings_arr = idynarray_data(&strings);
-    for (unsigned i = 0; i < num_strings; i++) {
-      union object *string = strings_arr[i];
-      uint32_t      string_length = object_string_length(string);
-      memcpy(dest, string->string.chars, string_length);
-      dest += string_length;
-    }
-    assert(dest - combined == (ptrdiff_t)combined_length);
-
-    object = object_intern_string(&s->cg.objects, type, combined_length,
-                                  combined);
-    if (object->string.chars != combined) {
-      arena_free_to(s->scanner.strings, combined);
-    }
-    idynarray_free(&strings);
+  if (combined_length > UINT32_MAX) {
+    internal_error("combined string literal too long");
   }
 
-  return ast_const_new(s, object);
+  unsigned num_strings = idynarray_length(strings, union object *);
+  char    *combined = arena_allocate(s->scanner.strings, combined_length, 1);
+  char    *dest = combined;
+  union object **strings_arr = idynarray_data(strings);
+  for (unsigned i = 0; i < num_strings; i++) {
+    union object *string = strings_arr[i];
+    uint32_t      string_length = object_string_length(string);
+    memcpy(dest, string->string.chars, string_length);
+    dest += string_length;
+  }
+  assert(dest - combined == (ptrdiff_t)combined_length);
+
+  union object *object
+      = object_intern_string(&s->cg.objects, type, combined_length, combined);
+  if (object->string.chars != combined) {
+    arena_free_to(s->scanner.strings, combined);
+  }
+  return object;
+}
+
+static union ast_expression *parse_string(struct parser_state *s)
+{
+  union object *string;
+  // fast-path: single string literal
+  if (peek(s) == T_STRING) {
+    string = peek_get_object(s, T_STRING);
+    eat(s, T_STRING);
+    if (peek(s) != T_STRING && peek(s) != T_FSTRING_START) {
+      return ast_const_new(s, string);
+    }
+  } else {
+    string = NULL;
+  }
+
+  // prepare to concatenate multiple (f-)string literals.
+  union object   **inline_storage[8];
+  struct idynarray strings;
+  idynarray_init(&strings, inline_storage, sizeof(inline_storage));
+  size_t           combined_length = 0;
+  struct location  mixed_types = { 0 };
+  enum object_type type;
+  if (string != NULL) {
+    type = object_type(string);
+    if (object_string_length(string) > 0) {
+      *idynarray_append(&strings, union object *) = string;
+      combined_length += object_string_length(string);
+    }
+  } else {
+    assert(peek(s) == T_FSTRING_START);
+    type = OBJECT_STRING;
+  }
+
+  struct fstring_element inline_storage_elements[8];
+  struct idynarray       elements;
+  idynarray_init(&elements, inline_storage_elements,
+                 sizeof(inline_storage_elements));
+
+  for (;;) {
+    if (peek(s) == T_STRING) {
+      string = peek_get_object(s, T_STRING);
+      eat(s, T_STRING);
+      if (object_string_length(string) > 0) {
+        *idynarray_append(&strings, union object *) = string;
+        combined_length += object_string_length(string);
+      }
+      if (object_type(string) != type) {
+        mixed_types = scanner_location(&s->scanner);
+      }
+      continue;
+    }
+    if (peek(s) == T_FSTRING_START) {
+      if (type != OBJECT_STRING) {
+        mixed_types = scanner_location(&s->scanner);
+      }
+      for (;;) {
+        assert(peek(s) == T_FSTRING_START || peek(s) == T_FSTRING_FRAGMENT
+               || peek(s) == T_FSTRING_END);
+        string = peek_get_object(s, peek(s));
+
+        if (object_string_length(string) > 0) {
+          *idynarray_append(&strings, union object *) = string;
+          combined_length += object_string_length(string);
+        }
+        if (peek(s) == T_FSTRING_END) {
+          next_token(s);
+          break;
+        }
+        next_token(s);
+
+        if (combined_length > 0) {
+          union object *combined
+              = concat_strings(s, &strings, type, combined_length);
+          idynarray_clear(&strings);
+          combined_length = 0;
+
+          struct fstring_element *element
+              = idynarray_append(&elements, struct fstring_element);
+          memset(element, 0, sizeof(*element));
+          element->u.string = combined;
+          element->is_expression = false;
+        }
+
+        union ast_expression *expression
+            = parse_expression(s, PREC_EXPRESSION);
+        uint8_t conversion = FORMAT_VALUE_NONE;
+        if (accept(s, '!')) {
+          struct location location = scanner_location(&s->scanner);
+          struct symbol  *symbol = parse_identifier(s);
+          const char     *symbol_str = symbol->string;
+          if (strcmp(symbol_str, "r") == 0) {
+            conversion = FORMAT_VALUE_REPR;
+          } else if (strcmp(symbol_str, "s") == 0) {
+            conversion = FORMAT_VALUE_STR;
+          } else if (strcmp(symbol_str, "a") == 0) {
+            conversion = FORMAT_VALUE_ASCII;
+          } else if (strcmp(symbol_str, "<invalid>") != 0) {
+            diag_begin_error(s->d, location);
+            diag_frag(s->d, "f-string conversion should be `r`, `s` or `a`");
+            diag_end(s->d);
+          }
+        }
+        if (accept(s, ':')) {
+          unimplemented("f-string `:`");
+        }
+
+        struct fstring_element *element
+            = idynarray_append(&elements, struct fstring_element);
+        memset(element, 0, sizeof(*element));
+        element->u.expression = expression;
+        element->is_expression = true;
+        element->conversion = conversion;
+      }
+      continue;
+    }
+    break;
+  }
+
+  if (combined_length > 0) {
+    union object *combined
+        = concat_strings(s, &strings, type, combined_length);
+    struct fstring_element *element
+        = idynarray_append(&elements, struct fstring_element);
+    memset(element, 0, sizeof(*element));
+    element->u.string = combined;
+    element->is_expression = false;
+  }
+  idynarray_free(&strings);
+
+  if (mixed_types.line > 0) {
+    diag_begin_error(s->d, mixed_types);
+    diag_frag(s->d, "cannot mix bytes and str literals");
+    diag_end(s->d);
+  }
+
+  unsigned num_elements = idynarray_length(&elements, struct fstring_element);
+  struct fstring_element *element_arr = idynarray_data(&elements);
+  if (num_elements <= 1
+      && (num_elements == 0 || element_arr[0].is_expression == false)) {
+    union object *object;
+    if (num_elements == 1) {
+      object = element_arr[0].u.string;
+    } else {
+      object = object_intern_cstring(&s->cg.objects, "");
+    }
+    idynarray_free(&elements);
+    return ast_const_new(s, object);
+  }
+
+  size_t elements_size = num_elements * sizeof(struct fstring_element);
+  union ast_expression *expression = ast_allocate_expression_(
+      s, sizeof(struct ast_fstring) + elements_size, AST_FSTRING);
+  expression->fstring.num_elements = num_elements;
+  memcpy(expression->fstring.elements, idynarray_data(&elements),
+         elements_size);
+  idynarray_free(&elements);
+  return expression;
 }
 
 static union ast_expression *parse_negative(struct parser_state *s)
@@ -1141,9 +1203,8 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
   case T_None:
     return parse_none(s);
   case T_STRING:
-    return parse_string(s);
   case T_FSTRING_START:
-    return parse_fstring(s);
+    return parse_string(s);
   case T_True:
     return parse_true(s);
   case T_await:

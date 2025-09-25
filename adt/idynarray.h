@@ -24,6 +24,11 @@ static void idynarray_free(struct idynarray *a)
   }
 }
 
+static void idynarray_clear(struct idynarray *a)
+{
+  a->size = 0;
+}
+
 static inline char *idynarray_append_size(struct idynarray *a, unsigned size)
 {
   unsigned old_size = a->size;

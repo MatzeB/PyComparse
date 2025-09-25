@@ -766,7 +766,7 @@ static void scan_string_literal(struct scanner_state    *s,
 
   if (flags.format && s->fstring_stack_top >= MAX_FSTRING_NESTING) {
     diag_begin_error(s->d, scanner_location(s));
-    diag_frag(s->d, "too may nested f-strings");
+    diag_frag(s->d, "too many nested f-strings");
     diag_end(s->d);
     flags.format = false;
   }
@@ -844,7 +844,9 @@ static void scan_string_literal(struct scanner_state    *s,
       if (!flags.format) break;
       next_char(s);
       if (s->c == '{') break;
-      fstring_push(s, quote);
+      if (!flags.continue_format) {
+        fstring_push(s, quote);
+      }
       kind = flags.continue_format ? T_FSTRING_FRAGMENT : T_FSTRING_START;
       goto finish_string;
     case '}':

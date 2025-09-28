@@ -38,7 +38,7 @@ struct object_float {
 
 struct object_int {
   struct object_base base;
-  int64_t            value;
+  uint64_t           value;
 };
 
 struct object_list {

@@ -112,6 +112,7 @@ struct scan_string_flags {
   uint8_t raw : 1;
   uint8_t format : 1;
   uint8_t continue_format : 1;
+  uint8_t format_spec : 1;
 };
 
 static const unsigned TABSIZE = 8;
@@ -145,7 +146,7 @@ static void next_char(struct scanner_state *s)
   s->c = UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s) : *(s->p++);
 }
 
-static void eat(struct scanner_state *s, int c)
+static void eat_char(struct scanner_state *s, int c)
 {
   (void)c;
   assert(s->c == c);
@@ -174,7 +175,7 @@ static void arena_grow_utf8_codepoint(struct arena *strings,
 
 static void scan_line_comment(struct scanner_state *s)
 {
-  eat(s, '#');
+  eat_char(s, '#');
   for (;;) {
     switch (s->c) {
     case '\r':
@@ -225,7 +226,7 @@ static void scan_identifier(struct scanner_state *s, char first_char,
   s->token.u.symbol = symbol;
 }
 
-static bool end_number_literal(struct scanner_state *s, int64_t value,
+static bool end_number_literal(struct scanner_state *s, uint64_t value,
                                char last, bool *had_error,
                                const char *literal_kind)
 {
@@ -264,9 +265,9 @@ static bool end_number_literal(struct scanner_state *s, int64_t value,
 
 static void scan_hexadecimal_integer(struct scanner_state *s)
 {
-  int64_t value = 0;
-  bool    had_error = false;
-  char    last = 0;
+  uint64_t value = 0;
+  bool     had_error = false;
+  char     last = 0;
   for (;; last = s->c) {
     next_char(s);
     int64_t digit_value;
@@ -316,7 +317,7 @@ static void scan_hexadecimal_integer(struct scanner_state *s)
       }
       return;
     }
-    if (value > ((INT64_MAX - digit_value) >> 4)) {
+    if (value > ((UINT64_MAX - digit_value) >> 4)) {
       unimplemented("arbitrary precision integer");
     }
     value <<= 4;
@@ -326,12 +327,12 @@ static void scan_hexadecimal_integer(struct scanner_state *s)
 
 static void scan_octal_integer(struct scanner_state *s)
 {
-  int64_t value = 0;
-  bool    had_error = false;
-  char    last = 0;
+  uint64_t value = 0;
+  bool     had_error = false;
+  char     last = 0;
   for (;; last = s->c) {
     next_char(s);
-    int64_t digit_value;
+    uint64_t digit_value;
     switch (s->c) {
     case '0':
     case '1':
@@ -360,7 +361,7 @@ static void scan_octal_integer(struct scanner_state *s)
       }
       return;
     }
-    if (value > ((INT64_MAX - digit_value) >> 3)) {
+    if (value > ((UINT64_MAX - digit_value) >> 3)) {
       unimplemented("arbitrary precision integer");
     }
     value <<= 3;
@@ -370,9 +371,9 @@ static void scan_octal_integer(struct scanner_state *s)
 
 static void scan_binary_integer(struct scanner_state *s)
 {
-  int64_t value = 0;
-  bool    had_error = false;
-  char    last = 0;
+  uint64_t value = 0;
+  bool     had_error = false;
+  char     last = 0;
   for (;; last = s->c) {
     next_char(s);
     int64_t digit_value;
@@ -398,7 +399,7 @@ static void scan_binary_integer(struct scanner_state *s)
       }
       return;
     }
-    if (value > ((INT64_MAX - digit_value) >> 1)) {
+    if (value > ((UINT64_MAX - digit_value) >> 1)) {
       unimplemented("arbitrary precision integer");
     }
     value <<= 1;
@@ -719,37 +720,15 @@ static void error_unterminated_string(struct scanner_state *s)
   diag_end(s->d);
 }
 
-static void scan_fstring_format_spec(struct scanner_state *s)
-{
-  struct arena *strings = s->strings;
-  arena_grow_begin(strings, alignof(char));
-  while (s->c != '}') {
-    if (s->c == C_EOF) {
-      error_unterminated_string(s);
-      break;
-    }
-    arena_grow_char(strings, s->c);
-    next_char(s);
-  }
-
-  size_t           length = arena_grow_current_size(strings);
-  char            *chars = (char *)arena_grow_finish(strings);
-  enum object_type type = OBJECT_STRING;
-  union object *object = object_intern_string(s->objects, type, length, chars);
-  if (object->string.chars != chars) {
-    arena_free_to(strings, chars);
-  }
-  s->token.u.object = object;
-  s->token.kind = T_FSTRING_FRAGMENT;
-}
-
-static void fstring_push(struct scanner_state *s, enum string_quote quote)
+static void fstring_push(struct scanner_state *s, enum string_quote quote,
+                         bool format_spec)
 {
   assert(s->fstring_stack_top < MAX_FSTRING_NESTING);
   s->fstring_stack[s->fstring_stack_top++] = s->fstring;
   memset(&s->fstring, 0, sizeof(s->fstring));
   s->fstring.paren_level = s->paren_level;
   s->fstring.quote = quote;
+  s->fstring.format_spec = format_spec;
 }
 
 static void fstring_pop(struct scanner_state *s)
@@ -775,11 +754,17 @@ static void scan_string_literal(struct scanner_state    *s,
   char            quote_char;
   uint8_t         quote;
   if (flags.continue_format) {
-    eat(s, '}');
+    eat_char(s, '}');
     quote = s->fstring.quote;
     quote_char = (quote & QUOTE_QUOTATION_MARK) ? '"' : '\'';
     assert(quote != 0);
     kind = T_FSTRING_END;
+  } else if (flags.format_spec) {
+    eat_char(s, ':');
+    quote = s->fstring.quote;
+    quote_char = (quote & QUOTE_QUOTATION_MARK) ? '"' : '\'';
+    assert(quote != 0);
+    kind = T_STRING;
   } else {
     assert(s->c == '"' || s->c == '\'');
     quote_char = s->c;
@@ -845,12 +830,15 @@ static void scan_string_literal(struct scanner_state    *s,
       next_char(s);
       if (s->c == '{') break;
       if (!flags.continue_format) {
-        fstring_push(s, quote);
+        fstring_push(s, quote, flags.format_spec);
+        kind = T_FSTRING_START;
+      } else {
+        kind = T_FSTRING_FRAGMENT;
       }
-      kind = flags.continue_format ? T_FSTRING_FRAGMENT : T_FSTRING_START;
       goto finish_string;
     case '}':
       if (!flags.format) break;
+      if (flags.format_spec) goto quote_finish_string;
       next_char(s);
       if (s->c == '}') break;
       diag_begin_error(s->d, scanner_location(s));
@@ -1369,11 +1357,20 @@ begin_new_line:
       }
 
     case ':':
-      next_char(s);
       if (s->fstring.quote != 0 && s->fstring.paren_level == s->paren_level) {
-        scan_fstring_format_spec(s);
+        if (s->token.kind != ':') {
+          s->token.kind = ':';
+          return;
+        }
+        struct scan_string_flags flags = {
+          .unicode = true,
+          .format = true,
+          .format_spec = true,
+        };
+        scan_string_literal(s, flags);
         return;
       }
+      next_char(s);
 
       if (s->c == '=') {
         next_char(s);
@@ -1391,8 +1388,12 @@ begin_new_line:
 
     case '}':
       if (s->fstring.quote != 0 && s->fstring.paren_level == s->paren_level) {
-        struct scan_string_flags flags
-            = { .unicode = true, .format = true, .continue_format = true };
+        struct scan_string_flags flags = {
+          .unicode = true,
+          .format = true,
+          .continue_format = true,
+          .format_spec = s->fstring.format_spec,
+        };
         scan_string_literal(s, flags);
         return;
       }

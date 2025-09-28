@@ -1066,14 +1066,16 @@ static union ast_expression *parse_string(struct parser_state *s)
             diag_end(s->d);
           }
         }
+        union ast_expression *format_spec = NULL;
         if (accept(s, ':')) {
-          unimplemented("f-string `:`");
+          format_spec = parse_string(s);
         }
 
         struct fstring_element *element
             = idynarray_append(&elements, struct fstring_element);
         memset(element, 0, sizeof(*element));
         element->u.expression = expression;
+        element->format_spec = format_spec;
         element->is_expression = true;
         element->conversion = conversion;
       }

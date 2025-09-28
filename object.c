@@ -156,7 +156,7 @@ union object *object_new_float(struct arena *arena, double value)
   return object;
 }
 
-union object *object_new_int(struct arena *arena, int64_t value)
+union object *object_new_int(struct arena *arena, uint64_t value)
 {
   union object *object
       = object_allocate_zero(arena, struct object_int, OBJECT_INT);
@@ -200,7 +200,7 @@ double object_float_value(const union object *object)
   return object->float_obj.value;
 }
 
-int64_t object_int_value(const union object *object)
+uint64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
   return object->int_obj.value;

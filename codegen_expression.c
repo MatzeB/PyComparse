@@ -714,11 +714,13 @@ static void emit_fstring(struct cg_state *s, struct ast_fstring *fstring)
     if (element->is_expression) {
       emit_expression(s, element->u.expression);
       uint32_t argument = element->conversion;
+      unsigned pop = 1;
       if (element->format_spec != NULL) {
         emit_expression(s, element->format_spec);
         argument |= FORMAT_VALUE_FMT_SPEC;
+        pop = 2;
       }
-      cg_op_pop_push(s, OPCODE_FORMAT_VALUE, argument, /*pop=*/1,
+      cg_op_pop_push(s, OPCODE_FORMAT_VALUE, argument, /*pop=*/pop,
                      /*push=*/1);
     } else {
       cg_load_const(s, element->u.string);

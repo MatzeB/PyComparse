@@ -95,7 +95,7 @@ union object *object_intern_float(struct object_intern *s, double value)
   return result;
 }
 
-union object *object_intern_int(struct object_intern *s, int64_t value)
+union object *object_intern_int(struct object_intern *s, uint64_t value)
 {
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {

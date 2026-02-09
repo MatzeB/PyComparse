@@ -252,6 +252,7 @@ struct ast_statement_def {
   struct symbol                  *name;
   bool                            async;
   bool                            has_yield;
+  bool                            scope_bindings_ready;
   unsigned                        positional_only_argcount;
   unsigned                        num_parameters;
   struct parameter *nullable      parameters;
@@ -259,6 +260,14 @@ struct ast_statement_def {
   struct ast_statement_list      *body;
   unsigned                        num_decorators;
   union ast_expression *nonnull *nullable decorators;
+  unsigned                        num_scope_globals;
+  struct symbol *nonnull *nullable scope_globals;
+  unsigned                        num_scope_locals;
+  struct symbol *nonnull *nullable scope_locals;
+  unsigned                        num_scope_cellvars;
+  struct symbol *nonnull *nullable scope_cellvars;
+  unsigned                        num_scope_freevars;
+  struct symbol *nonnull *nullable scope_freevars;
 };
 
 struct ast_statement_del {

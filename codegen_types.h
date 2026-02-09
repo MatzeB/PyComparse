@@ -40,6 +40,7 @@ struct code_state {
   union object       *names;
   union object       *varnames;
   union object       *freevars;
+  union object       *cellvars;
   struct basic_block *current_block;
   struct basic_block *first_block;
   struct basic_block *last_block;

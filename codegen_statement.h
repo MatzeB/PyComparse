@@ -23,8 +23,11 @@ union ast_statement;
 
 struct make_function_state {
   bool annotations;
+  bool closure;
   bool defaults;
   bool keyword_defaults;
+  unsigned                      num_closure_symbols;
+  struct symbol *nonnull *nullable closure_symbols;
 };
 
 struct for_while_state {

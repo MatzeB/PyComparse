@@ -175,6 +175,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   code->names = object_new_list(arena);
   code->varnames = object_new_list(arena);
   code->freevars = object_new_list(arena);
+  code->cellvars = object_new_list(arena);
   if (s->next_scope_id == UINT16_MAX) {
     internal_error("Ran out of scope identifiers");
   }
@@ -295,8 +296,12 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   pop_symbol_infos(s);
 
-  // TODO: compute NOFREE...
-  s->code.flags |= CO_NOFREE;
+  if (object_list_length(s->code.freevars) == 0
+      && object_list_length(s->code.cellvars) == 0) {
+    s->code.flags |= CO_NOFREE;
+  } else {
+    s->code.flags &= ~CO_NOFREE;
+  }
 
   unsigned prologue_length = 0;
   if (s->code.setup_annotations) prologue_length += 2;
@@ -449,7 +454,6 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
                                             code_length, code_bytes);
-  union object *cellvars = object_intern_empty_tuple(&s->objects);
   union object *filename = object_intern_cstring(&s->objects, s->filename);
   union object *name_string = object_intern_cstring(&s->objects, name);
   union object *lnotab
@@ -467,7 +471,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.names = s->code.names;
   object->code.varnames = s->code.varnames;
   object->code.freevars = s->code.freevars;
-  object->code.cellvars = cellvars;
+  object->code.cellvars = s->code.cellvars;
   object->code.filename = filename;
   object->code.name = name_string;
   object->code.lnotab = lnotab;
@@ -584,6 +588,15 @@ static unsigned cg_append_freevar(struct cg_state *s, struct symbol *name)
   return object_list_length(freevars) - 1;
 }
 
+static unsigned cg_append_cellvar(struct cg_state *s, struct symbol *name)
+{
+  const char   *cstring = name->string;
+  union object *cellvars = s->code.cellvars;
+  union object *string = object_intern_cstring(&s->objects, cstring);
+  object_list_append(cellvars, string);
+  return object_list_length(cellvars) - 1;
+}
+
 static struct symbol_info *cg_symbol_info(struct cg_state *s,
                                           struct symbol   *symbol)
 {
@@ -636,6 +649,11 @@ bool cg_declare(struct cg_state *s, struct symbol *name,
 {
   struct symbol_info *info = cg_symbol_info(s, name);
   if (info != NULL) {
+    if (info->type == SYMBOL_LOCAL && type == SYMBOL_CELL) {
+      info->type = SYMBOL_CELL;
+      info->index = cg_append_cellvar(s, name);
+      return true;
+    }
     return info->type == type;
   }
   info = cg_new_symbol_info(s, name);
@@ -644,11 +662,35 @@ bool cg_declare(struct cg_state *s, struct symbol *name,
     info->index = cg_register_name(s, name);
   } else if (type == SYMBOL_LOCAL) {
     info->index = cg_append_varname(s, name);
+  } else if (type == SYMBOL_CELL) {
+    info->index = cg_append_cellvar(s, name);
   } else {
     assert(type == SYMBOL_NONLOCAL);
     info->index = cg_append_freevar(s, name);
   }
   return true;
+}
+
+bool cg_promote_to_cell(struct cg_state *s, struct symbol *name)
+{
+  return cg_declare(s, name, SYMBOL_CELL);
+}
+
+unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
+{
+  struct symbol_info *info = cg_symbol_info(s, name);
+  if (info == NULL) {
+    internal_error("missing symbol info for closure");
+  }
+
+  switch ((enum symbol_info_type)info->type) {
+  case SYMBOL_CELL:
+    return info->index;
+  case SYMBOL_NONLOCAL:
+    return object_list_length(s->code.cellvars) + info->index;
+  default:
+    internal_error("symbol is not a closure variable");
+  }
 }
 
 void cg_load(struct cg_state *s, struct symbol *name)
@@ -664,8 +706,13 @@ void cg_load(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op_push1(s, OPCODE_LOAD_FAST, info->index);
     return;
+  case SYMBOL_CELL:
+    cg_op_push1(s, OPCODE_LOAD_DEREF, info->index);
+    return;
   case SYMBOL_NONLOCAL:
-    unimplemented("nonlocal load");
+    cg_op_push1(s, OPCODE_LOAD_DEREF,
+                object_list_length(s->code.cellvars) + info->index);
+    return;
   }
   internal_error("load from invalid symbol type");
 }
@@ -683,8 +730,13 @@ void cg_store(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op_pop1(s, OPCODE_STORE_FAST, info->index);
     return;
+  case SYMBOL_CELL:
+    cg_op_pop1(s, OPCODE_STORE_DEREF, info->index);
+    return;
   case SYMBOL_NONLOCAL:
-    unimplemented("nonlocal store");
+    cg_op_pop1(s, OPCODE_STORE_DEREF,
+               object_list_length(s->code.cellvars) + info->index);
+    return;
   }
   internal_error("store to invalid symbol type");
 }
@@ -702,8 +754,13 @@ void cg_delete(struct cg_state *s, struct symbol *name)
   case SYMBOL_LOCAL:
     cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
+  case SYMBOL_CELL:
+    cg_op(s, OPCODE_DELETE_DEREF, info->index);
+    return;
   case SYMBOL_NONLOCAL:
-    unimplemented("nonlocal del");
+    cg_op(s, OPCODE_DELETE_DEREF,
+          object_list_length(s->code.cellvars) + info->index);
+    return;
   }
   internal_error("del invalid symbol type");
 }

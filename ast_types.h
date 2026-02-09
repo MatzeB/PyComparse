@@ -241,6 +241,13 @@ struct ast_statement_class {
   struct ast_statement_list      *body;
   unsigned                        num_decorators;
   union ast_expression *nonnull *nullable decorators;
+  bool                            scope_bindings_ready;
+  unsigned                        num_scope_globals;
+  struct symbol *nonnull *nullable scope_globals;
+  unsigned                        num_scope_locals;
+  struct symbol *nonnull *nullable scope_locals;
+  unsigned                        num_scope_freevars;
+  struct symbol *nonnull *nullable scope_freevars;
 };
 
 struct ast_statement_continue {

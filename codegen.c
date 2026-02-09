@@ -588,6 +588,24 @@ static unsigned cg_append_freevar(struct cg_state *s, struct symbol *name)
   return object_list_length(freevars) - 1;
 }
 
+unsigned cg_register_freevar(struct cg_state *s, struct symbol *name)
+{
+  const char   *cstring = name->string;
+  size_t        length = strlen(cstring);
+  union object *freevars = s->code.freevars;
+  for (unsigned i = 0, num_freevars = object_list_length(freevars);
+       i < num_freevars; ++i) {
+    const union object *object = object_list_at(freevars, i);
+    if (object->type != OBJECT_STRING) continue;
+    const struct object_string *string = &object->string;
+    if (string->length == length
+        && memcmp(string->chars, cstring, length) == 0) {
+      return i;
+    }
+  }
+  return cg_append_freevar(s, name);
+}
+
 static unsigned cg_append_cellvar(struct cg_state *s, struct symbol *name)
 {
   const char   *cstring = name->string;
@@ -666,7 +684,7 @@ bool cg_declare(struct cg_state *s, struct symbol *name,
     info->index = cg_append_cellvar(s, name);
   } else {
     assert(type == SYMBOL_NONLOCAL);
-    info->index = cg_append_freevar(s, name);
+    info->index = cg_register_freevar(s, name);
   }
   return true;
 }
@@ -679,18 +697,31 @@ bool cg_promote_to_cell(struct cg_state *s, struct symbol *name)
 unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
 {
   struct symbol_info *info = cg_symbol_info(s, name);
-  if (info == NULL) {
-    internal_error("missing symbol info for closure");
+  if (info != NULL) {
+    switch ((enum symbol_info_type)info->type) {
+    case SYMBOL_CELL:
+      return info->index;
+    case SYMBOL_NONLOCAL:
+      return object_list_length(s->code.cellvars) + info->index;
+    default:
+      break;
+    }
   }
 
-  switch ((enum symbol_info_type)info->type) {
-  case SYMBOL_CELL:
-    return info->index;
-  case SYMBOL_NONLOCAL:
-    return object_list_length(s->code.cellvars) + info->index;
-  default:
-    internal_error("symbol is not a closure variable");
+  union object *freevars = s->code.freevars;
+  const char   *cstring = name->string;
+  size_t        length = strlen(cstring);
+  for (unsigned i = 0, num_freevars = object_list_length(freevars);
+       i < num_freevars; ++i) {
+    const union object *object = object_list_at(freevars, i);
+    if (object->type != OBJECT_STRING) continue;
+    const struct object_string *string = &object->string;
+    if (string->length == length
+        && memcmp(string->chars, cstring, length) == 0) {
+      return object_list_length(s->code.cellvars) + i;
+    }
   }
+  internal_error("symbol is not a closure variable");
 }
 
 void cg_load(struct cg_state *s, struct symbol *name)
@@ -710,8 +741,9 @@ void cg_load(struct cg_state *s, struct symbol *name)
     cg_op_push1(s, OPCODE_LOAD_DEREF, info->index);
     return;
   case SYMBOL_NONLOCAL:
-    cg_op_push1(s, OPCODE_LOAD_DEREF,
-                object_list_length(s->code.cellvars) + info->index);
+    cg_op_push1(
+        s, s->code.in_class_body ? OPCODE_LOAD_CLASSDEREF : OPCODE_LOAD_DEREF,
+        object_list_length(s->code.cellvars) + info->index);
     return;
   }
   internal_error("load from invalid symbol type");

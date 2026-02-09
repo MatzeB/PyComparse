@@ -1152,6 +1152,7 @@ void emit_class_begin(struct cg_state *s, struct symbol *symbol)
 
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/false);
+  s->code.in_class_body = true;
 
   cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
@@ -1167,15 +1168,32 @@ static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
 }
 
 void emit_class_end(struct cg_state *s, struct symbol *symbol,
-                    struct ast_call *call, unsigned num_decorators)
+                    struct ast_call *call, unsigned num_decorators,
+                    unsigned num_closure_symbols,
+                    struct symbol **nullable closure_symbols)
 {
   emit_code_end(s);
   union object *code = cg_pop_code(s, symbol->string);
+
+  uint32_t flags = 0;
+  unsigned operands = 2;
+  if (num_closure_symbols > 0) {
+    for (unsigned i = 0; i < num_closure_symbols; ++i) {
+      cg_op_push1(s, OPCODE_LOAD_CLOSURE,
+                  cg_closure_index(s, closure_symbols[i]));
+    }
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_closure_symbols,
+                   /*pop=*/num_closure_symbols, /*push=*/1);
+    flags |= MAKE_FUNCTION_CLOSURE;
+    ++operands;
+  }
+
   cg_load_const(s, code);
 
   union object *string = object_intern_cstring(&s->objects, symbol->string);
   cg_load_const(s, string);
-  cg_op_pop1(s, OPCODE_MAKE_FUNCTION, 0);
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
+                 /*push=*/1);
   cg_load_const(s, string);
   emit_call_helper(s, call, /*num_extra_args=*/2);
   emit_decorator_calls(s, num_decorators);
@@ -1403,6 +1421,7 @@ struct binding_scope {
   struct binding_scope   *nullable parent;
   struct ast_statement_def *nullable def;
   struct cg_state        *cg;
+  bool                    is_class;
 
   struct symbol *locals_inline[16];
   struct symbol *bound_before_decl_inline[16];
@@ -1412,6 +1431,7 @@ struct binding_scope {
   struct symbol *cellvars_inline[8];
   struct symbol *uses_inline[16];
   struct ast_statement_def *children_inline[8];
+  struct ast_statement_class *class_children_inline[8];
 
   struct idynarray locals;
   struct idynarray bound_before_decl;
@@ -1421,6 +1441,7 @@ struct binding_scope {
   struct idynarray cellvars;
   struct idynarray uses;
   struct idynarray children;
+  struct idynarray class_children;
 };
 
 static void emit_statement_list_with_function(
@@ -1466,12 +1487,14 @@ static struct symbol **nullable symbol_array_copy(struct cg_state *s,
 static void binding_scope_init(struct binding_scope        *scope,
                                struct cg_state             *cg,
                                struct binding_scope *nullable parent,
-                               struct ast_statement_def *nullable def)
+                               struct ast_statement_def *nullable def,
+                               bool                       is_class)
 {
   memset(scope, 0, sizeof(*scope));
   scope->cg = cg;
   scope->parent = parent;
   scope->def = def;
+  scope->is_class = is_class;
   idynarray_init(&scope->locals, scope->locals_inline, sizeof(scope->locals_inline));
   idynarray_init(&scope->bound_before_decl, scope->bound_before_decl_inline,
                  sizeof(scope->bound_before_decl_inline));
@@ -1485,10 +1508,14 @@ static void binding_scope_init(struct binding_scope        *scope,
   idynarray_init(&scope->uses, scope->uses_inline, sizeof(scope->uses_inline));
   idynarray_init(&scope->children, scope->children_inline,
                  sizeof(scope->children_inline));
+  idynarray_init(&scope->class_children, scope->class_children_inline,
+                 sizeof(scope->class_children_inline));
 }
 
 static void binding_scope_free(struct binding_scope *scope)
 {
+  idynarray_clear(&scope->class_children);
+  idynarray_free(&scope->class_children);
   idynarray_clear(&scope->children);
   idynarray_free(&scope->children);
   idynarray_free(&scope->uses);
@@ -1504,6 +1531,17 @@ static bool resolve_from_parent_scope(struct binding_scope *nullable scope,
                                       struct symbol                 *name)
 {
   if (scope == NULL) {
+    return false;
+  }
+
+  if (scope->is_class) {
+    if (symbol_array_contains(&scope->freevars, name)) {
+      return true;
+    }
+    if (resolve_from_parent_scope(scope->parent, name)) {
+      symbol_array_append_unique(&scope->freevars, name);
+      return true;
+    }
     return false;
   }
 
@@ -1809,6 +1847,8 @@ static void analyze_statement_collect(struct binding_scope *scope,
     for (unsigned i = 0; i < class_stmt->call->num_arguments; ++i) {
       analyze_expression(scope, class_stmt->call->arguments[i].expression);
     }
+    *idynarray_append(&scope->class_children, struct ast_statement_class *)
+        = class_stmt;
     return;
   }
   case AST_STATEMENT_DEF: {
@@ -1949,6 +1989,81 @@ static void analyze_statement_collect(struct binding_scope *scope,
 
 static void analyze_function_bindings(struct cg_state *s,
                                       struct ast_statement_def *def_stmt,
+                                      struct binding_scope *nullable parent);
+static void analyze_class_bindings(struct cg_state *s,
+                                   struct ast_statement_class *class_stmt,
+                                   struct binding_scope *nullable parent);
+
+static void analyze_class_bindings(struct cg_state *s,
+                                   struct ast_statement_class *class_stmt,
+                                   struct binding_scope *nullable parent)
+{
+  if (class_stmt->scope_bindings_ready) {
+    return;
+  }
+
+  struct binding_scope scope;
+  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/true);
+  analyze_statement_list_collect(&scope, class_stmt->body);
+
+  struct ast_statement_class **class_children
+      = idynarray_data(&scope.class_children);
+  unsigned num_class_children
+      = idynarray_length(&scope.class_children, struct ast_statement_class *);
+  for (unsigned i = 0; i < num_class_children; ++i) {
+    analyze_class_bindings(s, class_children[i], &scope);
+  }
+
+  struct ast_statement_def **children = idynarray_data(&scope.children);
+  unsigned                  num_children
+      = idynarray_length(&scope.children, struct ast_statement_def *);
+  for (unsigned i = 0; i < num_children; ++i) {
+    analyze_function_bindings(s, children[i], &scope);
+  }
+
+  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
+  unsigned        num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
+  for (unsigned i = 0; i < num_nonlocals; ++i) {
+    struct symbol *name = nonlocals[i];
+    if (!resolve_from_parent_scope(scope.parent, name)) {
+      diag_begin_error(s->d, class_stmt->base.location);
+      diag_frag(s->d, "no binding for nonlocal ");
+      diag_symbol(s->d, name);
+      diag_frag(s->d, " found");
+      diag_end(s->d);
+    } else {
+      symbol_array_append_unique(&scope.freevars, name);
+    }
+  }
+
+  struct symbol **uses = idynarray_data(&scope.uses);
+  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
+  for (unsigned i = 0; i < num_uses; ++i) {
+    struct symbol *name = uses[i];
+    if (symbol_array_contains(&scope.locals, name)
+        || symbol_array_contains(&scope.globals, name)
+        || symbol_array_contains(&scope.nonlocals, name)
+        || symbol_array_contains(&scope.freevars, name)) {
+      continue;
+    }
+    if (resolve_from_parent_scope(scope.parent, name)) {
+      symbol_array_append_unique(&scope.freevars, name);
+    }
+  }
+
+  class_stmt->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
+  class_stmt->scope_globals = symbol_array_copy(s, &scope.globals);
+  class_stmt->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
+  class_stmt->scope_locals = symbol_array_copy(s, &scope.locals);
+  class_stmt->num_scope_freevars = idynarray_length(&scope.freevars, struct symbol *);
+  class_stmt->scope_freevars = symbol_array_copy(s, &scope.freevars);
+  class_stmt->scope_bindings_ready = true;
+
+  binding_scope_free(&scope);
+}
+
+static void analyze_function_bindings(struct cg_state *s,
+                                      struct ast_statement_def *def_stmt,
                                       struct binding_scope *nullable parent)
 {
   if (def_stmt->scope_bindings_ready) {
@@ -1956,13 +2071,21 @@ static void analyze_function_bindings(struct cg_state *s,
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, def_stmt);
+  binding_scope_init(&scope, s, parent, def_stmt, /*is_class=*/false);
 
   for (unsigned i = 0; i < def_stmt->num_parameters; ++i) {
     scope_mark_local(&scope, def_stmt->parameters[i].name);
   }
 
   analyze_statement_list_collect(&scope, def_stmt->body);
+
+  struct ast_statement_class **class_children
+      = idynarray_data(&scope.class_children);
+  unsigned num_class_children
+      = idynarray_length(&scope.class_children, struct ast_statement_class *);
+  for (unsigned i = 0; i < num_class_children; ++i) {
+    analyze_class_bindings(s, class_children[i], &scope);
+  }
 
   struct ast_statement_def **children = idynarray_data(&scope.children);
   unsigned                  num_children
@@ -2012,6 +2135,39 @@ static void analyze_function_bindings(struct cg_state *s,
   def_stmt->scope_bindings_ready = true;
 
   binding_scope_free(&scope);
+}
+
+static void apply_class_bindings(struct cg_state *s,
+                                 struct ast_statement_class *class_stmt)
+{
+  for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
+    cg_register_freevar(s, class_stmt->scope_freevars[i]);
+  }
+  for (unsigned i = 0; i < class_stmt->num_scope_globals; ++i) {
+    cg_declare(s, class_stmt->scope_globals[i], SYMBOL_GLOBAL);
+  }
+  for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
+    struct symbol *name = class_stmt->scope_freevars[i];
+    bool           is_global = false;
+    for (unsigned j = 0; j < class_stmt->num_scope_globals; ++j) {
+      if (class_stmt->scope_globals[j] == name) {
+        is_global = true;
+        break;
+      }
+    }
+    if (is_global) continue;
+
+    bool is_local = false;
+    for (unsigned j = 0; j < class_stmt->num_scope_locals; ++j) {
+      if (class_stmt->scope_locals[j] == name) {
+        is_local = true;
+        break;
+      }
+    }
+    if (is_local) continue;
+
+    cg_declare(s, class_stmt->scope_freevars[i], SYMBOL_NONLOCAL);
+  }
 }
 
 static void apply_function_bindings(struct cg_state *s,
@@ -2151,14 +2307,18 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   case AST_STATEMENT_CLASS: {
     struct ast_statement_class *class_stmt = &statement->class_stmt;
+    analyze_class_bindings(s, class_stmt, /*parent=*/NULL);
     for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
       emit_expression(s, class_stmt->decorators[i]);
     }
     emit_class_begin(s, class_stmt->name);
+    apply_class_bindings(s, class_stmt);
     emit_statement_list_with_function(s, class_stmt->body,
                                       /*current_function=*/NULL);
     emit_class_end(s, class_stmt->name, class_stmt->call,
-                   class_stmt->num_decorators);
+                   class_stmt->num_decorators,
+                   class_stmt->num_scope_freevars,
+                   class_stmt->scope_freevars);
     return;
   }
   case AST_STATEMENT_CONTINUE:

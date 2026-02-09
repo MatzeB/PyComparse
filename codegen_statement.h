@@ -76,7 +76,9 @@ bool emit_break(struct cg_state *s);
 
 void emit_class_begin(struct cg_state *s, struct symbol *name);
 void emit_class_end(struct cg_state *s, struct symbol *name,
-                    struct ast_call *call, unsigned num_decorators);
+                    struct ast_call *call, unsigned num_decorators,
+                    unsigned num_closure_symbols,
+                    struct symbol *nonnull *nullable closure_symbols);
 
 void emit_code_end(struct cg_state *s);
 

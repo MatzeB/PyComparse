@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "ast.h"
 #include "ast_types.h"
@@ -1379,4 +1380,288 @@ void emit_yield_from_statement(struct cg_state      *s,
   if (unreachable(s)) return;
   emit_yield_from(s, expression);
   cg_op_pop1(s, OPCODE_POP_TOP, 0);
+}
+
+static void emit_statement(struct cg_state *s, union ast_statement *statement);
+
+static void emit_break_statement(struct cg_state *s, struct location location)
+{
+  if (!emit_break(s)) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_break);
+    diag_frag(s->d, " outside loop");
+    diag_end(s->d);
+  }
+}
+
+static void emit_continue_statement(struct cg_state *s, struct location location)
+{
+  if (!emit_continue(s)) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_continue);
+    diag_frag(s->d, " outside loop");
+    diag_end(s->d);
+  }
+}
+
+static void emit_global_statement_checked(struct cg_state *s,
+                                          struct location  location,
+                                          struct symbol   *name)
+{
+  if (!emit_global_statement(s, name)) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "name ");
+    diag_symbol(s->d, name);
+    diag_frag(s->d, " is assigned to before global declaration");
+    diag_end(s->d);
+  }
+}
+
+static void emit_nonlocal_statement_checked(struct cg_state *s,
+                                            struct location  location,
+                                            struct symbol   *name)
+{
+  if (!emit_nonlocal_statement(s, name)) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "name ");
+    diag_symbol(s->d, name);
+    diag_frag(s->d, " is assigned to before nonlocal declaration");
+    diag_end(s->d);
+  }
+}
+
+static void emit_return_statement_checked(struct cg_state               *s,
+                                          struct location                location,
+                                          union ast_expression *nullable expression)
+{
+  if (!cg_in_function(s)) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_return);
+    diag_frag(s->d, " outside function");
+    diag_end(s->d);
+  }
+  emit_return_statement(s, expression);
+}
+
+void emit_statement_list(struct cg_state *s,
+                         struct ast_statement_list *statement_list)
+{
+  for (unsigned i = 0; i < statement_list->num_statements; ++i) {
+    emit_statement(s, statement_list->statements[i]);
+  }
+}
+
+static void emit_statement(struct cg_state *s, union ast_statement *statement)
+{
+  switch (ast_statement_type(statement)) {
+  case AST_STATEMENT_ANNOTATION: {
+    struct ast_statement_annotation *annotation = &statement->annotation;
+    if (annotation->value != NULL) {
+      union ast_expression *targets[] = { annotation->target };
+      emit_assign_statement(s, 1, targets, annotation->value);
+    }
+    emit_annotation(s, annotation->target, annotation->annotation);
+    return;
+  }
+  case AST_STATEMENT_ASSERT: {
+    struct ast_statement_assert *assertion = &statement->assertion;
+    emit_assert(s, assertion->expression, assertion->message);
+    return;
+  }
+  case AST_STATEMENT_ASSIGN: {
+    struct ast_statement_assign *assign = &statement->assign;
+    emit_assign_statement(s, assign->num_targets, assign->targets,
+                          assign->value);
+    return;
+  }
+  case AST_STATEMENT_AUGASSIGN:
+    emit_binexpr_assign_statement(s, statement->augassign.expression);
+    return;
+  case AST_STATEMENT_BREAK:
+    emit_break_statement(s, statement->base.location);
+    return;
+  case AST_STATEMENT_CLASS: {
+    struct ast_statement_class *class_stmt = &statement->class_stmt;
+    for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
+      emit_expression(s, class_stmt->decorators[i]);
+    }
+    emit_class_begin(s, class_stmt->name);
+    emit_statement_list(s, class_stmt->body);
+    emit_class_end(s, class_stmt->name, class_stmt->call,
+                   class_stmt->num_decorators);
+    return;
+  }
+  case AST_STATEMENT_CONTINUE:
+    emit_continue_statement(s, statement->base.location);
+    return;
+  case AST_STATEMENT_DEF: {
+    struct ast_statement_def *def_stmt = &statement->def_stmt;
+    for (unsigned i = 0; i < def_stmt->num_decorators; ++i) {
+      emit_expression(s, def_stmt->decorators[i]);
+    }
+    struct make_function_state state;
+    emit_def_begin(s, &state, def_stmt->num_parameters, def_stmt->parameters,
+                   def_stmt->positional_only_argcount, def_stmt->return_type);
+    emit_statement_list(s, def_stmt->body);
+    if (def_stmt->has_yield) {
+      s->code.flags |= CO_GENERATOR;
+    }
+    emit_def_end(s, &state, def_stmt->name, def_stmt->num_decorators,
+                 def_stmt->async);
+    return;
+  }
+  case AST_STATEMENT_DEL:
+    emit_del(s, statement->del_stmt.targets);
+    return;
+  case AST_STATEMENT_EXPRESSION:
+    emit_expression_statement(s, statement->expression_stmt.expression);
+    return;
+  case AST_STATEMENT_FOR: {
+    struct ast_statement_for *for_stmt = &statement->for_stmt;
+    struct for_while_state    state;
+    emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression);
+    emit_statement_list(s, for_stmt->body);
+    emit_for_else(s, &state);
+    if (for_stmt->else_body != NULL) {
+      emit_statement_list(s, for_stmt->else_body);
+    }
+    emit_for_end(s, &state);
+    return;
+  }
+  case AST_STATEMENT_FROM_IMPORT: {
+    struct ast_statement_from_import *from_import = &statement->from_import_stmt;
+    if (from_import->import_star) {
+      emit_from_import_star_statement(s, from_import->num_prefix_dots,
+                                      from_import->module);
+    } else {
+      emit_from_import_statement(s, from_import->num_prefix_dots,
+                                 from_import->module, from_import->num_items,
+                                 from_import->items);
+    }
+    return;
+  }
+  case AST_STATEMENT_GLOBAL: {
+    struct ast_statement_global *global = &statement->global_stmt;
+    for (unsigned i = 0; i < global->num_names; ++i) {
+      emit_global_statement_checked(s, statement->base.location,
+                                    global->names[i]);
+    }
+    return;
+  }
+  case AST_STATEMENT_IF: {
+    struct ast_statement_if *if_stmt = &statement->if_stmt;
+    struct if_state          state;
+    emit_if_begin(s, &state, if_stmt->condition);
+    emit_statement_list(s, if_stmt->body);
+    for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
+      struct ast_if_elif *elif_stmt = &if_stmt->elifs[i];
+      emit_if_elif(s, &state, elif_stmt->condition);
+      emit_statement_list(s, elif_stmt->body);
+    }
+    if (if_stmt->else_body != NULL) {
+      emit_if_else(s, &state);
+      emit_statement_list(s, if_stmt->else_body);
+    }
+    emit_if_end(s, &state);
+    return;
+  }
+  case AST_STATEMENT_IMPORT: {
+    struct ast_statement_import *import_stmt = &statement->import_stmt;
+    for (unsigned i = 0; i < import_stmt->num_items; ++i) {
+      struct ast_import_item *item = &import_stmt->items[i];
+      emit_import_statement(s, item->module, item->as);
+    }
+    return;
+  }
+  case AST_STATEMENT_NONLOCAL: {
+    struct ast_statement_nonlocal *nonlocal = &statement->nonlocal_stmt;
+    for (unsigned i = 0; i < nonlocal->num_names; ++i) {
+      emit_nonlocal_statement_checked(s, statement->base.location,
+                                      nonlocal->names[i]);
+    }
+    return;
+  }
+  case AST_STATEMENT_PASS:
+    return;
+  case AST_STATEMENT_RAISE: {
+    struct ast_statement_raise *raise = &statement->raise_stmt;
+    emit_raise_statement(s, raise->expression, raise->from);
+    return;
+  }
+  case AST_STATEMENT_RETURN:
+    emit_return_statement_checked(s, statement->base.location,
+                                  statement->return_stmt.expression);
+    return;
+  case AST_STATEMENT_TRY: {
+    struct ast_statement_try *try_stmt = &statement->try_stmt;
+    struct try_state          state;
+    emit_try_body_begin(s, &state);
+    emit_statement_list(s, try_stmt->body);
+    emit_try_body_end(s, &state);
+
+    for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
+      struct ast_try_except *except_stmt = &try_stmt->excepts[i];
+      emit_try_except_begin(s, &state, except_stmt->match, except_stmt->as);
+      emit_statement_list(s, except_stmt->body);
+      emit_try_except_end(s, &state, except_stmt->as);
+    }
+
+    if (try_stmt->else_body != NULL) {
+      emit_try_else_begin(s, &state);
+      emit_statement_list(s, try_stmt->else_body);
+      emit_try_else_end(s, &state);
+    }
+
+    if (try_stmt->finally_body != NULL) {
+      emit_try_finally_begin(s, &state);
+      emit_statement_list(s, try_stmt->finally_body);
+      emit_try_finally_end(s, &state);
+    }
+
+    emit_try_end(s, &state);
+    return;
+  }
+  case AST_STATEMENT_WHILE: {
+    struct ast_statement_while *while_stmt = &statement->while_stmt;
+    struct for_while_state      state;
+    emit_while_begin(s, &state, while_stmt->condition);
+    emit_statement_list(s, while_stmt->body);
+    emit_while_else(s, &state);
+    if (while_stmt->else_body != NULL) {
+      emit_statement_list(s, while_stmt->else_body);
+    }
+    emit_while_end(s, &state);
+    return;
+  }
+  case AST_STATEMENT_WITH: {
+    struct ast_statement_with *with_stmt = &statement->with_stmt;
+    unsigned                  num_items = with_stmt->num_items;
+    struct with_state        *states = NULL;
+    if (num_items > 0) {
+      states = (struct with_state *)calloc(num_items, sizeof(*states));
+      if (states == NULL) {
+        internal_error("out of memory");
+      }
+    }
+
+    for (unsigned i = 0; i < num_items; ++i) {
+      struct ast_with_item *item = &with_stmt->items[i];
+      emit_with_begin(s, &states[i], item->expression, item->targets);
+    }
+    emit_statement_list(s, with_stmt->body);
+    for (unsigned i = num_items; i-- > 0;) {
+      emit_with_end(s, &states[i]);
+    }
+    free(states);
+    return;
+  }
+  case AST_STATEMENT_YIELD:
+    emit_yield_statement(s, statement->yield_stmt.expression);
+    return;
+  case AST_STATEMENT_YIELD_FROM:
+    emit_yield_from_statement(s, statement->yield_stmt.expression);
+    return;
+  default:
+    internal_error("invalid statement");
+  }
 }

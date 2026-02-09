@@ -5,8 +5,10 @@
 ASSUME_NONNULL_BEGIN
 
 struct ast_expression_list;
+struct ast_statement_list;
 struct object_intern;
 union ast_expression;
+union ast_statement;
 union object;
 
 enum ast_expression_type {
@@ -70,6 +72,35 @@ enum ast_expression_type {
 };
 
 enum ast_expression_type ast_expression_type(union ast_expression *expression);
+
+enum ast_statement_type {
+  AST_STATEMENT_ANNOTATION,
+  AST_STATEMENT_ASSERT,
+  AST_STATEMENT_ASSIGN,
+  AST_STATEMENT_AUGASSIGN,
+  AST_STATEMENT_BREAK,
+  AST_STATEMENT_CLASS,
+  AST_STATEMENT_CONTINUE,
+  AST_STATEMENT_DEF,
+  AST_STATEMENT_DEL,
+  AST_STATEMENT_EXPRESSION,
+  AST_STATEMENT_FOR,
+  AST_STATEMENT_FROM_IMPORT,
+  AST_STATEMENT_GLOBAL,
+  AST_STATEMENT_IF,
+  AST_STATEMENT_IMPORT,
+  AST_STATEMENT_NONLOCAL,
+  AST_STATEMENT_PASS,
+  AST_STATEMENT_RAISE,
+  AST_STATEMENT_RETURN,
+  AST_STATEMENT_TRY,
+  AST_STATEMENT_WHILE,
+  AST_STATEMENT_WITH,
+  AST_STATEMENT_YIELD,
+  AST_STATEMENT_YIELD_FROM,
+};
+
+enum ast_statement_type ast_statement_type(union ast_statement *statement);
 
 union object *nullable
 ast_expression_as_constant(union ast_expression *expression);

@@ -42,6 +42,17 @@ This script runs the parser against test files in `test/` and compares output wi
 build/parser_test test/simple.py > /tmp/output.pyc && uv run python /tmp/output.pyc
 ```
 
+### Compiling and print bytecode for reference compiler
+```bash
+uv run utils/decode.py /tmp/test.py
+```
+
+### Compile and print bytecode for pyparse
+- remember to build first
+```bash
+build/parser_test /tmp/test.py | uv run utils/decode.py
+```
+
 ## Architecture
 
 ### Core Components

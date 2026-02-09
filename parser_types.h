@@ -16,6 +16,7 @@ struct parser_state {
   struct arena              ast;
   struct cg_state           cg;
   struct diagnostics_state *d;
+  bool *nullable            current_function_has_yield;
 
   unsigned short anchor_set[NUM_TOKENS];
 };

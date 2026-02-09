@@ -11,12 +11,15 @@ ASSUME_NONNULL_BEGIN
 struct ast_call;
 struct ast_comparison;
 struct ast_generator_expression;
+struct ast_statement_list;
 struct basic_block;
 struct cg_state;
 struct dotted_name;
+struct from_import_item;
 struct parameter;
 struct symbol;
 union ast_expression;
+union ast_statement;
 
 struct make_function_state {
   bool annotations;
@@ -24,19 +27,9 @@ struct make_function_state {
   bool keyword_defaults;
 };
 
-struct dotted_name {
-  unsigned               num_symbols;
-  struct symbol *nonnull symbols[];
-};
-
 struct for_while_state {
   struct basic_block *else_or_footer;
   struct loop_state   saved;
-};
-
-struct from_import_item {
-  struct symbol          *name;
-  struct symbol *nullable as;
 };
 
 struct if_state {
@@ -182,5 +175,8 @@ void emit_yield_statement(struct cg_state               *s,
                           union ast_expression *nullable expression);
 void emit_yield_from_statement(struct cg_state      *s,
                                union ast_expression *expression);
+
+void emit_statement_list(struct cg_state *s,
+                         struct ast_statement_list *statement_list);
 
 ASSUME_NONNULL_END

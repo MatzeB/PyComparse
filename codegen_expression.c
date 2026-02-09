@@ -740,6 +740,7 @@ static void emit_generator_expression(
 
 void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 {
+  s->code.flags |= CO_GENERATOR;
   if (!cg_in_function(s)) {
     struct location location = { 12345 };
     diag_begin_error(s->d, location);
@@ -758,6 +759,7 @@ void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 
 void emit_yield_from(struct cg_state *s, union ast_expression *value)
 {
+  s->code.flags |= CO_GENERATOR;
   if (!cg_in_function(s)) {
     struct location location = { 12345 };
     diag_begin_error(s->d, location);

@@ -12,6 +12,11 @@ enum ast_expression_type ast_expression_type(union ast_expression *expression)
   return expression->type;
 }
 
+enum ast_statement_type ast_statement_type(union ast_statement *statement)
+{
+  return statement->type;
+}
+
 union object *ast_expression_as_constant(union ast_expression *expression)
 {
   switch (ast_expression_type(expression)) {

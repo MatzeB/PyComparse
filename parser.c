@@ -274,6 +274,71 @@ ast_allocate_expression_(struct parser_state *s, size_t size,
 #define ast_allocate_expression(s, type, type_id)                             \
   ast_allocate_expression_((s), sizeof(type), (type_id))
 
+static union ast_statement *
+ast_allocate_statement_(struct parser_state *s, size_t size,
+                        enum ast_statement_type type,
+                        struct location         location)
+{
+  union ast_statement *statement = (union ast_statement *)arena_allocate(
+      &s->ast, size, alignof(union ast_statement));
+  memset(statement, 0, size);
+  statement->type = type;
+  statement->base.location = location;
+  return statement;
+}
+
+#define ast_allocate_statement(s, type, type_id, location)                    \
+  ast_allocate_statement_((s), sizeof(type), (type_id), (location))
+
+static struct ast_statement_list *
+ast_statement_list_from_array(struct parser_state *s,
+                              union ast_statement **statements,
+                              unsigned              num_statements)
+{
+  size_t statements_size = num_statements * sizeof(union ast_statement *);
+  struct ast_statement_list *result = (struct ast_statement_list *)arena_allocate(
+      &s->ast, sizeof(struct ast_statement_list) + statements_size,
+      alignof(struct ast_statement_list));
+  result->num_statements = num_statements;
+  if (num_statements > 0) {
+    memcpy(result->statements, statements, statements_size);
+  }
+  return result;
+}
+
+static union ast_expression **
+ast_expression_array_copy(struct parser_state   *s,
+                          union ast_expression **expressions,
+                          unsigned               num_expressions)
+{
+  if (num_expressions == 0) return NULL;
+  size_t size = num_expressions * sizeof(union ast_expression *);
+  union ast_expression **result = (union ast_expression **)arena_allocate(
+      &s->ast, size, alignof(union ast_expression *));
+  memcpy(result, expressions, size);
+  return result;
+}
+
+static union ast_expression **
+ast_expression_array_copy_dyn(struct parser_state *s, struct idynarray *array)
+{
+  unsigned num_expressions = idynarray_length(array, union ast_expression *);
+  union ast_expression **expressions = idynarray_data(array);
+  return ast_expression_array_copy(s, expressions, num_expressions);
+}
+
+static struct parameter *
+ast_parameter_array_copy_dyn(struct parser_state *s, struct idynarray *array)
+{
+  unsigned num_parameters = idynarray_length(array, struct parameter);
+  if (num_parameters == 0) return NULL;
+  size_t size = num_parameters * sizeof(struct parameter);
+  struct parameter *result
+      = (struct parameter *)arena_allocate(&s->ast, size, alignof(struct parameter));
+  memcpy(result, idynarray_data(array), size);
+  return result;
+}
+
 static union ast_expression *ast_const_new(struct parser_state *s,
                                            union object        *object)
 {
@@ -843,8 +908,9 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     }
     expression = ast_allocate_expression(s, struct ast_yield, type);
     expression->yield.value = yield_expression;
-
-    had_yield(&s->cg);
+    if (s->current_function_has_yield != NULL) {
+      *s->current_function_has_yield = true;
+    }
   } else {
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
     if (peek(s) == T_for) {
@@ -1728,10 +1794,10 @@ static union ast_expression *check_assignment_target(
   return invalid_expression(s);
 }
 
-static void parse_assignment(struct parser_state  *s,
-                             union ast_expression *target)
+static union ast_statement *parse_assignment(struct parser_state  *s,
+                                             union ast_expression *target,
+                                             struct location       location)
 {
-  struct location location = scanner_location(&s->scanner);
   target = check_assignment_target(s, target, location, /*is_del=*/false,
                                    /*show_equal_hint=*/true);
   eat(s, '=');
@@ -1745,44 +1811,56 @@ static void parse_assignment(struct parser_state  *s,
     *idynarray_append(&targets, union ast_expression *) = target;
 
     do {
-      struct location location = scanner_location(&s->scanner);
-      rhs = check_assignment_target(s, rhs, location, /*is_del=*/false,
+      struct location assign_location = scanner_location(&s->scanner);
+      rhs = check_assignment_target(s, rhs, assign_location,
+                                    /*is_del=*/false,
                                     /*show_equal_hint=*/true);
       eat(s, '=');
       *idynarray_append(&targets, union ast_expression *) = rhs;
-
       rhs = parse_star_expressions(s, PREC_EXPRESSION);
     } while (peek(s) == '=');
 
     unsigned num_targets = idynarray_length(&targets, union ast_expression *);
-    union ast_expression **targets_arr = idynarray_data(&targets);
-    emit_assign_statement(&s->cg, num_targets, targets_arr, rhs);
-
+    union ast_statement *statement = ast_allocate_statement(
+        s, struct ast_statement_assign, AST_STATEMENT_ASSIGN, location);
+    statement->assign.num_targets = num_targets;
+    statement->assign.targets = ast_expression_array_copy_dyn(s, &targets);
+    statement->assign.value = rhs;
     idynarray_free(&targets);
-  } else {
-    union ast_expression *targets[] = { target };
-    emit_assign_statement(&s->cg, 1, targets, rhs);
+    return statement;
   }
+
+  union ast_expression *targets[] = { target };
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_assign, AST_STATEMENT_ASSIGN, location);
+  statement->assign.num_targets = 1;
+  statement->assign.targets = ast_expression_array_copy(s, targets, 1);
+  statement->assign.value = rhs;
+  return statement;
 }
 
-static void parse_expression_statement(struct parser_state *s)
+static union ast_statement *parse_expression_statement(struct parser_state *s)
 {
+  struct location       location = scanner_location(&s->scanner);
   union ast_expression *expression = parse_star_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
     /* TODO Check: check that expression is either:
      *  NAME |  ( single_target ) | single_subscript_attribute_target
      */
     union ast_expression *annotation = parse_expression(s, PREC_EXPRESSION);
-
+    union ast_expression *value = NULL;
     if (accept(s, '=')) {
       /* "annotated_rhs": yield | star_expressions */
-      union ast_expression *rhs = parse_star_expressions(s, PREC_EXPRESSION);
-      union ast_expression *targets[] = { expression };
-      emit_assign_statement(&s->cg, 1, targets, rhs);
+      value = parse_star_expressions(s, PREC_EXPRESSION);
     }
 
-    emit_annotation(&s->cg, expression, annotation);
-    return;
+    union ast_statement *statement = ast_allocate_statement(
+        s, struct ast_statement_annotation, AST_STATEMENT_ANNOTATION,
+        location);
+    statement->annotation.target = expression;
+    statement->annotation.annotation = annotation;
+    statement->annotation.value = value;
+    return statement;
   }
   if (peek(s) == ',') {
     expression = parse_expression_list_helper(
@@ -1795,21 +1873,26 @@ static void parse_expression_statement(struct parser_state *s)
     const struct postfix_expression_parser *parser = &postfix_parsers[peek(s)];
     if (parser->precedence == PREC_ASSIGN) {
       expression = parser->func(s, expression);
-      emit_binexpr_assign_statement(&s->cg, expression);
-      return;
+      union ast_statement *statement = ast_allocate_statement(
+          s, struct ast_statement_augassign, AST_STATEMENT_AUGASSIGN, location);
+      statement->augassign.expression = expression;
+      return statement;
     }
   }
 
   if (peek(s) == '=') {
-    parse_assignment(s, expression);
-    return;
+    return parse_assignment(s, expression, location);
   }
 
-  emit_expression_statement(&s->cg, expression);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_expression, AST_STATEMENT_EXPRESSION, location);
+  statement->expression_stmt.expression = expression;
+  return statement;
 }
 
-static void parse_assert(struct parser_state *s)
+static union ast_statement *parse_assert(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_assert);
 
   union ast_expression *expression = parse_expression(s, PREC_NAMED);
@@ -1818,37 +1901,33 @@ static void parse_assert(struct parser_state *s)
     message = parse_expression(s, PREC_NAMED);
   }
 
-  emit_assert(&s->cg, expression, message);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_assert, AST_STATEMENT_ASSERT, location);
+  statement->assertion.expression = expression;
+  statement->assertion.message = message;
+  return statement;
 }
 
-static void parse_break(struct parser_state *s)
+static union ast_statement *parse_break(struct parser_state *s)
 {
-  if (!emit_break(&s->cg)) {
-    struct location location = scanner_location(&s->scanner);
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_break);
-    diag_frag(s->d, " outside loop");
-    diag_end(s->d);
-  }
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_break);
+  return ast_allocate_statement(s, struct ast_statement_break,
+                                AST_STATEMENT_BREAK, location);
 }
 
-static void parse_continue(struct parser_state *s)
+static union ast_statement *parse_continue(struct parser_state *s)
 {
-  if (!emit_continue(&s->cg)) {
-    struct location location = scanner_location(&s->scanner);
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_continue);
-    diag_frag(s->d, " outside loop");
-    diag_end(s->d);
-  }
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_continue);
+  return ast_allocate_statement(s, struct ast_statement_continue,
+                                AST_STATEMENT_CONTINUE, location);
 }
 
-static void parse_del(struct parser_state *s)
+static union ast_statement *parse_del(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_del);
-  struct location       location = scanner_location(&s->scanner);
   union ast_expression *targets = parse_expression(s, PREC_OR);
   if (peek(s) == ',') {
     targets = parse_expression_list_helper(s, AST_EXPRESSION_LIST, targets,
@@ -1857,7 +1936,11 @@ static void parse_del(struct parser_state *s)
   }
   targets = check_assignment_target(s, targets, location, /*is_del=*/true,
                                     /*show_equal_hint=*/false);
-  emit_del(&s->cg, targets);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_del, AST_STATEMENT_DEL, location);
+  statement->del_stmt.targets = targets;
+  return statement;
 }
 
 static struct dotted_name *parse_dotted_name(struct parser_state *s)
@@ -1877,8 +1960,9 @@ static struct dotted_name *parse_dotted_name(struct parser_state *s)
   return result;
 }
 
-static void parse_from_import_statement(struct parser_state *s)
+static union ast_statement *parse_from_import_statement(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_from);
 
   unsigned num_prefix_dots = 0;
@@ -1898,8 +1982,16 @@ static void parse_from_import_statement(struct parser_state *s)
   expect(s, T_import);
 
   if (accept(s, '*')) {
-    emit_from_import_star_statement(&s->cg, num_prefix_dots, module);
-    return;
+    union ast_statement *statement = ast_allocate_statement(
+        s, struct ast_statement_from_import, AST_STATEMENT_FROM_IMPORT,
+        location);
+    statement->from_import_stmt.num_prefix_dots = num_prefix_dots;
+    statement->from_import_stmt.module = module;
+    statement->from_import_stmt.import_star = true;
+    statement->from_import_stmt.num_items = 0;
+    statement->from_import_stmt.items = NULL;
+    idynarray_free(&pairs);
+    return statement;
   }
 
   bool braced = accept(s, '(');
@@ -1920,28 +2012,61 @@ static void parse_from_import_statement(struct parser_state *s)
 
   if (braced) expect(s, ')');
 
-  unsigned num_pairs = idynarray_length(&pairs, struct from_import_item);
-  emit_from_import_statement(&s->cg, num_prefix_dots, module, num_pairs,
-                             idynarray_data(&pairs));
+  unsigned                num_items = idynarray_length(&pairs, struct from_import_item);
+  struct from_import_item *items = NULL;
+  if (num_items > 0) {
+    size_t size = num_items * sizeof(*items);
+    items = (struct from_import_item *)arena_allocate(
+        &s->ast, size, alignof(struct from_import_item));
+    memcpy(items, idynarray_data(&pairs), size);
+  }
+  idynarray_free(&pairs);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_from_import, AST_STATEMENT_FROM_IMPORT,
+      location);
+  statement->from_import_stmt.num_prefix_dots = num_prefix_dots;
+  statement->from_import_stmt.module = module;
+  statement->from_import_stmt.import_star = false;
+  statement->from_import_stmt.num_items = num_items;
+  statement->from_import_stmt.items = items;
+  return statement;
 }
 
-static void parse_global_statement(struct parser_state *s)
+static union ast_statement *parse_global_statement(struct parser_state *s)
 {
+  struct location       location = scanner_location(&s->scanner);
+  struct symbol        *inline_storage[8];
+  struct idynarray      names;
+  idynarray_init(&names, inline_storage, sizeof(inline_storage));
+
   eat(s, T_global);
   do {
     struct symbol *name = parse_identifier(s);
-    if (!emit_global_statement(&s->cg, name)) {
-      diag_begin_error(s->d, scanner_location(&s->scanner));
-      diag_frag(s->d, "name ");
-      diag_symbol(s->d, name);
-      diag_frag(s->d, " is assigned to before global declaration");
-      diag_end(s->d);
-    }
+    *idynarray_append(&names, struct symbol *) = name;
   } while (accept(s, ','));
+
+  unsigned num_names = idynarray_length(&names, struct symbol *);
+  size_t   size = num_names * sizeof(struct symbol *);
+  struct symbol **name_arr = (struct symbol **)arena_allocate(
+      &s->ast, size, alignof(struct symbol *));
+  memcpy(name_arr, idynarray_data(&names), size);
+  idynarray_free(&names);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_global, AST_STATEMENT_GLOBAL, location);
+  statement->global_stmt.num_names = num_names;
+  statement->global_stmt.names = name_arr;
+  return statement;
 }
 
-static void parse_import_statement(struct parser_state *s)
+static union ast_statement *parse_import_statement(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
+  struct ast_import_item inline_storage[8];
+  struct idynarray       items;
+  idynarray_init(&items, inline_storage, sizeof(inline_storage));
+
   eat(s, T_import);
 
   do {
@@ -1950,32 +2075,67 @@ static void parse_import_statement(struct parser_state *s)
     if (accept(s, T_as)) {
       as = parse_identifier(s);
     }
-    emit_import_statement(&s->cg, dotted_name, as);
+    struct ast_import_item *item
+        = idynarray_append(&items, struct ast_import_item);
+    item->module = dotted_name;
+    item->as = as;
   } while (accept(s, ','));
+
+  unsigned num_items = idynarray_length(&items, struct ast_import_item);
+  struct ast_import_item *items_arr = NULL;
+  if (num_items > 0) {
+    size_t size = num_items * sizeof(struct ast_import_item);
+    items_arr = (struct ast_import_item *)arena_allocate(
+        &s->ast, size, alignof(struct ast_import_item));
+    memcpy(items_arr, idynarray_data(&items), size);
+  }
+  idynarray_free(&items);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_import, AST_STATEMENT_IMPORT, location);
+  statement->import_stmt.num_items = num_items;
+  statement->import_stmt.items = items_arr;
+  return statement;
 }
 
-static void parse_nonlocal_statement(struct parser_state *s)
+static union ast_statement *parse_nonlocal_statement(struct parser_state *s)
 {
+  struct location       location = scanner_location(&s->scanner);
+  struct symbol        *inline_storage[8];
+  struct idynarray      names;
+  idynarray_init(&names, inline_storage, sizeof(inline_storage));
+
   eat(s, T_nonlocal);
   do {
     struct symbol *name = parse_identifier(s);
-    if (!emit_nonlocal_statement(&s->cg, name)) {
-      diag_begin_error(s->d, scanner_location(&s->scanner));
-      diag_frag(s->d, "name ");
-      diag_symbol(s->d, name);
-      diag_frag(s->d, " is assigned to before nonlocal declaration");
-      diag_end(s->d);
-    }
+    *idynarray_append(&names, struct symbol *) = name;
   } while (accept(s, ','));
+
+  unsigned num_names = idynarray_length(&names, struct symbol *);
+  size_t   size = num_names * sizeof(struct symbol *);
+  struct symbol **name_arr = (struct symbol **)arena_allocate(
+      &s->ast, size, alignof(struct symbol *));
+  memcpy(name_arr, idynarray_data(&names), size);
+  idynarray_free(&names);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_nonlocal, AST_STATEMENT_NONLOCAL, location);
+  statement->nonlocal_stmt.num_names = num_names;
+  statement->nonlocal_stmt.names = name_arr;
+  return statement;
 }
 
-static void parse_pass(struct parser_state *s)
+static union ast_statement *parse_pass(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_pass);
+  return ast_allocate_statement(s, struct ast_statement_pass,
+                                AST_STATEMENT_PASS, location);
 }
 
-static void parse_raise(struct parser_state *s)
+static union ast_statement *parse_raise(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_raise);
 
   union ast_expression *expression = NULL;
@@ -1986,10 +2146,15 @@ static void parse_raise(struct parser_state *s)
       from = parse_expression(s, PREC_EXPRESSION);
     }
   }
-  emit_raise_statement(&s->cg, expression, from);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_raise, AST_STATEMENT_RAISE, location);
+  statement->raise_stmt.expression = expression;
+  statement->raise_stmt.from = from;
+  return statement;
 }
 
-static void parse_return(struct parser_state *s)
+static union ast_statement *parse_return(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_return);
@@ -2001,113 +2166,110 @@ static void parse_return(struct parser_state *s)
     expression = NULL;
   }
 
-  if (!cg_in_function(&s->cg)) {
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_return);
-    diag_frag(s->d, " outside function");
-    diag_end(s->d);
-  }
-
-  emit_return_statement(&s->cg, expression);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_return, AST_STATEMENT_RETURN, location);
+  statement->return_stmt.expression = expression;
+  return statement;
 }
 
-static void parse_yield_statement(struct parser_state *s)
+static union ast_statement *parse_yield_statement(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_yield);
+  if (s->current_function_has_yield != NULL) {
+    *s->current_function_has_yield = true;
+  }
 
   if (accept(s, T_from)) {
     union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
-    emit_yield_from_statement(&s->cg, expression);
-    return;
+    union ast_statement *statement = ast_allocate_statement(
+        s, struct ast_statement_yield, AST_STATEMENT_YIELD_FROM, location);
+    statement->yield_stmt.expression = expression;
+    return statement;
   }
   union ast_expression *expression = NULL;
   if (is_expression_start(peek(s)) || peek(s) == '*') {
     expression = parse_star_expressions(s, PREC_EXPRESSION);
   }
-  emit_yield_statement(&s->cg, expression);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_yield, AST_STATEMENT_YIELD, location);
+  statement->yield_stmt.expression = expression;
+  return statement;
 }
 
-static void parse_simple_statement(struct parser_state *s)
+static union ast_statement *nullable parse_simple_statement(struct parser_state *s)
 {
   switch (peek(s)) {
   case EXPRESSION_START_CASES:
-    parse_expression_statement(s);
-    break;
+    return parse_expression_statement(s);
   case T_assert:
-    parse_assert(s);
-    break;
+    return parse_assert(s);
   case T_break:
-    parse_break(s);
-    break;
+    return parse_break(s);
   case T_continue:
-    parse_continue(s);
-    break;
+    return parse_continue(s);
   case T_del:
-    parse_del(s);
-    break;
+    return parse_del(s);
   case T_from:
-    parse_from_import_statement(s);
-    break;
+    return parse_from_import_statement(s);
   case T_global:
-    parse_global_statement(s);
-    break;
+    return parse_global_statement(s);
   case T_import:
-    parse_import_statement(s);
-    break;
+    return parse_import_statement(s);
   case T_nonlocal:
-    parse_nonlocal_statement(s);
-    break;
+    return parse_nonlocal_statement(s);
   case T_pass:
-    parse_pass(s);
-    break;
+    return parse_pass(s);
   case T_raise:
-    parse_raise(s);
-    break;
+    return parse_raise(s);
   case T_return:
-    parse_return(s);
-    break;
+    return parse_return(s);
   case T_yield:
-    parse_yield_statement(s);
-    break;
+    return parse_yield_statement(s);
   default:
     error_expected(s, "statement");
     eat_until_anchor(s);
+    return NULL;
   }
 }
 
-static void parse_simple_statements(struct parser_state *s)
+static struct ast_statement_list *parse_simple_statements(struct parser_state *s)
 {
+  union ast_statement *inline_storage[8];
+  struct idynarray     statements;
+  idynarray_init(&statements, inline_storage, sizeof(inline_storage));
+
   add_anchor(s, T_NEWLINE);
   do {
-    parse_simple_statement(s);
+    union ast_statement *statement = parse_simple_statement(s);
+    if (statement != NULL) {
+      *idynarray_append(&statements, union ast_statement *) = statement;
+    }
   } while (accept(s, ';') && peek(s) != T_NEWLINE);
   remove_anchor(s, T_NEWLINE);
   expect(s, T_NEWLINE);
+
+  struct ast_statement_list *result = ast_statement_list_from_array(
+      s, idynarray_data(&statements),
+      idynarray_length(&statements, union ast_statement *));
+  idynarray_free(&statements);
+  return result;
 }
 
-static void parse_statement(struct parser_state *s);
+static struct ast_statement_list *parse_suite(struct parser_state *s);
+static void parse_statement(struct parser_state *s, struct idynarray *statements);
 
-static void parse_suite(struct parser_state *s)
+static void append_statement_list(struct idynarray *statements,
+                                  struct ast_statement_list *list)
 {
-#ifndef NDEBUG
-  unsigned prev_stacksize = s->cg.code.stacksize;
-#endif
-  if (accept(s, T_NEWLINE)) {
-    if (peek(s) != T_INDENT) {
-      error_expected_tok1(s, T_INDENT);
-      /* abort early because the following loop wouldn't terminate without a
-       * matching T_DEDENT. */
-      return;
-    }
-    eat(s, T_INDENT);
-    do {
-      parse_statement(s);
-      assert(s->cg.code.stacksize == prev_stacksize);
-    } while (!accept(s, T_DEDENT));
-  } else {
-    parse_simple_statements(s);
-    assert(s->cg.code.stacksize == prev_stacksize);
+  for (unsigned i = 0; i < list->num_statements; ++i) {
+    *idynarray_append(statements, union ast_statement *) = list->statements[i];
   }
+}
+
+static struct ast_statement_list *empty_statement_list(struct parser_state *s)
+{
+  return ast_statement_list_from_array(s, NULL, 0);
 }
 
 static void parse_type_parameters(struct parser_state *s)
@@ -2117,7 +2279,10 @@ static void parse_type_parameters(struct parser_state *s)
   }
 }
 
-static void parse_class(struct parser_state *s, unsigned num_decorators)
+static union ast_statement *parse_class(struct parser_state    *s,
+                                        struct location         location,
+                                        unsigned                num_decorators,
+                                        union ast_expression **decorators)
 {
   eat(s, T_class);
   struct symbol *name = parse_identifier(s);
@@ -2135,15 +2300,23 @@ static void parse_class(struct parser_state *s, unsigned num_decorators)
     call->call.num_arguments = 0;
   }
 
-  emit_class_begin(&s->cg, name);
-
   expect(s, ':');
-  parse_suite(s);
+  struct ast_statement_list *body = parse_suite(s);
 
-  emit_class_end(&s->cg, name, &call->call, num_decorators);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_class, AST_STATEMENT_CLASS, location);
+  statement->class_stmt.name = name;
+  statement->class_stmt.call = &call->call;
+  statement->class_stmt.body = body;
+  statement->class_stmt.num_decorators = num_decorators;
+  statement->class_stmt.decorators = decorators;
+  return statement;
 }
 
-static void parse_def(struct parser_state *s, unsigned num_decorators)
+static union ast_statement *parse_def(struct parser_state    *s,
+                                      struct location         location,
+                                      unsigned                num_decorators,
+                                      union ast_expression **decorators)
 {
   bool async = false;
   if (accept(s, T_async)) {
@@ -2158,12 +2331,7 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
   unsigned positional_only_argcount;
 
   expect(s, '(');
-
-  parse_parameters(s, &parameters, &positional_only_argcount,
-                   /*end=*/')');
-
-  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
-  struct parameter *parameter_arr = idynarray_data(&parameters);
+  parse_parameters(s, &parameters, &positional_only_argcount, /*end=*/')');
 
   union ast_expression *return_type = NULL;
   if (accept(s, T_MINUS_GREATER_THAN)) {
@@ -2171,34 +2339,57 @@ static void parse_def(struct parser_state *s, unsigned num_decorators)
   }
   expect(s, ':');
 
-  struct make_function_state state;
-  emit_def_begin(&s->cg, &state, num_parameters, parameter_arr,
-                 positional_only_argcount, return_type);
+  bool has_yield = false;
+  bool *saved_function_has_yield = s->current_function_has_yield;
+  s->current_function_has_yield = &has_yield;
+  struct ast_statement_list *body = parse_suite(s);
+  s->current_function_has_yield = saved_function_has_yield;
+
+  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
+  struct parameter *parameter_arr = ast_parameter_array_copy_dyn(s, &parameters);
   idynarray_free(&parameters);
 
-  parse_suite(s);
-
-  emit_def_end(&s->cg, &state, name, num_decorators, async);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_def, AST_STATEMENT_DEF, location);
+  statement->def_stmt.name = name;
+  statement->def_stmt.async = async;
+  statement->def_stmt.has_yield = has_yield;
+  statement->def_stmt.positional_only_argcount = positional_only_argcount;
+  statement->def_stmt.num_parameters = num_parameters;
+  statement->def_stmt.parameters = parameter_arr;
+  statement->def_stmt.return_type = return_type;
+  statement->def_stmt.body = body;
+  statement->def_stmt.num_decorators = num_decorators;
+  statement->def_stmt.decorators = decorators;
+  return statement;
 }
 
-static void parse_decorator(struct parser_state *s, unsigned num_decorators)
+static union ast_statement *nullable parse_decorator_statement(
+    struct parser_state *s)
 {
-  eat(s, '@');
-  union ast_expression *expression = parse_expression(s, PREC_NAMED);
-  expect(s, T_NEWLINE);
-  emit_expression(&s->cg, expression);
+  struct location location = scanner_location(&s->scanner);
+  union ast_expression *inline_storage[4];
+  struct idynarray      decorators;
+  idynarray_init(&decorators, inline_storage, sizeof(inline_storage));
+
+  do {
+    eat(s, '@');
+    union ast_expression *expression = parse_expression(s, PREC_NAMED);
+    expect(s, T_NEWLINE);
+    *idynarray_append(&decorators, union ast_expression *) = expression;
+  } while (peek(s) == '@');
+
+  unsigned num_decorators = idynarray_length(&decorators, union ast_expression *);
+  union ast_expression **decorator_arr
+      = ast_expression_array_copy_dyn(s, &decorators);
+  idynarray_free(&decorators);
 
   switch (peek(s)) {
-  case '@':
-    parse_decorator(s, num_decorators + 1);
-    return;
   case T_class:
-    parse_class(s, num_decorators + 1);
-    return;
+    return parse_class(s, location, num_decorators, decorator_arr);
   case T_async:
   case T_def:
-    parse_def(s, num_decorators + 1);
-    return;
+    return parse_def(s, location, num_decorators, decorator_arr);
   default:
     diag_begin_error(s->d, scanner_location(&s->scanner));
     diag_frag(s->d, "expected ");
@@ -2210,14 +2401,14 @@ static void parse_decorator(struct parser_state *s, unsigned num_decorators)
     diag_frag(s->d, " after decorator, got ");
     diag_token(s->d, &s->scanner.token);
     diag_end(s->d);
-    return;
+    return NULL;
   }
 }
 
-static void parse_for(struct parser_state *s)
+static union ast_statement *parse_for(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_for);
-  struct location       location = scanner_location(&s->scanner);
   union ast_expression *targets = parse_star_expressions(s, PREC_OR);
   targets = check_assignment_target(s, targets, location, /*is_del=*/false,
                                     /*show_equal_hint=*/false);
@@ -2235,78 +2426,98 @@ static void parse_for(struct parser_state *s)
     expression = invalid_expression(s);
   }
   expect(s, ':');
+  struct ast_statement_list *body = parse_suite(s);
 
-  struct for_while_state state;
-  emit_for_begin(&s->cg, &state, targets, expression);
-
-  parse_suite(s);
-
-  emit_for_else(&s->cg, &state);
+  struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
     expect(s, ':');
-    parse_suite(s);
+    else_body = parse_suite(s);
   }
 
-  emit_for_end(&s->cg, &state);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_for, AST_STATEMENT_FOR, location);
+  statement->for_stmt.targets = targets;
+  statement->for_stmt.expression = expression;
+  statement->for_stmt.body = body;
+  statement->for_stmt.else_body = else_body;
+  return statement;
 }
 
-static void parse_if(struct parser_state *s)
+static union ast_statement *parse_if(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_if);
-  union ast_expression *expression = parse_expression(s, PREC_NAMED);
+  union ast_expression *condition = parse_expression(s, PREC_NAMED);
   expect(s, ':');
+  struct ast_statement_list *body = parse_suite(s);
 
-  struct if_state state;
-  emit_if_begin(&s->cg, &state, expression);
-
-  parse_suite(s);
+  struct ast_if_elif inline_storage[4];
+  struct idynarray   elifs;
+  idynarray_init(&elifs, inline_storage, sizeof(inline_storage));
 
   while (accept(s, T_elif)) {
-    union ast_expression *expression = parse_expression(s, PREC_NAMED);
+    struct ast_if_elif *elif_stmt = idynarray_append(&elifs, struct ast_if_elif);
+    elif_stmt->condition = parse_expression(s, PREC_NAMED);
     expect(s, ':');
-
-    emit_if_elif(&s->cg, &state, expression);
-    parse_suite(s);
+    elif_stmt->body = parse_suite(s);
   }
 
+  struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
     expect(s, ':');
-
-    emit_if_else(&s->cg, &state);
-    parse_suite(s);
+    else_body = parse_suite(s);
   }
-  emit_if_end(&s->cg, &state);
+
+  unsigned            num_elifs = idynarray_length(&elifs, struct ast_if_elif);
+  struct ast_if_elif *elif_arr = NULL;
+  if (num_elifs > 0) {
+    size_t size = num_elifs * sizeof(struct ast_if_elif);
+    elif_arr = (struct ast_if_elif *)arena_allocate(
+        &s->ast, size, alignof(struct ast_if_elif));
+    memcpy(elif_arr, idynarray_data(&elifs), size);
+  }
+  idynarray_free(&elifs);
+
+  union ast_statement *statement
+      = ast_allocate_statement(s, struct ast_statement_if, AST_STATEMENT_IF, location);
+  statement->if_stmt.condition = condition;
+  statement->if_stmt.body = body;
+  statement->if_stmt.num_elifs = num_elifs;
+  statement->if_stmt.elifs = elif_arr;
+  statement->if_stmt.else_body = else_body;
+  return statement;
 }
 
-static void parse_try(struct parser_state *s)
+static union ast_statement *parse_try(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_try);
   expect(s, ':');
+  struct ast_statement_list *body = parse_suite(s);
 
-  struct try_state state;
-  emit_try_body_begin(&s->cg, &state);
-  parse_suite(s);
-  emit_try_body_end(&s->cg, &state);
+  struct ast_try_except inline_storage[4];
+  struct idynarray      excepts;
+  idynarray_init(&excepts, inline_storage, sizeof(inline_storage));
 
-  bool had_except = false;
   while (accept(s, T_except)) {
-    union ast_expression *match = NULL;
-    struct symbol        *as = NULL;
+    struct ast_try_except *except_stmt
+        = idynarray_append(&excepts, struct ast_try_except);
+    except_stmt->match = NULL;
+    except_stmt->as = NULL;
+
     if (peek(s) != ':') {
-      match = parse_expression(s, PREC_TEST);
+      except_stmt->match = parse_expression(s, PREC_TEST);
       if (accept(s, T_as)) {
-        as = parse_identifier(s);
+        except_stmt->as = parse_identifier(s);
       }
     }
     expect(s, ':');
-
-    emit_try_except_begin(&s->cg, &state, match, as);
-    parse_suite(s);
-    emit_try_except_end(&s->cg, &state, as);
-    had_except = true;
+    except_stmt->body = parse_suite(s);
   }
 
-  bool had_else = false;
+  bool had_except = idynarray_length(&excepts, struct ast_try_except) > 0;
+
+  struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
     if (!had_except) {
       diag_begin_error(s->d, scanner_location(&s->scanner));
@@ -2318,21 +2529,13 @@ static void parse_try(struct parser_state *s)
       diag_end(s->d);
     }
     expect(s, ':');
-
-    emit_try_else_begin(&s->cg, &state);
-    parse_suite(s);
-    emit_try_else_end(&s->cg, &state);
-    had_else = true;
+    else_body = parse_suite(s);
   }
 
-  bool had_finally = false;
+  struct ast_statement_list *finally_body = NULL;
   if (accept(s, T_finally)) {
     expect(s, ':');
-
-    emit_try_finally_begin(&s->cg, &state);
-    parse_suite(s);
-    emit_try_finally_end(&s->cg, &state);
-    had_finally = true;
+    finally_body = parse_suite(s);
   }
 
   while (peek(s) == T_except || peek(s) == T_else) {
@@ -2342,11 +2545,10 @@ static void parse_try(struct parser_state *s)
     diag_token_kind(s->d, T_finally);
     diag_end(s->d);
     next_token(s);
-
     eat_until_anchor(s);
   }
 
-  if (!had_except && !had_finally && !had_else) {
+  if (!had_except && finally_body == NULL && else_body == NULL) {
     diag_begin_error(s->d, scanner_location(&s->scanner));
     diag_token_kind(s->d, T_try);
     diag_frag(s->d, "-block requires an ");
@@ -2357,100 +2559,162 @@ static void parse_try(struct parser_state *s)
     diag_end(s->d);
   }
 
-  emit_try_end(&s->cg, &state);
+  unsigned               num_excepts = idynarray_length(&excepts, struct ast_try_except);
+  struct ast_try_except *except_arr = NULL;
+  if (num_excepts > 0) {
+    size_t size = num_excepts * sizeof(struct ast_try_except);
+    except_arr = (struct ast_try_except *)arena_allocate(
+        &s->ast, size, alignof(struct ast_try_except));
+    memcpy(except_arr, idynarray_data(&excepts), size);
+  }
+  idynarray_free(&excepts);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_try, AST_STATEMENT_TRY, location);
+  statement->try_stmt.body = body;
+  statement->try_stmt.num_excepts = num_excepts;
+  statement->try_stmt.excepts = except_arr;
+  statement->try_stmt.else_body = else_body;
+  statement->try_stmt.finally_body = finally_body;
+  return statement;
 }
 
-static void parse_while(struct parser_state *s)
+static union ast_statement *parse_while(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_while);
-  union ast_expression *expression = parse_expression(s, PREC_NAMED);
+  union ast_expression *condition = parse_expression(s, PREC_NAMED);
   expect(s, ':');
+  struct ast_statement_list *body = parse_suite(s);
 
-  struct for_while_state state;
-  emit_while_begin(&s->cg, &state, expression);
-
-  parse_suite(s);
-
-  emit_while_else(&s->cg, &state);
+  struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
     expect(s, ':');
-    parse_suite(s);
+    else_body = parse_suite(s);
   }
 
-  emit_while_end(&s->cg, &state);
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_while, AST_STATEMENT_WHILE, location);
+  statement->while_stmt.condition = condition;
+  statement->while_stmt.body = body;
+  statement->while_stmt.else_body = else_body;
+  return statement;
 }
 
-static void parse_with(struct parser_state *s)
+static union ast_statement *parse_with(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_with);
 
-  struct with_state inline_storage[4];
-  struct idynarray  cleanup_blocks;
-  idynarray_init(&cleanup_blocks, inline_storage, sizeof(inline_storage));
+  struct ast_with_item inline_storage[4];
+  struct idynarray     items;
+  idynarray_init(&items, inline_storage, sizeof(inline_storage));
 
   do {
-    union ast_expression *expression = parse_expression(s, PREC_TEST);
-    union ast_expression *targets = NULL;
+    struct ast_with_item *item = idynarray_append(&items, struct ast_with_item);
+    item->expression = parse_expression(s, PREC_TEST);
+    item->targets = NULL;
     if (accept(s, T_as)) {
-      targets = parse_expression(s, PREC_NAMED);
+      item->targets = parse_expression(s, PREC_NAMED);
       /* TODO: check_assignment_target */
     }
-
-    struct with_state *state
-        = idynarray_append(&cleanup_blocks, struct with_state);
-    emit_with_begin(&s->cg, state, expression, targets);
   } while (accept(s, ','));
   expect(s, ':');
+  struct ast_statement_list *body = parse_suite(s);
 
-  unsigned num_cleanup_blocks
-      = idynarray_length(&cleanup_blocks, struct with_state);
-  struct with_state *cleanup_blocks_arr = idynarray_data(&cleanup_blocks);
-
-  parse_suite(s);
-
-  for (unsigned i = num_cleanup_blocks; i-- > 0;) {
-    emit_with_end(&s->cg, &cleanup_blocks_arr[i]);
+  unsigned              num_items = idynarray_length(&items, struct ast_with_item);
+  struct ast_with_item *items_arr = NULL;
+  if (num_items > 0) {
+    size_t size = num_items * sizeof(struct ast_with_item);
+    items_arr = (struct ast_with_item *)arena_allocate(
+        &s->ast, size, alignof(struct ast_with_item));
+    memcpy(items_arr, idynarray_data(&items), size);
   }
-  idynarray_free(&cleanup_blocks);
+  idynarray_free(&items);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_statement_with, AST_STATEMENT_WITH, location);
+  statement->with_stmt.num_items = num_items;
+  statement->with_stmt.items = items_arr;
+  statement->with_stmt.body = body;
+  return statement;
 }
 
-static void parse_statement(struct parser_state *s)
+static struct ast_statement_list *parse_suite(struct parser_state *s)
+{
+  if (accept(s, T_NEWLINE)) {
+    if (peek(s) != T_INDENT) {
+      error_expected_tok1(s, T_INDENT);
+      /* Abort early because a matching T_DEDENT may never arrive. */
+      return empty_statement_list(s);
+    }
+    eat(s, T_INDENT);
+
+    union ast_statement *inline_storage[16];
+    struct idynarray     statements;
+    idynarray_init(&statements, inline_storage, sizeof(inline_storage));
+
+    do {
+      parse_statement(s, &statements);
+    } while (!accept(s, T_DEDENT));
+
+    struct ast_statement_list *result = ast_statement_list_from_array(
+        s, idynarray_data(&statements),
+        idynarray_length(&statements, union ast_statement *));
+    idynarray_free(&statements);
+    return result;
+  }
+
+  return parse_simple_statements(s);
+}
+
+static void parse_statement(struct parser_state *s, struct idynarray *statements)
 {
   add_anchor(s, T_NEWLINE);
   switch (peek(s)) {
-  case '@':
-    parse_decorator(s, /*num_decorators=*/0);
+  case '@': {
+    union ast_statement *statement = parse_decorator_statement(s);
+    if (statement != NULL) {
+      *idynarray_append(statements, union ast_statement *) = statement;
+    }
     break;
+  }
   case T_class:
-    parse_class(s, /*num_decorators=*/0);
+    *idynarray_append(statements, union ast_statement *)
+        = parse_class(s, scanner_location(&s->scanner), /*num_decorators=*/0,
+                      NULL);
     break;
   case T_async:
   case T_def:
-    parse_def(s, /*num_decorators=*/0);
+    *idynarray_append(statements, union ast_statement *)
+        = parse_def(s, scanner_location(&s->scanner), /*num_decorators=*/0,
+                    NULL);
     break;
   case T_for:
-    parse_for(s);
+    *idynarray_append(statements, union ast_statement *) = parse_for(s);
     break;
   case T_if:
-    parse_if(s);
+    *idynarray_append(statements, union ast_statement *) = parse_if(s);
     break;
   case T_try:
-    parse_try(s);
+    *idynarray_append(statements, union ast_statement *) = parse_try(s);
     break;
   case T_while:
-    parse_while(s);
+    *idynarray_append(statements, union ast_statement *) = parse_while(s);
     break;
   case T_with:
-    parse_with(s);
+    *idynarray_append(statements, union ast_statement *) = parse_with(s);
     break;
   case T_INVALID:
     next_token(s);
     break;
   case T_EOF:
     break;
-  default:
-    parse_simple_statements(s);
+  default: {
+    struct ast_statement_list *simple = parse_simple_statements(s);
+    append_statement_list(statements, simple);
     break;
+  }
   }
   remove_anchor(s, T_NEWLINE);
 }
@@ -2458,15 +2722,17 @@ static void parse_statement(struct parser_state *s)
 union object *parse(struct parser_state *s, const char *filename)
 {
   cg_init(&s->cg, s->scanner.symbol_table, filename, s->d);
-  emit_module_begin(&s->cg);
 
   next_token(s);
+
+  union ast_statement *inline_storage[32];
+  struct idynarray     statements;
+  idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
   add_anchor(s, T_EOF);
   while (peek(s) != T_EOF) {
     if (accept(s, T_NEWLINE)) continue;
-    parse_statement(s);
-    assert(s->cg.code.stacksize == 0);
+    parse_statement(s, &statements);
   }
 
 #ifndef NDEBUG
@@ -2479,6 +2745,13 @@ union object *parse(struct parser_state *s, const char *filename)
   }
 #endif
 
+  struct ast_statement_list *module = ast_statement_list_from_array(
+      s, idynarray_data(&statements),
+      idynarray_length(&statements, union ast_statement *));
+  idynarray_free(&statements);
+
+  emit_module_begin(&s->cg);
+  emit_statement_list(&s->cg, module);
   return emit_module_end(&s->cg);
 }
 

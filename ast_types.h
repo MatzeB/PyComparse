@@ -4,16 +4,28 @@
 #include <stdint.h>
 
 #include "nullable.h"
+#include "scanner_location.h"
 
 ASSUME_NONNULL_BEGIN
 
 union object;
 union ast_expression;
+union ast_statement;
 struct symbol;
 
 struct argument {
   union ast_expression   *expression;
   struct symbol *nullable name;
+};
+
+struct dotted_name {
+  unsigned               num_symbols;
+  struct symbol *nonnull symbols[];
+};
+
+struct from_import_item {
+  struct symbol          *name;
+  struct symbol *nullable as;
 };
 
 enum parameter_variant {
@@ -52,6 +64,11 @@ struct generator_expression_part {
 
 struct ast_node_base {
   uint8_t type;
+};
+
+struct ast_statement_base {
+  uint8_t         type;
+  struct location location;
 };
 
 struct ast_attr {
@@ -181,6 +198,214 @@ union ast_expression {
   struct ast_slice                slice;
   struct ast_unexpr               unexpr;
   struct ast_yield                yield;
+};
+
+struct ast_statement_list {
+  unsigned                     num_statements;
+  union ast_statement *nonnull statements[];
+};
+
+struct ast_statement_annotation {
+  struct ast_statement_base base;
+  union ast_expression     *target;
+  union ast_expression     *annotation;
+  union ast_expression     *nullable value;
+};
+
+struct ast_statement_assert {
+  struct ast_statement_base base;
+  union ast_expression     *expression;
+  union ast_expression     *nullable message;
+};
+
+struct ast_statement_assign {
+  struct ast_statement_base       base;
+  unsigned                        num_targets;
+  union ast_expression *nonnull   value;
+  union ast_expression *nonnull *nonnull targets;
+};
+
+struct ast_statement_augassign {
+  struct ast_statement_base base;
+  union ast_expression     *expression;
+};
+
+struct ast_statement_break {
+  struct ast_statement_base base;
+};
+
+struct ast_statement_class {
+  struct ast_statement_base       base;
+  struct symbol                  *name;
+  struct ast_call                *call;
+  struct ast_statement_list      *body;
+  unsigned                        num_decorators;
+  union ast_expression *nonnull *nullable decorators;
+};
+
+struct ast_statement_continue {
+  struct ast_statement_base base;
+};
+
+struct ast_statement_def {
+  struct ast_statement_base       base;
+  struct symbol                  *name;
+  bool                            async;
+  bool                            has_yield;
+  unsigned                        positional_only_argcount;
+  unsigned                        num_parameters;
+  struct parameter *nullable      parameters;
+  union ast_expression *nullable  return_type;
+  struct ast_statement_list      *body;
+  unsigned                        num_decorators;
+  union ast_expression *nonnull *nullable decorators;
+};
+
+struct ast_statement_del {
+  struct ast_statement_base base;
+  union ast_expression     *targets;
+};
+
+struct ast_statement_expression {
+  struct ast_statement_base base;
+  union ast_expression     *expression;
+};
+
+struct ast_statement_for {
+  struct ast_statement_base  base;
+  union ast_expression      *targets;
+  union ast_expression      *expression;
+  struct ast_statement_list *body;
+  struct ast_statement_list *nullable else_body;
+};
+
+struct ast_statement_from_import {
+  struct ast_statement_base          base;
+  unsigned                           num_prefix_dots;
+  struct dotted_name *nullable       module;
+  bool                               import_star;
+  unsigned                           num_items;
+  struct from_import_item *nullable  items;
+};
+
+struct ast_statement_global {
+  struct ast_statement_base base;
+  unsigned                  num_names;
+  struct symbol *nonnull *nonnull names;
+};
+
+struct ast_if_elif {
+  union ast_expression      *condition;
+  struct ast_statement_list *body;
+};
+
+struct ast_statement_if {
+  struct ast_statement_base        base;
+  union ast_expression            *condition;
+  struct ast_statement_list       *body;
+  unsigned                         num_elifs;
+  struct ast_if_elif *nullable     elifs;
+  struct ast_statement_list *nullable else_body;
+};
+
+struct ast_import_item {
+  struct dotted_name *module;
+  struct symbol *nullable as;
+};
+
+struct ast_statement_import {
+  struct ast_statement_base      base;
+  unsigned                       num_items;
+  struct ast_import_item *nullable items;
+};
+
+struct ast_statement_nonlocal {
+  struct ast_statement_base base;
+  unsigned                  num_names;
+  struct symbol *nonnull *nonnull names;
+};
+
+struct ast_statement_pass {
+  struct ast_statement_base base;
+};
+
+struct ast_statement_raise {
+  struct ast_statement_base       base;
+  union ast_expression *nullable  expression;
+  union ast_expression *nullable  from;
+};
+
+struct ast_statement_return {
+  struct ast_statement_base       base;
+  union ast_expression *nullable  expression;
+};
+
+struct ast_try_except {
+  union ast_expression *nullable  match;
+  struct symbol *nullable         as;
+  struct ast_statement_list      *body;
+};
+
+struct ast_statement_try {
+  struct ast_statement_base          base;
+  struct ast_statement_list         *body;
+  unsigned                           num_excepts;
+  struct ast_try_except *nullable    excepts;
+  struct ast_statement_list *nullable else_body;
+  struct ast_statement_list *nullable finally_body;
+};
+
+struct ast_statement_while {
+  struct ast_statement_base  base;
+  union ast_expression      *condition;
+  struct ast_statement_list *body;
+  struct ast_statement_list *nullable else_body;
+};
+
+struct ast_with_item {
+  union ast_expression      *expression;
+  union ast_expression *nullable targets;
+};
+
+struct ast_statement_with {
+  struct ast_statement_base      base;
+  unsigned                       num_items;
+  struct ast_with_item *nullable items;
+  struct ast_statement_list     *body;
+};
+
+struct ast_statement_yield {
+  struct ast_statement_base       base;
+  union ast_expression *nullable  expression;
+};
+
+union ast_statement {
+  uint8_t                    type;
+  struct ast_statement_base  base;
+
+  struct ast_statement_annotation annotation;
+  struct ast_statement_assert     assertion;
+  struct ast_statement_assign     assign;
+  struct ast_statement_augassign  augassign;
+  struct ast_statement_break      break_stmt;
+  struct ast_statement_class      class_stmt;
+  struct ast_statement_continue   continue_stmt;
+  struct ast_statement_def        def_stmt;
+  struct ast_statement_del        del_stmt;
+  struct ast_statement_expression expression_stmt;
+  struct ast_statement_for        for_stmt;
+  struct ast_statement_from_import from_import_stmt;
+  struct ast_statement_global      global_stmt;
+  struct ast_statement_if          if_stmt;
+  struct ast_statement_import      import_stmt;
+  struct ast_statement_nonlocal    nonlocal_stmt;
+  struct ast_statement_pass        pass_stmt;
+  struct ast_statement_raise       raise_stmt;
+  struct ast_statement_return      return_stmt;
+  struct ast_statement_try         try_stmt;
+  struct ast_statement_while       while_stmt;
+  struct ast_statement_with        with_stmt;
+  struct ast_statement_yield       yield_stmt;
 };
 
 ASSUME_NONNULL_END

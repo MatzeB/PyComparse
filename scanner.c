@@ -153,6 +153,19 @@ static void eat_char(struct scanner_state *s, int c)
   next_char(s);
 }
 
+static void pushback_char(struct scanner_state *s, int c)
+{
+  assert(c != C_EOF);
+  assert(s->c == c);
+  assert(s->read_buffer != NULL);
+  assert(s->p != NULL);
+  assert(s->buffer_end != NULL);
+  assert(s->p > s->read_buffer && s->p <= s->buffer_end);
+  assert((unsigned char)s->p[-1] == (unsigned char)c);
+  --s->p;
+  s->c = c;
+}
+
 static void arena_grow_utf8_codepoint(struct arena *strings,
                                       uint32_t      codepoint)
 {
@@ -394,7 +407,7 @@ static void scan_binary_integer(struct scanner_state *s)
       }
       continue;
     default:
-      if (end_number_literal(s, value, last, &had_error, "hexadecimal")) {
+      if (end_number_literal(s, value, last, &had_error, "binary")) {
         continue;
       }
       return;
@@ -1347,8 +1360,11 @@ begin_new_line:
           next_char(s);
           s->token.kind = T_DOT_DOT_DOT;
         } else {
-          // TODO: pushback? just for this?
-          s->token.kind = T_DOT_DOT_DOT;
+          if (s->c != C_EOF) {
+            pushback_char(s, s->c);
+          }
+          s->token.kind = '.';
+          s->c = '.';
         }
         return;
       default:
@@ -1400,7 +1416,9 @@ begin_new_line:
       /* fallthrough */
     case ')':
     case ']':
-      --s->paren_level;
+      if (s->paren_level > 0) {
+        --s->paren_level;
+      }
       goto single_char_token;
 
     case ',':
@@ -1462,6 +1480,9 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
   size_t read_buffer_size = 16 * 1024 - 16;
   memset(s, 0, sizeof(*s));
   s->read_buffer = malloc(read_buffer_size);
+  if (s->read_buffer == NULL) {
+    internal_error("out of memory");
+  }
   s->read_buffer_size = read_buffer_size;
   s->input = input;
   s->filename = filename;

@@ -3,6 +3,7 @@
 
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "util.h"
 
 struct symbol_table_bucket {
   struct symbol *symbol;
@@ -55,6 +56,9 @@ static void symbol_table_resize(struct symbol_table *symbol_table,
   struct symbol_table_bucket *old_buckets = symbol_table->buckets;
   unsigned num_old_buckets = hash_set_num_buckets(&symbol_table->set);
   symbol_table->buckets = calloc(new_size, sizeof(symbol_table->buckets[0]));
+  if (symbol_table->buckets == NULL) {
+    internal_error("out of memory");
+  }
   hash_set_init(&symbol_table->set, new_size);
   for (unsigned i = 0; i < num_old_buckets; ++i) {
     struct symbol_table_bucket *bucket = &old_buckets[i];
@@ -62,6 +66,7 @@ static void symbol_table_resize(struct symbol_table *symbol_table,
       symbol_table_insert_new(symbol_table, bucket->symbol, bucket->hash);
     }
   }
+  free(old_buckets);
 }
 
 struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
@@ -111,6 +116,9 @@ void symbol_table_init(struct symbol_table *symbol_table)
   hash_set_init(&symbol_table->set, num_buckets);
   symbol_table->buckets
       = calloc(num_buckets, sizeof(symbol_table->buckets[0]));
+  if (symbol_table->buckets == NULL) {
+    internal_error("out of memory");
+  }
 
 #define TCHAR(val, name, desc)
 #define TDES(name, desc)

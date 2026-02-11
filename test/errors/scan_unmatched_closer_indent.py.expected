@@ -1,0 +1,4 @@
+test/errors/scan_unmatched_closer_indent.py:1 error: expected statement, got `)`
+test/errors/scan_unmatched_closer_indent.py:2 error: expected statement, got indent
+test/errors/scan_unmatched_closer_indent.py:3 error: expected statement, got dedent
+test/errors/scan_unmatched_closer_indent.py:3 error: expected new line, got end of file

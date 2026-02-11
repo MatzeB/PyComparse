@@ -1,0 +1,1 @@
+test/errors/nonlocal___class___missing.py:1 error: no binding for nonlocal `__class__` found

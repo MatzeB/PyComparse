@@ -18,3 +18,8 @@ for t in test/errors/*.py; do
     fi
     diff -U 100 $t.expected /tmp/errors.txt
 done
+
+for t in test/compile_only/*.py; do
+    echo "...$t"
+    ${PARSER_TEST} $t > /tmp/test.pyc
+done

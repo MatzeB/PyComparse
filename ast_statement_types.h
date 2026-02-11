@@ -67,6 +67,8 @@ struct ast_class {
   struct symbol * nonnull * nullable        scope_globals;
   unsigned                                  num_scope_locals;
   struct symbol * nonnull * nullable        scope_locals;
+  unsigned                                  num_scope_cellvars;
+  struct symbol * nonnull * nullable        scope_cellvars;
   unsigned                                  num_scope_freevars;
   struct symbol * nonnull * nullable        scope_freevars;
 };

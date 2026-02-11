@@ -1,0 +1,1 @@
+test/errors/expr_await_non_async.py error: `await` outside async function

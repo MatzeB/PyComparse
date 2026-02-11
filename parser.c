@@ -902,11 +902,14 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   union ast_expression *expression;
   if (peek(s) == T_yield) {
     eat(s, T_yield);
-    enum ast_expression_type type
-        = accept(s, T_from) ? AST_YIELD_FROM : AST_YIELD;
-    union ast_expression *yield_expression = NULL;
+    bool                     is_yield_from = accept(s, T_from);
+    enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
+    union ast_expression    *yield_expression = NULL;
     if (peek(s) != ')') {
       yield_expression = parse_star_expressions(s, PREC_EXPRESSION);
+    } else if (is_yield_from) {
+      error_expected(s, "expression");
+      yield_expression = invalid_expression(s);
     }
     expression = ast_allocate_expression(s, struct ast_expression_yield, type);
     expression->yield.value = yield_expression;

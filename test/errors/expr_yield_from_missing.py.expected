@@ -1,0 +1,1 @@
+test/errors/expr_yield_from_missing.py:2 error: expected expression, got `)`

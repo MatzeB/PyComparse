@@ -195,7 +195,7 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     unsigned                    num_expressions = list->num_expressions;
     if (list->has_star_expression) {
       if (num_expressions > 256) {
-        struct location location = { 12345 };
+        struct location location = INVALID_LOCATION;
         diag_begin_error(s->d, location);
         diag_frag(s->d, "too many expressions in star-unpacking assignment");
         diag_end(s->d);
@@ -352,6 +352,7 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
   emit_make_function_begin(s, &state, lambda->num_parameters,
                            lambda->parameters,
                            lambda->positional_only_argcount,
+                           /*async_function=*/false,
                            /*return_type=*/NULL);
   emit_expression(s, lambda->expression);
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
@@ -444,14 +445,13 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
 
 static void emit_await(struct cg_state *s, struct ast_unexpr *unexpr)
 {
-  if (!cg_in_function(s)) {
-    struct location location = { 12345 };
+  if (!cg_in_function(s) || !s->code.in_async_function) {
+    struct location location = INVALID_LOCATION;
     diag_begin_error(s->d, location);
     diag_token_kind(s->d, T_await);
-    diag_frag(s->d, " outside of function");
+    diag_frag(s->d, " outside async function");
     diag_end(s->d);
   }
-  /* TODO: check inside async function */
 
   emit_expression(s, unexpr->op);
   cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
@@ -740,11 +740,11 @@ static void emit_generator_expression(
   emit_generator_helper(s, generator_expression, "<genexpr>");
 }
 
-void emit_yield(struct cg_state *s, union ast_expression *nullable value)
+void emit_yield(struct cg_state *s, union ast_expression *nullable value,
+                struct location location)
 {
   s->code.flags |= CO_GENERATOR;
   if (!cg_in_function(s)) {
-    struct location location = { 12345 };
     diag_begin_error(s->d, location);
     diag_token_kind(s->d, T_yield);
     diag_frag(s->d, " outside function");
@@ -759,17 +759,28 @@ void emit_yield(struct cg_state *s, union ast_expression *nullable value)
   cg_op(s, OPCODE_YIELD_VALUE, 0);
 }
 
-void emit_yield_from(struct cg_state *s, union ast_expression *value)
+void emit_yield_from(struct cg_state *s, union ast_expression *nullable value,
+                     struct location location)
 {
   s->code.flags |= CO_GENERATOR;
   if (!cg_in_function(s)) {
-    struct location location = { 12345 };
     diag_begin_error(s->d, location);
     diag_frag(s->d, "`yield from` outside function");
     diag_end(s->d);
+  } else if (s->code.in_async_function) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`yield from` inside async function");
+    diag_end(s->d);
   }
 
-  emit_expression(s, value);
+  if (value != NULL) {
+    emit_expression(s, value);
+  } else {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "expected expression after `yield from`");
+    diag_end(s->d);
+    emit_none(s);
+  }
   cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
   cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
@@ -889,10 +900,10 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_UNEXPR_STAR_STAR:
     internal_error("attempted to emit `*`/`**` as value");
   case AST_YIELD:
-    emit_yield(s, expression->yield.value);
+    emit_yield(s, expression->yield.value, INVALID_LOCATION);
     return;
   case AST_YIELD_FROM:
-    emit_yield_from(s, expression->yield.value);
+    emit_yield_from(s, expression->yield.value, INVALID_LOCATION);
     return;
   }
 }

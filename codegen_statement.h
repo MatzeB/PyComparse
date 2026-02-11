@@ -5,6 +5,7 @@
 #include "codegen_types.h"
 #include "nullable.h"
 #include "opcodes.h"
+#include "scanner_location.h"
 
 ASSUME_NONNULL_BEGIN
 
@@ -80,6 +81,7 @@ void emit_make_function_begin(struct cg_state            *s,
                               unsigned                    num_parameters,
                               struct parameter           *parameters,
                               unsigned positional_only_argcount,
+                              bool     async_function,
                               union ast_expression *nullable return_type);
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,

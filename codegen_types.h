@@ -56,6 +56,7 @@ struct code_state {
   unsigned            max_stacksize;
   uint32_t            flags;
   bool                in_function;
+  bool                in_async_function;
   bool                in_class_body;
   bool                setup_annotations;
 };

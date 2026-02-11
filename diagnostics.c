@@ -14,7 +14,11 @@ void diag_begin_error(struct diagnostics_state *s, struct location location)
   assert(!s->in_diagnostic);
   s->in_diagnostic = true;
   s->had_error = true;
-  fprintf(s->out, "%s:%u error: ", s->default_filename, location.line);
+  if (location.line == INVALID_LOCATION.line) {
+    fprintf(s->out, "%s error: ", s->default_filename);
+  } else {
+    fprintf(s->out, "%s:%u error: ", s->default_filename, location.line);
+  }
 }
 
 void diag_frag(struct diagnostics_state *s, const char *message)

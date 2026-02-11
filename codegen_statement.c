@@ -498,6 +498,7 @@ void emit_make_function_begin(struct cg_state            *s,
                               unsigned                    num_parameters,
                               struct parameter           *parameters,
                               unsigned positional_only_argcount,
+                              bool     async_function,
                               union ast_expression *nullable return_type)
 {
   memset(state, 0, sizeof(*state));
@@ -510,6 +511,7 @@ void emit_make_function_begin(struct cg_state            *s,
 
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
+  s->code.in_async_function = async_function;
 
   unsigned       keyword_only_idx = num_parameters;
   struct symbol *variable_arguments_name = NULL;
@@ -2080,7 +2082,8 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
 
   struct make_function_state state;
   emit_make_function_begin(s, &state, def->num_parameters, def->parameters,
-                           def->positional_only_argcount, def->return_type);
+                           def->positional_only_argcount, def->async,
+                           def->return_type);
   apply_function_bindings(s, def);
   emit_statement_list_with_function(s, def->body, def);
   if (def->has_yield) {
@@ -2391,9 +2394,8 @@ static void emit_return(struct cg_state *s, struct location location,
 
 static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 {
-  s->code.flags |= CO_GENERATOR;
   if (!unreachable(s)) {
-    emit_yield(s, yield->expression);
+    emit_yield(s, yield->expression, yield->base.location);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
@@ -2401,9 +2403,8 @@ static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 static void emit_yield_from_statement(struct cg_state  *s,
                                       struct ast_yield *yield_from)
 {
-  s->code.flags |= CO_GENERATOR;
   if (!unreachable(s)) {
-    emit_yield_from(s, yield_from->expression);
+    emit_yield_from(s, yield_from->expression, yield_from->base.location);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents when working with code in this repository.
 
 ## Overview
 
@@ -11,6 +11,7 @@ PyParse is a Python bytecode compiler implemented in C. It consists of a scanner
 This project uses CMake and Ninja for building:
 
 ```bash
+cmake -S . -B build -G Ninja
 ninja -C build
 ```
 
@@ -23,22 +24,23 @@ The build produces three main executables:
 
 ### Building
 ```bash
-mkdir -p build && cd build && cmake .. && make
+cmake -S . -B build -G Ninja
+ninja -C build
 ```
 
 ### Performance Builds
 For performance profiling/benchmarking, use an optimized CMake build and do
 not rely on the default build type:
 ```bash
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release -j
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja -C build-release
 ```
 Use `build-release/parser_test` (or an equivalent `-O3 -DNDEBUG` binary) for
 `perf`/`valgrind` runs.
 
 For PGO + LTO builds, use:
 ```bash
-scripts/build_pgo_lto.sh
+CMAKE_GENERATOR=Ninja scripts/build_pgo_lto.sh
 ```
 The helper performs:
 1. Instrumented `Release` build (`PYCOMPARSE_PGO_MODE=generate`, `PYCOMPARSE_ENABLE_LTO=ON`)

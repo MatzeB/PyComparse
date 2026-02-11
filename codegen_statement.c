@@ -2270,6 +2270,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
                            def->positional_only_argcount, def->async,
                            def->return_type);
   apply_function_bindings(s, def);
+  cg_set_lineno(s, def->base.location.line);
   emit_statement_list_with_function(s, def->body, def);
   if (def->has_yield) {
     s->code.flags |= CO_GENERATOR;
@@ -2307,6 +2308,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 
   apply_class_bindings(s, class_stmt);
+  cg_set_lineno(s, class_stmt->base.location.line);
   emit_statement_list_with_function(s, class_stmt->body,
                                     /*current_function=*/NULL);
   if (class_stmt->needs_class_cell) {
@@ -2639,6 +2641,7 @@ static void emit_yield_from_statement(struct cg_state  *s,
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function)
 {
+  cg_set_lineno(s, statement->base.location.line);
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION:
     emit_annotation_stmt(s, &statement->annotation);

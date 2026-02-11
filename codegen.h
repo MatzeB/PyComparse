@@ -44,6 +44,8 @@ void                cg_jump(struct cg_state *s, struct basic_block *target);
 void cg_block_insert_delayed(struct cg_state *s, struct basic_block *block);
 void cg_block_begin_delayed(struct cg_state *s, struct basic_block *block);
 
+void cg_set_lineno(struct cg_state *s, unsigned lineno);
+
 void          cg_code_begin(struct cg_state *s, bool in_function);
 union object *cg_code_end(struct cg_state *s, const char *name);
 bool          cg_in_function(struct cg_state *s);

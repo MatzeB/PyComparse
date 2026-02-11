@@ -14,6 +14,12 @@ struct diagnostics_state;
 struct ast_statement_list;
 struct pending_finally_state;
 
+struct lnotab_mark {
+  struct basic_block *block;
+  unsigned            offset_in_block;
+  unsigned            lineno;
+};
+
 struct basic_block {
   uint8_t                     *code_bytes;
   unsigned                     code_length;
@@ -62,6 +68,11 @@ struct code_state {
   bool                                   in_class_body;
   bool                                   setup_annotations;
   struct pending_finally_state *nullable pending_finally;
+  unsigned                               current_lineno;
+  unsigned                               first_lineno;
+  struct lnotab_mark           *nullable lnotab_marks;
+  unsigned                               lnotab_marks_length;
+  unsigned                               lnotab_marks_capacity;
 };
 
 struct cg_state {

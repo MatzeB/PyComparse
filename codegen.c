@@ -85,6 +85,27 @@ void cg_op_push1(struct cg_state *s, enum opcode opcode, uint32_t arg)
   cg_push(s, 1);
 }
 
+void cg_set_lineno(struct cg_state *s, unsigned lineno)
+{
+  if (lineno == 0 || lineno == s->code.current_lineno) return;
+  if (s->code.first_lineno == 0) s->code.first_lineno = lineno;
+  s->code.current_lineno = lineno;
+
+  if (!cg_in_block(s)) return;
+
+  unsigned length = s->code.lnotab_marks_length;
+  if (length >= s->code.lnotab_marks_capacity) {
+    s->code.lnotab_marks
+        = dynmemory_grow(s->code.lnotab_marks, &s->code.lnotab_marks_capacity,
+                         length + 1, sizeof(struct lnotab_mark));
+  }
+  struct lnotab_mark *mark = &s->code.lnotab_marks[length];
+  mark->block = s->code.current_block;
+  mark->offset_in_block = arena_grow_current_size(&s->code.opcodes);
+  mark->lineno = lineno;
+  s->code.lnotab_marks_length = length + 1;
+}
+
 struct basic_block *cg_block_allocate(struct cg_state *s)
 {
   struct arena       *arena = object_intern_arena(&s->objects);
@@ -454,10 +475,68 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
                                             code_length, code_bytes);
+
+  /* Build lnotab from marks. */
+  unsigned first_lineno = s->code.first_lineno;
+  if (first_lineno == 0) first_lineno = 1;
+
+  arena_grow_begin(arena, /*alignment=*/1);
+  unsigned prev_offset = 0;
+  unsigned prev_lineno = first_lineno;
+  for (unsigned i = 0; i < s->code.lnotab_marks_length; ++i) {
+    struct lnotab_mark *mark = &s->code.lnotab_marks[i];
+    unsigned abs_offset = mark->block->offset + mark->offset_in_block;
+    unsigned lineno = mark->lineno;
+    if (lineno == prev_lineno) continue;
+
+    /* Collapse consecutive marks at the same bytecode offset: only emit
+     * one entry using the last mark's line number. */
+    while (i + 1 < s->code.lnotab_marks_length) {
+      struct lnotab_mark *next = &s->code.lnotab_marks[i + 1];
+      unsigned next_offset = next->block->offset + next->offset_in_block;
+      if (next_offset != abs_offset) break;
+      lineno = next->lineno;
+      ++i;
+    }
+    if (lineno == prev_lineno) continue;
+
+    unsigned offset_delta = abs_offset - prev_offset;
+    int      line_delta = (int)lineno - (int)prev_lineno;
+
+    while (offset_delta > 255) {
+      arena_grow_u8(arena, 255);
+      arena_grow_u8(arena, 0);
+      offset_delta -= 255;
+    }
+
+    if (line_delta >= 0) {
+      while (line_delta > 127) {
+        arena_grow_u8(arena, (uint8_t)offset_delta);
+        arena_grow_u8(arena, 127);
+        offset_delta = 0;
+        line_delta -= 127;
+      }
+    } else {
+      while (line_delta < -128) {
+        arena_grow_u8(arena, (uint8_t)offset_delta);
+        arena_grow_u8(arena, (uint8_t)(-128 & 0xff));
+        offset_delta = 0;
+        line_delta += 128;
+      }
+    }
+    arena_grow_u8(arena, (uint8_t)offset_delta);
+    arena_grow_u8(arena, (uint8_t)(line_delta & 0xff));
+
+    prev_offset = abs_offset;
+    prev_lineno = lineno;
+  }
+  unsigned lnotab_length = arena_grow_current_size(arena);
+  char    *lnotab_bytes = arena_grow_finish(arena);
+
+  union object *lnotab = object_intern_string(&s->objects, OBJECT_BYTES,
+                                              lnotab_length, lnotab_bytes);
   union object *filename = object_intern_cstring(&s->objects, s->filename);
   union object *name_string = object_intern_cstring(&s->objects, name);
-  union object *lnotab
-      = object_intern_string(&s->objects, OBJECT_BYTES, 0, "");
 
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
@@ -466,6 +545,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.nlocals = object_list_length(s->code.varnames);
   object->code.stacksize = s->code.max_stacksize;
   object->code.flags = s->code.flags;
+  object->code.firstlineno = first_lineno;
   object->code.code = code;
   object->code.consts = s->code.consts;
   object->code.names = s->code.names;
@@ -476,6 +556,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.name = name_string;
   object->code.lnotab = lnotab;
 
+  free(s->code.lnotab_marks);
   arena_free(&s->code.opcodes);
   return object;
 }

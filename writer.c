@@ -214,7 +214,7 @@ static void write_code(struct writer_state *s, const struct object_code *code)
   }
   write_object(s, code->filename);
   write_object(s, code->name);
-  write_uint32(s, 1); // firstlineno
+  write_uint32(s, code->firstlineno);
   write_object(s, code->lnotab);
 }
 

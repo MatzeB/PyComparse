@@ -71,9 +71,14 @@ union object *object_new_code(struct arena *arena)
 struct tuple_prep *object_new_tuple_begin(struct arena *arena, uint32_t length)
 {
   assert(length < UINT32_MAX);
+  size_t length_size = (size_t)length;
+  if (length_size > (SIZE_MAX - sizeof(struct object_tuple))
+                        / sizeof(((union object *)0)->tuple.items[0])) {
+    internal_error("tuple size overflow");
+  }
+  size_t size = sizeof(struct object_tuple)
+                + length_size * sizeof(((union object *)0)->tuple.items[0]);
   union object *object;
-  size_t        size
-      = sizeof(struct object_tuple) + length * sizeof(object->tuple.items[0]);
   object = object_allocate_zero_(arena, size, OBJECT_TUPLE_CONSTRUCTION);
   object->tuple.length = length;
 #ifndef NDEBUG
@@ -172,6 +177,7 @@ bool object_string_equals(const union object *object, uint32_t length,
     return false;
   }
   if (length == 0) return true;
+  assert(chars != NULL);
   return memcmp(object->string.chars, chars, length) == 0;
 }
 
@@ -190,7 +196,7 @@ uint32_t object_tuple_length(const union object *object)
 union object *object_tuple_at(union object *object, uint32_t index)
 {
   assert(object->type == OBJECT_TUPLE);
-  assert(index <= object->tuple.length);
+  assert(index < object->tuple.length);
   return object->tuple.items[index];
 }
 

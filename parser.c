@@ -897,6 +897,31 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   return expression;
 }
 
+static union ast_expression *parse_yield_expression(struct parser_state *s)
+{
+  eat(s, T_yield);
+  bool                     is_yield_from = accept(s, T_from);
+  enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
+  union ast_expression    *yield_expression = NULL;
+  if (is_yield_from) {
+    if (!is_expression_start(peek(s))) {
+      error_expected(s, "expression");
+      yield_expression = invalid_expression(s);
+    } else {
+      yield_expression = parse_expression(s, PREC_EXPRESSION);
+    }
+  } else if (is_expression_start(peek(s)) || peek(s) == '*') {
+    yield_expression = parse_star_expressions(s, PREC_EXPRESSION);
+  }
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_expression_yield, type);
+  expression->yield.value = yield_expression;
+  if (s->current_function_has_yield != NULL) {
+    *s->current_function_has_yield = true;
+  }
+  return expression;
+}
+
 static union ast_expression *parse_l_paren(struct parser_state *s)
 {
   eat(s, '(');
@@ -914,21 +939,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
 
   union ast_expression *expression;
   if (peek(s) == T_yield) {
-    eat(s, T_yield);
-    bool                     is_yield_from = accept(s, T_from);
-    enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
-    union ast_expression    *yield_expression = NULL;
-    if (peek(s) != ')') {
-      yield_expression = parse_star_expressions(s, PREC_EXPRESSION);
-    } else if (is_yield_from) {
-      error_expected(s, "expression");
-      yield_expression = invalid_expression(s);
-    }
-    expression = ast_allocate_expression(s, struct ast_expression_yield, type);
-    expression->yield.value = yield_expression;
-    if (s->current_function_has_yield != NULL) {
-      *s->current_function_has_yield = true;
-    }
+    expression = parse_yield_expression(s);
   } else {
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
     if (peek(s) == T_for || peek(s) == T_async) {
@@ -1299,6 +1310,8 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
     return parse_lambda(s);
   case T_not:
     return parse_not(s);
+  case T_yield:
+    return parse_yield_expression(s);
   default:
     if (peek(s) == '*' || peek(s) == T_ASTERISK_ASTERISK) {
       struct location          location = scanner_location(&s->scanner);
@@ -1822,7 +1835,12 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
                                    /*show_equal_hint=*/true);
   eat(s, '=');
 
-  union ast_expression *rhs = parse_star_expressions(s, PREC_EXPRESSION);
+  union ast_expression *rhs;
+  if (peek(s) == T_yield) {
+    rhs = parse_yield_expression(s);
+  } else {
+    rhs = parse_star_expressions(s, PREC_EXPRESSION);
+  }
 
   if (peek(s) == '=') {
     union ast_expression *inline_storage[8];
@@ -1837,7 +1855,11 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
                                     /*show_equal_hint=*/true);
       eat(s, '=');
       *idynarray_append(&targets, union ast_expression *) = rhs;
-      rhs = parse_star_expressions(s, PREC_EXPRESSION);
+      if (peek(s) == T_yield) {
+        rhs = parse_yield_expression(s);
+      } else {
+        rhs = parse_star_expressions(s, PREC_EXPRESSION);
+      }
     } while (peek(s) == '=');
 
     unsigned num_targets = idynarray_length(&targets, union ast_expression *);
@@ -1871,7 +1893,11 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
     union ast_expression *value = NULL;
     if (accept(s, '=')) {
       /* "annotated_rhs": yield | star_expressions */
-      value = parse_star_expressions(s, PREC_EXPRESSION);
+      if (peek(s) == T_yield) {
+        value = parse_yield_expression(s);
+      } else {
+        value = parse_star_expressions(s, PREC_EXPRESSION);
+      }
     }
 
     union ast_statement *statement

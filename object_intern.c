@@ -1,15 +1,85 @@
 #include "object_intern.h"
 
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "object_intern_types.h"
+#include "object_types.h"
 #include "util.h"
+
+struct object_intern_string_bucket {
+  union object *nullable object;
+  unsigned               hash;
+};
+
+static unsigned fnv_hash_mem(enum object_type type, uint32_t length,
+                             const char *chars)
+{
+  unsigned hash = 2166136261u;
+  hash ^= (unsigned)type;
+  hash *= 16777619u;
+  hash ^= length;
+  hash *= 16777619u;
+  for (uint32_t i = 0; i < length; ++i) {
+    hash ^= (unsigned char)chars[i];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+static void object_intern_insert_string_bucket(struct object_intern *s,
+                                               union object *string,
+                                               unsigned      hash)
+{
+  hash_set_increment_num_elements(&s->string_set);
+  struct hash_set_chain_iteration_state c;
+  hash_set_chain_iteration_begin(&c, &s->string_set, hash);
+  struct object_intern_string_bucket *buckets = s->string_buckets;
+  for (;; hash_set_chain_iteration_next(&c)) {
+    struct object_intern_string_bucket *bucket = &buckets[c.index];
+    if (bucket->object == NULL) {
+      bucket->object = string;
+      bucket->hash = hash;
+      return;
+    }
+  }
+}
+
+static void object_intern_resize_strings(struct object_intern *s,
+                                         unsigned              new_size)
+{
+  struct object_intern_string_bucket *old_buckets = s->string_buckets;
+  unsigned num_old_buckets = hash_set_num_buckets(&s->string_set);
+
+  s->string_buckets = calloc(new_size, sizeof(s->string_buckets[0]));
+  if (s->string_buckets == NULL) {
+    internal_error("out of memory");
+  }
+  hash_set_init(&s->string_set, new_size);
+
+  for (unsigned i = 0; i < num_old_buckets; ++i) {
+    struct object_intern_string_bucket *bucket = &old_buckets[i];
+    if (bucket->object != NULL) {
+      object_intern_insert_string_bucket(s, bucket->object, bucket->hash);
+    }
+  }
+
+  free(old_buckets);
+}
 
 void object_intern_init(struct object_intern *s)
 {
   memset(s, 0, sizeof(*s));
   s->objects = object_new_list(&s->arena);
+
+  unsigned num_string_buckets = 4096;
+  hash_set_init(&s->string_set, num_string_buckets);
+  s->string_buckets = calloc(num_string_buckets, sizeof(s->string_buckets[0]));
+  if (s->string_buckets == NULL) {
+    internal_error("out of memory");
+  }
+
   s->singleton_none = object_new_singleton(&s->arena, OBJECT_NONE);
   s->singleton_true = object_new_singleton(&s->arena, OBJECT_TRUE);
   s->singleton_false = object_new_singleton(&s->arena, OBJECT_FALSE);
@@ -21,6 +91,7 @@ void object_intern_init(struct object_intern *s)
 
 void object_intern_free(struct object_intern *s)
 {
+  free(s->string_buckets);
   arena_free(&s->arena);
 }
 
@@ -56,17 +127,34 @@ union object *object_intern_string(struct object_intern *s,
                                    const char *chars)
 {
   assert(type == OBJECT_STRING || type == OBJECT_BYTES);
-  // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
-    if (object_type(object) == type
-        && object_string_equals(object, length, chars)) {
-      return object;
+  unsigned new_size = hash_set_should_resize(&s->string_set);
+  if (UNLIKELY(new_size != 0)) {
+    object_intern_resize_strings(s, new_size);
+  }
+
+  unsigned hash = fnv_hash_mem(type, length, chars);
+  struct hash_set_chain_iteration_state c;
+  hash_set_chain_iteration_begin(&c, &s->string_set, hash);
+  struct object_intern_string_bucket *buckets = s->string_buckets;
+  for (;; hash_set_chain_iteration_next(&c)) {
+    struct object_intern_string_bucket *bucket = &buckets[c.index];
+    if (bucket->object == NULL) {
+      break;
+    }
+    if (bucket->hash == hash) {
+      union object *object = bucket->object;
+      if ((enum object_type)object->type == type
+          && object->string.length == length
+          && (object->string.chars == chars || length == 0
+              || memcmp(object->string.chars, chars, length) == 0)) {
+        return object;
+      }
     }
   }
 
   union object *string = object_new_string(&s->arena, type, length, chars);
   object_list_append(s->objects, string);
+  object_intern_insert_string_bucket(s, string, hash);
   return string;
 }
 

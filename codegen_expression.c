@@ -775,11 +775,6 @@ void emit_yield_from(struct cg_state *s, union ast_expression *value)
   cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
 }
 
-void had_yield(struct cg_state *s)
-{
-  s->code.flags |= CO_GENERATOR;
-}
-
 void emit_expression(struct cg_state *s, union ast_expression *expression)
 {
   switch (ast_expression_type(expression)) {

@@ -199,8 +199,8 @@ union object *emit_module_end(struct cg_state *s)
   return cg_code_end(s, "<module>");
 }
 
-void emit_annotation(struct cg_state *s, union ast_expression *target,
-                     union ast_expression *annotation)
+static void emit_annotation(struct cg_state *s, union ast_expression *target,
+                            union ast_expression *annotation)
 {
   if (!cg_in_function(s)) {
     s->code.setup_annotations = true;
@@ -232,8 +232,8 @@ void emit_annotation(struct cg_state *s, union ast_expression *target,
   }
 }
 
-void emit_assert(struct cg_state *s, union ast_expression *expression,
-                 union ast_expression *message)
+static void emit_assert(struct cg_state *s, union ast_expression *expression,
+                        union ast_expression *message)
 {
   if (unreachable(s)) return;
 
@@ -258,9 +258,9 @@ void emit_assert(struct cg_state *s, union ast_expression *expression,
   cg_block_begin(s, continue_block);
 }
 
-void emit_assign_statement(struct cg_state *s, unsigned num_targets,
-                           union ast_expression **targets,
-                           union ast_expression  *value)
+static void emit_assign(struct cg_state *s, unsigned num_targets,
+                        union ast_expression **targets,
+                        union ast_expression  *value)
 {
   if (unreachable(s)) return;
   emit_expression(s, value);
@@ -271,21 +271,6 @@ void emit_assign_statement(struct cg_state *s, unsigned num_targets,
     }
     emit_assignment(s, target);
   }
-}
-
-void emit_expression_statement(struct cg_state      *s,
-                               union ast_expression *expression)
-{
-  if (unreachable(s)) return;
-  emit_expression(s, expression);
-  cg_op_pop1(s, OPCODE_POP_TOP, 0);
-}
-
-void emit_binexpr_assign_statement(struct cg_state      *s,
-                                   union ast_expression *expression)
-{
-  if (unreachable(s)) return;
-  emit_expression(s, expression);
 }
 
 static unsigned register_dotted_name(struct cg_state    *s,
@@ -313,9 +298,9 @@ static unsigned register_dotted_name(struct cg_state    *s,
   return cg_register_name_from_cstring(s, chars);
 }
 
-void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
-                                struct dotted_name *module, unsigned num_pairs,
-                                struct from_import_item *items)
+static void emit_from_import(struct cg_state *s, unsigned num_prefix_dots,
+                             struct dotted_name *module, unsigned num_pairs,
+                             struct from_import_item *items)
 {
   if (unreachable(s)) return;
   unsigned module_name = module != NULL ? register_dotted_name(s, module)
@@ -357,20 +342,8 @@ void emit_from_import_statement(struct cg_state *s, unsigned num_prefix_dots,
   }
 }
 
-void emit_from_import_star_statement(struct cg_state    *s,
-                                     unsigned            num_prefix_dots,
-                                     struct dotted_name *module)
-{
-  emit_from_import_statement(s, num_prefix_dots, module, 0, NULL);
-}
-
-bool emit_global_statement(struct cg_state *s, struct symbol *name)
-{
-  return cg_declare(s, name, SYMBOL_GLOBAL);
-}
-
-void emit_import_statement(struct cg_state *s, struct dotted_name *module,
-                           struct symbol *as)
+static void emit_import(struct cg_state *s, struct dotted_name *module,
+                        struct symbol *as)
 {
   if (unreachable(s)) return;
   unsigned      module_name = register_dotted_name(s, module);
@@ -617,45 +590,7 @@ void emit_make_function_end(struct cg_state            *s,
                  /*pop=*/operands, /*push=*/1);
 }
 
-bool emit_nonlocal_statement(struct cg_state *s, struct symbol *name)
-{
-  return cg_declare(s, name, SYMBOL_NONLOCAL);
-}
-
-void emit_raise_statement(struct cg_state               *s,
-                          union ast_expression *nullable expression,
-                          union ast_expression *nullable from)
-{
-  if (unreachable(s)) return;
-
-  unsigned args = 0;
-  if (expression != NULL) {
-    emit_expression(s, expression);
-    args++;
-    if (from != NULL) {
-      emit_expression(s, from);
-      args++;
-    }
-  }
-  /* TODO: should this be a jump and end the block?
-   * cpython compiler does not seem to think so, is this on purpose? */
-  cg_op_pop_push(s, OPCODE_RAISE_VARARGS, args, /*pop=*/args, /*push=*/0);
-}
-
-void emit_return_statement(struct cg_state               *s,
-                           union ast_expression *nullable expression)
-{
-  if (unreachable(s)) return;
-  if (expression != NULL) {
-    emit_expression(s, expression);
-  } else {
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
-  }
-  cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
-  cg_block_end(s);
-}
-
-void emit_try_body_begin(struct cg_state *s, struct try_state *state)
+static void emit_try_body_begin(struct cg_state *s, struct try_state *state)
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) return;
@@ -674,7 +609,7 @@ void emit_try_body_begin(struct cg_state *s, struct try_state *state)
   cg_block_begin(s, body);
 }
 
-void emit_try_body_end(struct cg_state *s, struct try_state *state)
+static void emit_try_body_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
   if (unreachable(s)) return;
@@ -687,8 +622,9 @@ void emit_try_body_end(struct cg_state *s, struct try_state *state)
   cg_block_insert_delayed(s, body_exit);
 }
 
-void emit_try_except_begin(struct cg_state *s, struct try_state *state,
-                           union ast_expression *match, struct symbol *as)
+static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
+                                  union ast_expression *match,
+                                  struct symbol        *as)
 {
   if (!state->try_reachable) return;
 
@@ -746,8 +682,8 @@ void emit_try_except_begin(struct cg_state *s, struct try_state *state,
   }
 }
 
-void emit_try_except_end(struct cg_state *s, struct try_state *state,
-                         struct symbol *as)
+static void emit_try_except_end(struct cg_state *s, struct try_state *state,
+                                struct symbol *as)
 {
   if (!state->try_reachable) return;
   struct basic_block *except_unassign_as = state->except_unassign_as;
@@ -779,7 +715,7 @@ void emit_try_except_end(struct cg_state *s, struct try_state *state,
   cg_jump(s, enter_finally);
 }
 
-void emit_try_else_begin(struct cg_state *s, struct try_state *state)
+static void emit_try_else_begin(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
   state->had_else = true;
@@ -802,7 +738,7 @@ void emit_try_else_begin(struct cg_state *s, struct try_state *state)
   cg_block_begin(s, else_block);
 }
 
-void emit_try_else_end(struct cg_state *s, struct try_state *state)
+static void emit_try_else_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
 
@@ -816,7 +752,7 @@ void emit_try_else_end(struct cg_state *s, struct try_state *state)
   }
 }
 
-void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
+static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
   state->had_finally = true;
@@ -855,7 +791,7 @@ void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   cg_block_begin(s, finally_body);
 }
 
-void emit_try_finally_end(struct cg_state *s, struct try_state *state)
+static void emit_try_finally_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
   if (unreachable(s)) return;
@@ -869,7 +805,7 @@ void emit_try_finally_end(struct cg_state *s, struct try_state *state)
   cg_jump(s, footer);
 }
 
-void emit_try_end(struct cg_state *s, struct try_state *state)
+static void emit_try_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
 
@@ -928,8 +864,8 @@ void emit_try_end(struct cg_state *s, struct try_state *state)
   cg_block_begin(s, footer);
 }
 
-void emit_if_begin(struct cg_state *s, struct if_state *state,
-                   union ast_expression *expression)
+static void emit_if_begin(struct cg_state *s, struct if_state *state,
+                          union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -948,8 +884,8 @@ void emit_if_begin(struct cg_state *s, struct if_state *state,
   state->footer = NULL;
 }
 
-void emit_if_elif(struct cg_state *s, struct if_state *state,
-                  union ast_expression *expression)
+static void emit_if_elif(struct cg_state *s, struct if_state *state,
+                         union ast_expression *expression)
 {
   struct basic_block *else_block = state->else_or_footer;
   if (else_block == NULL) return;
@@ -972,7 +908,7 @@ void emit_if_elif(struct cg_state *s, struct if_state *state,
   cg_block_begin(s, then_block);
 }
 
-void emit_if_else(struct cg_state *s, struct if_state *state)
+static void emit_if_else(struct cg_state *s, struct if_state *state)
 {
   struct basic_block *else_block = state->else_or_footer;
   if (else_block == NULL) return;
@@ -989,7 +925,7 @@ void emit_if_else(struct cg_state *s, struct if_state *state)
   cg_block_begin(s, else_block);
 }
 
-void emit_if_end(struct cg_state *s, struct if_state *state)
+static void emit_if_end(struct cg_state *s, struct if_state *state)
 {
   struct basic_block *footer = state->footer;
   struct basic_block *else_or_footer = state->else_or_footer;
@@ -1034,9 +970,9 @@ static void emit_for_begin_impl(struct cg_state        *s,
   };
 }
 
-void emit_for_begin(struct cg_state *s, struct for_while_state *state,
-                    union ast_expression *targets,
-                    union ast_expression *expression)
+static void emit_for_begin(struct cg_state *s, struct for_while_state *state,
+                           union ast_expression *targets,
+                           union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -1074,18 +1010,18 @@ static void emit_loop_end(struct cg_state *s, struct for_while_state *state)
   cg_block_begin(s, footer);
 }
 
-void emit_for_else(struct cg_state *s, struct for_while_state *state)
+static void emit_for_else(struct cg_state *s, struct for_while_state *state)
 {
   emit_loop_else(s, state);
   cg_pop(s, 1);
 }
 
-void emit_for_end(struct cg_state *s, struct for_while_state *state)
+static void emit_for_end(struct cg_state *s, struct for_while_state *state)
 {
   emit_loop_end(s, state);
 }
 
-bool emit_continue(struct cg_state *s)
+static bool emit_continue(struct cg_state *s)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   if (target == NULL) return false;
@@ -1095,7 +1031,7 @@ bool emit_continue(struct cg_state *s)
   return true;
 }
 
-bool emit_break(struct cg_state *s)
+static bool emit_break(struct cg_state *s)
 {
   struct basic_block *target = s->code.loop_state.break_block;
   if (target == NULL) return false;
@@ -1108,8 +1044,8 @@ bool emit_break(struct cg_state *s)
   return true;
 }
 
-void emit_while_begin(struct cg_state *s, struct for_while_state *state,
-                      union ast_expression *expression)
+static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
+                             union ast_expression *expression)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -1137,28 +1073,14 @@ void emit_while_begin(struct cg_state *s, struct for_while_state *state,
   };
 }
 
-void emit_while_else(struct cg_state *s, struct for_while_state *state)
+static void emit_while_else(struct cg_state *s, struct for_while_state *state)
 {
   emit_loop_else(s, state);
 }
 
-void emit_while_end(struct cg_state *s, struct for_while_state *state)
+static void emit_while_end(struct cg_state *s, struct for_while_state *state)
 {
   emit_loop_end(s, state);
-}
-
-void emit_class_begin(struct cg_state *s, struct symbol *symbol)
-{
-  cg_op_push1(s, OPCODE_LOAD_BUILD_CLASS, 0);
-
-  cg_push_code(s);
-  cg_code_begin(s, /*in_function=*/false);
-  s->code.in_class_body = true;
-
-  cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
-  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
-  cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
-  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 }
 
 static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
@@ -1168,64 +1090,7 @@ static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
   }
 }
 
-void emit_class_end(struct cg_state *s, struct symbol *symbol,
-                    struct ast_call *call, unsigned num_decorators,
-                    unsigned                 num_closure_symbols,
-                    struct symbol **nullable closure_symbols)
-{
-  emit_code_end(s);
-  union object *code = cg_pop_code(s, symbol->string);
-
-  uint32_t flags = 0;
-  unsigned operands = 2;
-  if (num_closure_symbols > 0) {
-    for (unsigned i = 0; i < num_closure_symbols; ++i) {
-      cg_op_push1(s, OPCODE_LOAD_CLOSURE,
-                  cg_closure_index(s, closure_symbols[i]));
-    }
-    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_closure_symbols,
-                   /*pop=*/num_closure_symbols, /*push=*/1);
-    flags |= MAKE_FUNCTION_CLOSURE;
-    ++operands;
-  }
-
-  cg_load_const(s, code);
-
-  union object *string = object_intern_cstring(&s->objects, symbol->string);
-  cg_load_const(s, string);
-  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
-                 /*push=*/1);
-  cg_load_const(s, string);
-  emit_call_helper(s, call, /*num_extra_args=*/2);
-  emit_decorator_calls(s, num_decorators);
-  cg_store(s, symbol);
-}
-
-void emit_def_begin(struct cg_state *s, struct make_function_state *state,
-                    unsigned num_parameters, struct parameter *parameters,
-                    unsigned                       positional_only_argcount,
-                    union ast_expression *nullable return_type)
-{
-  emit_make_function_begin(s, state, num_parameters, parameters,
-                           positional_only_argcount, return_type);
-}
-
-void emit_def_end(struct cg_state *s, struct make_function_state *state,
-                  struct symbol *symbol, unsigned num_decorators, bool async)
-{
-  if (async) {
-    if (s->code.flags & CO_GENERATOR) {
-      s->code.flags = (s->code.flags & ~CO_GENERATOR) | CO_ASYNC_GENERATOR;
-    } else {
-      s->code.flags |= CO_COROUTINE;
-    }
-  }
-  emit_make_function_end(s, state, symbol);
-  emit_decorator_calls(s, num_decorators);
-  cg_store(s, symbol);
-}
-
-void emit_del(struct cg_state *s, union ast_expression *targets)
+static void emit_del(struct cg_state *s, union ast_expression *targets)
 {
   switch (ast_expression_type(targets)) {
   case AST_IDENTIFIER:
@@ -1362,9 +1227,9 @@ void emit_generator_expression_code(
   }
 }
 
-void emit_with_begin(struct cg_state *s, struct with_state *state,
-                     union ast_expression *expression,
-                     union ast_expression *targets)
+static void emit_with_begin(struct cg_state *s, struct with_state *state,
+                            union ast_expression *expression,
+                            union ast_expression *targets)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -1386,7 +1251,7 @@ void emit_with_begin(struct cg_state *s, struct with_state *state,
   }
 }
 
-void emit_with_end(struct cg_state *s, struct with_state *state)
+static void emit_with_end(struct cg_state *s, struct with_state *state)
 {
   if (state->cleanup == NULL) return;
   if (!unreachable(s)) {
@@ -1399,23 +1264,6 @@ void emit_with_end(struct cg_state *s, struct with_state *state)
   cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
   cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
   cg_op(s, OPCODE_END_FINALLY, 0);
-}
-
-void emit_yield_statement(struct cg_state *s, union ast_expression *expression)
-{
-  s->code.flags |= CO_GENERATOR;
-  if (unreachable(s)) return;
-  emit_yield(s, expression);
-  cg_op_pop1(s, OPCODE_POP_TOP, 0);
-}
-
-void emit_yield_from_statement(struct cg_state      *s,
-                               union ast_expression *expression)
-{
-  s->code.flags |= CO_GENERATOR;
-  if (unreachable(s)) return;
-  emit_yield_from(s, expression);
-  cg_op_pop1(s, OPCODE_POP_TOP, 0);
 }
 
 struct binding_scope {
@@ -2206,6 +2054,273 @@ static void emit_function_closure(struct cg_state            *s,
   state->closure_symbols = def->scope_freevars;
 }
 
+void emit_statement_list(struct cg_state           *s,
+                         struct ast_statement_list *statement_list)
+{
+  emit_statement_list_with_function(s, statement_list,
+                                    /*current_function=*/NULL);
+}
+
+static void
+emit_statement_list_with_function(struct cg_state           *s,
+                                  struct ast_statement_list *statement_list,
+                                  struct ast_def *nullable   current_function)
+{
+  for (unsigned i = 0; i < statement_list->num_statements; ++i) {
+    emit_statement(s, statement_list->statements[i], current_function);
+  }
+}
+
+static void emit_def(struct cg_state *s, struct ast_def *def)
+{
+  analyze_function_bindings(s, def, /*parent=*/NULL);
+  for (unsigned i = 0; i < def->num_decorators; ++i) {
+    emit_expression(s, def->decorators[i]);
+  }
+
+  struct make_function_state state;
+  emit_make_function_begin(s, &state, def->num_parameters, def->parameters,
+                           def->positional_only_argcount, def->return_type);
+  apply_function_bindings(s, def);
+  emit_statement_list_with_function(s, def->body, def);
+  if (def->has_yield) {
+    s->code.flags |= CO_GENERATOR;
+  }
+  emit_function_closure(s, &state, def);
+
+  if (def->async) {
+    if (s->code.flags & CO_GENERATOR) {
+      s->code.flags = (s->code.flags & ~CO_GENERATOR) | CO_ASYNC_GENERATOR;
+    } else {
+      s->code.flags |= CO_COROUTINE;
+    }
+  }
+  emit_make_function_end(s, &state, def->name);
+  emit_decorator_calls(s, def->num_decorators);
+  cg_store(s, def->name);
+}
+
+static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
+{
+  analyze_class_bindings(s, class_stmt, /*parent=*/NULL);
+  for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
+    emit_expression(s, class_stmt->decorators[i]);
+  }
+
+  cg_op_push1(s, OPCODE_LOAD_BUILD_CLASS, 0);
+  cg_push_code(s);
+  cg_code_begin(s, /*in_function=*/false);
+  s->code.in_class_body = true;
+
+  cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
+  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
+  cg_load_const(s,
+                object_intern_cstring(&s->objects, class_stmt->name->string));
+  cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
+
+  apply_class_bindings(s, class_stmt);
+  emit_statement_list_with_function(s, class_stmt->body,
+                                    /*current_function=*/NULL);
+
+  emit_code_end(s);
+  union object *code = cg_pop_code(s, class_stmt->name->string);
+
+  uint32_t flags = 0;
+  unsigned operands = 2;
+  if (class_stmt->num_scope_freevars > 0) {
+    for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
+      cg_op_push1(s, OPCODE_LOAD_CLOSURE,
+                  cg_closure_index(s, class_stmt->scope_freevars[i]));
+    }
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, class_stmt->num_scope_freevars,
+                   /*pop=*/class_stmt->num_scope_freevars, /*push=*/1);
+    flags |= MAKE_FUNCTION_CLOSURE;
+    ++operands;
+  }
+
+  cg_load_const(s, code);
+  union object *name_const
+      = object_intern_cstring(&s->objects, class_stmt->name->string);
+  cg_load_const(s, name_const);
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
+                 /*push=*/1);
+  cg_load_const(s, name_const);
+  emit_call_helper(s, class_stmt->call, /*num_extra_args=*/2);
+  emit_decorator_calls(s, class_stmt->num_decorators);
+  cg_store(s, class_stmt->name);
+}
+
+static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
+                     struct ast_def *nullable current_function)
+{
+  struct for_while_state state;
+  emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression);
+  emit_statement_list_with_function(s, for_stmt->body, current_function);
+  emit_for_else(s, &state);
+  if (for_stmt->else_body != NULL) {
+    emit_statement_list_with_function(s, for_stmt->else_body,
+                                      current_function);
+  }
+  emit_for_end(s, &state);
+}
+
+static void emit_from_import_node(struct cg_state        *s,
+                                  struct ast_from_import *from_import)
+{
+  if (from_import->import_star) {
+    emit_from_import(s, from_import->num_prefix_dots, from_import->module, 0,
+                     NULL);
+  } else {
+    emit_from_import(s, from_import->num_prefix_dots, from_import->module,
+                     from_import->num_items, from_import->items);
+  }
+}
+
+static void emit_global_statement_node(struct cg_state   *s,
+                                       struct location    location,
+                                       struct ast_global *global)
+{
+  for (unsigned i = 0; i < global->num_names; ++i) {
+    struct symbol *name = global->names[i];
+    if (!cg_declare(s, name, SYMBOL_GLOBAL)) {
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "name ");
+      diag_symbol(s->d, name);
+      diag_frag(s->d, " is assigned to before global declaration");
+      diag_end(s->d);
+    }
+  }
+}
+
+static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
+                    struct ast_def *nullable current_function)
+{
+  struct if_state state;
+  emit_if_begin(s, &state, if_stmt->condition);
+  emit_statement_list_with_function(s, if_stmt->body, current_function);
+  for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
+    struct ast_if_elif *elif_stmt = &if_stmt->elifs[i];
+    emit_if_elif(s, &state, elif_stmt->condition);
+    emit_statement_list_with_function(s, elif_stmt->body, current_function);
+  }
+  if (if_stmt->else_body != NULL) {
+    emit_if_else(s, &state);
+    emit_statement_list_with_function(s, if_stmt->else_body, current_function);
+  }
+  emit_if_end(s, &state);
+}
+
+static void emit_import_node(struct cg_state   *s,
+                             struct ast_import *import_stmt)
+{
+  for (unsigned i = 0; i < import_stmt->num_items; ++i) {
+    struct ast_import_item *item = &import_stmt->items[i];
+    emit_import(s, item->module, item->as);
+  }
+}
+
+static void
+emit_nonlocal_statement_node(struct cg_state *s, struct location location,
+                             struct ast_statement_nonlocal *nonlocal)
+{
+  for (unsigned i = 0; i < nonlocal->num_names; ++i) {
+    struct symbol *name = nonlocal->names[i];
+    if (!cg_declare(s, name, SYMBOL_NONLOCAL)) {
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "name ");
+      diag_symbol(s->d, name);
+      diag_frag(s->d, " is assigned to before nonlocal declaration");
+      diag_end(s->d);
+    }
+  }
+}
+
+static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
+                     struct ast_def *nullable current_function)
+{
+  struct try_state state;
+  emit_try_body_begin(s, &state);
+  emit_statement_list_with_function(s, try_stmt->body, current_function);
+  emit_try_body_end(s, &state);
+
+  for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
+    struct ast_try_except *except_stmt = &try_stmt->excepts[i];
+    emit_try_except_begin(s, &state, except_stmt->match, except_stmt->as);
+    emit_statement_list_with_function(s, except_stmt->body, current_function);
+    emit_try_except_end(s, &state, except_stmt->as);
+  }
+
+  if (try_stmt->else_body != NULL) {
+    emit_try_else_begin(s, &state);
+    emit_statement_list_with_function(s, try_stmt->else_body,
+                                      current_function);
+    emit_try_else_end(s, &state);
+  }
+
+  if (try_stmt->finally_body != NULL) {
+    emit_try_finally_begin(s, &state);
+    emit_statement_list_with_function(s, try_stmt->finally_body,
+                                      current_function);
+    emit_try_finally_end(s, &state);
+  }
+
+  emit_try_end(s, &state);
+}
+
+static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
+                       struct ast_def *nullable current_function)
+{
+  struct for_while_state state;
+  emit_while_begin(s, &state, while_stmt->condition);
+  emit_statement_list_with_function(s, while_stmt->body, current_function);
+  emit_while_else(s, &state);
+  if (while_stmt->else_body != NULL) {
+    emit_statement_list_with_function(s, while_stmt->else_body,
+                                      current_function);
+  }
+  emit_while_end(s, &state);
+}
+
+static void emit_with(struct cg_state *s, struct ast_with *with,
+                      struct ast_def *nullable current_function)
+{
+  unsigned           num_items = with->num_items;
+  struct with_state *states = NULL;
+  if (num_items > 0) {
+    states = (struct with_state *)calloc(num_items, sizeof(*states));
+    if (states == NULL) {
+      internal_error("out of memory");
+    }
+  }
+
+  for (unsigned i = 0; i < num_items; ++i) {
+    struct ast_with_item *item = &with->items[i];
+    emit_with_begin(s, &states[i], item->expression, item->targets);
+  }
+  emit_statement_list_with_function(s, with->body, current_function);
+  for (unsigned i = num_items; i-- > 0;) {
+    emit_with_end(s, &states[i]);
+  }
+  free(states);
+}
+
+static void emit_annotation_stmt(struct cg_state                 *s,
+                                 struct ast_statement_annotation *annotation)
+{
+  if (annotation->value != NULL) {
+    union ast_expression *targets[] = { annotation->target };
+    emit_assign(s, 1, targets, annotation->value);
+  }
+  emit_annotation(s, annotation->target, annotation->annotation);
+}
+
+static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
+{
+  if (!unreachable(s)) {
+    emit_expression(s, augassign->expression);
+  }
+}
+
 static void emit_break_statement(struct cg_state *s, struct location location)
 {
   if (!emit_break(s)) {
@@ -2227,35 +2342,35 @@ static void emit_continue_statement(struct cg_state *s,
   }
 }
 
-static void emit_global_statement_checked(struct cg_state *s,
-                                          struct location  location,
-                                          struct symbol   *name)
+static void emit_expression_statement(struct cg_state                 *s,
+                                      struct ast_expression_statement *expr)
 {
-  if (!emit_global_statement(s, name)) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "name ");
-    diag_symbol(s->d, name);
-    diag_frag(s->d, " is assigned to before global declaration");
-    diag_end(s->d);
+  if (!unreachable(s)) {
+    emit_expression(s, expr->expression);
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
 
-static void emit_nonlocal_statement_checked(struct cg_state *s,
-                                            struct location  location,
-                                            struct symbol   *name)
+static void emit_raise(struct cg_state *s, struct ast_raise *raise)
 {
-  if (!emit_nonlocal_statement(s, name)) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "name ");
-    diag_symbol(s->d, name);
-    diag_frag(s->d, " is assigned to before nonlocal declaration");
-    diag_end(s->d);
+  if (!unreachable(s)) {
+    unsigned args = 0;
+    if (raise->expression != NULL) {
+      emit_expression(s, raise->expression);
+      args++;
+      if (raise->from != NULL) {
+        emit_expression(s, raise->from);
+        args++;
+      }
+    }
+    /* TODO: should this be a jump and end the block?
+     * cpython compiler does not seem to think so, is this on purpose? */
+    cg_op_pop_push(s, OPCODE_RAISE_VARARGS, args, /*pop=*/args, /*push=*/0);
   }
 }
 
-static void
-emit_return_statement_checked(struct cg_state *s, struct location location,
-                              union ast_expression *nullable expression)
+static void emit_return(struct cg_state *s, struct location location,
+                        struct ast_return *return_stmt)
 {
   if (!cg_in_function(s)) {
     diag_begin_error(s->d, location);
@@ -2263,23 +2378,33 @@ emit_return_statement_checked(struct cg_state *s, struct location location,
     diag_frag(s->d, " outside function");
     diag_end(s->d);
   }
-  emit_return_statement(s, expression);
+  if (!unreachable(s)) {
+    if (return_stmt->expression != NULL) {
+      emit_expression(s, return_stmt->expression);
+    } else {
+      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    }
+    cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
+    cg_block_end(s);
+  }
 }
 
-void emit_statement_list(struct cg_state           *s,
-                         struct ast_statement_list *statement_list)
+static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 {
-  emit_statement_list_with_function(s, statement_list,
-                                    /*current_function=*/NULL);
+  s->code.flags |= CO_GENERATOR;
+  if (!unreachable(s)) {
+    emit_yield(s, yield->expression);
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
+  }
 }
 
-static void
-emit_statement_list_with_function(struct cg_state           *s,
-                                  struct ast_statement_list *statement_list,
-                                  struct ast_def *nullable   current_function)
+static void emit_yield_from_statement(struct cg_state  *s,
+                                      struct ast_yield *yield_from)
 {
-  for (unsigned i = 0; i < statement_list->num_statements; ++i) {
-    emit_statement(s, statement_list->statements[i], current_function);
+  s->code.flags |= CO_GENERATOR;
+  if (!unreachable(s)) {
+    emit_yield_from(s, yield_from->expression);
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
 
@@ -2287,224 +2412,79 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function)
 {
   switch (ast_statement_type(statement)) {
-  case AST_STATEMENT_ANNOTATION: {
-    struct ast_statement_annotation *annotation = &statement->annotation;
-    if (annotation->value != NULL) {
-      union ast_expression *targets[] = { annotation->target };
-      emit_assign_statement(s, 1, targets, annotation->value);
-    }
-    emit_annotation(s, annotation->target, annotation->annotation);
+  case AST_STATEMENT_ANNOTATION:
+    emit_annotation_stmt(s, &statement->annotation);
     return;
-  }
-  case AST_STATEMENT_ASSERT: {
-    struct ast_assert *assertion = &statement->assert;
-    emit_assert(s, assertion->expression, assertion->message);
+  case AST_STATEMENT_ASSERT:
+    emit_assert(s, statement->assert.expression, statement->assert.message);
     return;
-  }
-  case AST_STATEMENT_ASSIGN: {
-    struct ast_assignment *assign = &statement->assign;
-    emit_assign_statement(s, assign->num_targets, assign->targets,
-                          assign->value);
+  case AST_STATEMENT_ASSIGN:
+    emit_assign(s, statement->assign.num_targets, statement->assign.targets,
+                statement->assign.value);
     return;
-  }
   case AST_STATEMENT_AUGASSIGN:
-    emit_binexpr_assign_statement(s, statement->augassign.expression);
+    emit_augassign(s, &statement->augassign);
     return;
   case AST_STATEMENT_BREAK:
     emit_break_statement(s, statement->base.location);
     return;
-  case AST_STATEMENT_CLASS: {
-    struct ast_class *class_stmt = &statement->class_;
-    analyze_class_bindings(s, class_stmt, /*parent=*/NULL);
-    for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
-      emit_expression(s, class_stmt->decorators[i]);
-    }
-    emit_class_begin(s, class_stmt->name);
-    apply_class_bindings(s, class_stmt);
-    emit_statement_list_with_function(s, class_stmt->body,
-                                      /*current_function=*/NULL);
-    emit_class_end(s, class_stmt->name, class_stmt->call,
-                   class_stmt->num_decorators, class_stmt->num_scope_freevars,
-                   class_stmt->scope_freevars);
+  case AST_STATEMENT_CLASS:
+    emit_class(s, &statement->class_);
     return;
-  }
   case AST_STATEMENT_CONTINUE:
     emit_continue_statement(s, statement->base.location);
     return;
-  case AST_STATEMENT_DEF: {
-    struct ast_def *def = &statement->def;
-    analyze_function_bindings(s, def, /*parent=*/NULL);
-    for (unsigned i = 0; i < def->num_decorators; ++i) {
-      emit_expression(s, def->decorators[i]);
-    }
-    struct make_function_state state;
-    emit_def_begin(s, &state, def->num_parameters, def->parameters,
-                   def->positional_only_argcount, def->return_type);
-    apply_function_bindings(s, def);
-    emit_statement_list_with_function(s, def->body, def);
-    if (def->has_yield) {
-      s->code.flags |= CO_GENERATOR;
-    }
-    emit_function_closure(s, &state, def);
-    emit_def_end(s, &state, def->name, def->num_decorators, def->async);
+  case AST_STATEMENT_DEF:
+    emit_def(s, &statement->def);
     return;
-  }
   case AST_STATEMENT_DEL:
     emit_del(s, statement->del.targets);
     return;
   case AST_STATEMENT_EXPRESSION:
-    emit_expression_statement(s, statement->expression.expression);
+    emit_expression_statement(s, &statement->expression);
     return;
-  case AST_STATEMENT_FOR: {
-    struct ast_for        *for_stmt = &statement->for_;
-    struct for_while_state state;
-    emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression);
-    emit_statement_list_with_function(s, for_stmt->body, current_function);
-    emit_for_else(s, &state);
-    if (for_stmt->else_body != NULL) {
-      emit_statement_list_with_function(s, for_stmt->else_body,
-                                        current_function);
-    }
-    emit_for_end(s, &state);
+  case AST_STATEMENT_FOR:
+    emit_for(s, &statement->for_, current_function);
     return;
-  }
-  case AST_STATEMENT_FROM_IMPORT: {
-    struct ast_from_import *from_import = &statement->from_import;
-    if (from_import->import_star) {
-      emit_from_import_star_statement(s, from_import->num_prefix_dots,
-                                      from_import->module);
-    } else {
-      emit_from_import_statement(s, from_import->num_prefix_dots,
-                                 from_import->module, from_import->num_items,
-                                 from_import->items);
-    }
+  case AST_STATEMENT_FROM_IMPORT:
+    emit_from_import_node(s, &statement->from_import);
     return;
-  }
-  case AST_STATEMENT_GLOBAL: {
-    struct ast_global *global = &statement->global;
-    for (unsigned i = 0; i < global->num_names; ++i) {
-      emit_global_statement_checked(s, statement->base.location,
-                                    global->names[i]);
-    }
+  case AST_STATEMENT_GLOBAL:
+    emit_global_statement_node(s, statement->base.location,
+                               &statement->global);
     return;
-  }
-  case AST_STATEMENT_IF: {
-    struct ast_if  *if_stmt = &statement->if_;
-    struct if_state state;
-    emit_if_begin(s, &state, if_stmt->condition);
-    emit_statement_list_with_function(s, if_stmt->body, current_function);
-    for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
-      struct ast_if_elif *elif_stmt = &if_stmt->elifs[i];
-      emit_if_elif(s, &state, elif_stmt->condition);
-      emit_statement_list_with_function(s, elif_stmt->body, current_function);
-    }
-    if (if_stmt->else_body != NULL) {
-      emit_if_else(s, &state);
-      emit_statement_list_with_function(s, if_stmt->else_body,
-                                        current_function);
-    }
-    emit_if_end(s, &state);
+  case AST_STATEMENT_IF:
+    emit_if(s, &statement->if_, current_function);
     return;
-  }
-  case AST_STATEMENT_IMPORT: {
-    struct ast_import *import_stmt = &statement->import;
-    for (unsigned i = 0; i < import_stmt->num_items; ++i) {
-      struct ast_import_item *item = &import_stmt->items[i];
-      emit_import_statement(s, item->module, item->as);
-    }
+  case AST_STATEMENT_IMPORT:
+    emit_import_node(s, &statement->import);
     return;
-  }
-  case AST_STATEMENT_NONLOCAL: {
-    struct ast_statement_nonlocal *nonlocal = &statement->nonlocal;
-    for (unsigned i = 0; i < nonlocal->num_names; ++i) {
-      emit_nonlocal_statement_checked(s, statement->base.location,
-                                      nonlocal->names[i]);
-    }
+  case AST_STATEMENT_NONLOCAL:
+    emit_nonlocal_statement_node(s, statement->base.location,
+                                 &statement->nonlocal);
     return;
-  }
   case AST_STATEMENT_PASS:
     return;
-  case AST_STATEMENT_RAISE: {
-    struct ast_raise *raise = &statement->raise;
-    emit_raise_statement(s, raise->expression, raise->from);
+  case AST_STATEMENT_RAISE:
+    emit_raise(s, &statement->raise);
     return;
-  }
   case AST_STATEMENT_RETURN:
-    emit_return_statement_checked(s, statement->base.location,
-                                  statement->return_.expression);
+    emit_return(s, statement->base.location, &statement->return_);
     return;
-  case AST_STATEMENT_TRY: {
-    struct ast_try  *try_stmt = &statement->try_;
-    struct try_state state;
-    emit_try_body_begin(s, &state);
-    emit_statement_list_with_function(s, try_stmt->body, current_function);
-    emit_try_body_end(s, &state);
-
-    for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
-      struct ast_try_except *except_stmt = &try_stmt->excepts[i];
-      emit_try_except_begin(s, &state, except_stmt->match, except_stmt->as);
-      emit_statement_list_with_function(s, except_stmt->body,
-                                        current_function);
-      emit_try_except_end(s, &state, except_stmt->as);
-    }
-
-    if (try_stmt->else_body != NULL) {
-      emit_try_else_begin(s, &state);
-      emit_statement_list_with_function(s, try_stmt->else_body,
-                                        current_function);
-      emit_try_else_end(s, &state);
-    }
-
-    if (try_stmt->finally_body != NULL) {
-      emit_try_finally_begin(s, &state);
-      emit_statement_list_with_function(s, try_stmt->finally_body,
-                                        current_function);
-      emit_try_finally_end(s, &state);
-    }
-
-    emit_try_end(s, &state);
+  case AST_STATEMENT_TRY:
+    emit_try(s, &statement->try_, current_function);
     return;
-  }
-  case AST_STATEMENT_WHILE: {
-    struct ast_while      *while_stmt = &statement->while_;
-    struct for_while_state state;
-    emit_while_begin(s, &state, while_stmt->condition);
-    emit_statement_list_with_function(s, while_stmt->body, current_function);
-    emit_while_else(s, &state);
-    if (while_stmt->else_body != NULL) {
-      emit_statement_list_with_function(s, while_stmt->else_body,
-                                        current_function);
-    }
-    emit_while_end(s, &state);
+  case AST_STATEMENT_WHILE:
+    emit_while(s, &statement->while_, current_function);
     return;
-  }
-  case AST_STATEMENT_WITH: {
-    struct ast_with   *with = &statement->with;
-    unsigned           num_items = with->num_items;
-    struct with_state *states = NULL;
-    if (num_items > 0) {
-      states = (struct with_state *)calloc(num_items, sizeof(*states));
-      if (states == NULL) {
-        internal_error("out of memory");
-      }
-    }
-
-    for (unsigned i = 0; i < num_items; ++i) {
-      struct ast_with_item *item = &with->items[i];
-      emit_with_begin(s, &states[i], item->expression, item->targets);
-    }
-    emit_statement_list_with_function(s, with->body, current_function);
-    for (unsigned i = num_items; i-- > 0;) {
-      emit_with_end(s, &states[i]);
-    }
-    free(states);
+  case AST_STATEMENT_WITH:
+    emit_with(s, &statement->with, current_function);
     return;
-  }
   case AST_STATEMENT_YIELD:
-    emit_yield_statement(s, statement->yield.expression);
+    emit_yield_statement(s, &statement->yield);
     return;
   case AST_STATEMENT_YIELD_FROM:
-    emit_yield_from_statement(s, statement->yield.expression);
+    emit_yield_from_statement(s, &statement->yield);
     return;
   default:
     internal_error("invalid statement");

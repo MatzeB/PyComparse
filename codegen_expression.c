@@ -710,6 +710,22 @@ static void emit_call(struct cg_state *s, struct ast_call *call)
 {
   union ast_expression *callee = call->callee;
   assert(callee != NULL);
+  if (!call->has_star_argument && !call->has_kw_argument
+      && ast_expression_type(callee) == AST_ATTR) {
+    struct ast_attr *attr = &callee->attr;
+    emit_expression(s, attr->expression);
+    unsigned index = cg_register_name(s, attr->symbol);
+    cg_op_pop_push(s, OPCODE_LOAD_METHOD, index, /*pop=*/1, /*push=*/2);
+
+    unsigned num_arguments = call->num_arguments;
+    for (unsigned i = 0; i < num_arguments; ++i) {
+      struct argument *argument = &call->arguments[i];
+      emit_expression(s, argument->expression);
+    }
+    cg_op_pop_push(s, OPCODE_CALL_METHOD, num_arguments,
+                   /*pop=*/num_arguments + 2, /*push=*/1);
+    return;
+  }
   emit_expression(s, callee);
   emit_call_helper(s, call, /*num_extra_args=*/0);
 }

@@ -9,6 +9,8 @@
 #include "adt/arena.h"
 #include "adt/idynarray.h"
 #include "ast.h"
+#include "ast_expression_types.h"
+#include "ast_statement_types.h"
 #include "ast_types.h"
 #include "codegen.h"
 #include "codegen_expression.h"

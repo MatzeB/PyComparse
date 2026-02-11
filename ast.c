@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "ast_expression_types.h"
+#include "ast_statement_types.h"
 #include "ast_types.h"
 #include "object_intern.h"
 

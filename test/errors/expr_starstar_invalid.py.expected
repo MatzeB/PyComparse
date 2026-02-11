@@ -1,0 +1,1 @@
+test/errors/expr_starstar_invalid.py:1 error: starred expression not allowed here

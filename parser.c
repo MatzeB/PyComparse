@@ -1051,7 +1051,7 @@ static union ast_expression *parse_string(struct parser_state *s)
   }
 
   // prepare to concatenate multiple (f-)string literals.
-  union object   **inline_storage[8];
+  union object    *inline_storage[8];
   struct idynarray strings;
   idynarray_init(&strings, inline_storage, sizeof(inline_storage));
   size_t           combined_length = 0;
@@ -1288,8 +1288,10 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
     return parse_not(s);
   default:
     if (peek(s) == '*' || peek(s) == T_ASTERISK_ASTERISK) {
-      struct location location = scanner_location(&s->scanner);
-      parse_unexpr(s, PREC_OR, AST_UNEXPR_STAR);
+      struct location          location = scanner_location(&s->scanner);
+      enum ast_expression_type type
+          = peek(s) == '*' ? AST_UNEXPR_STAR : AST_UNEXPR_STAR_STAR;
+      parse_unexpr(s, PREC_OR, type);
       diag_begin_error(s->d, location);
       diag_frag(s->d, "starred expression not allowed here");
       diag_end(s->d);

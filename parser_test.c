@@ -13,6 +13,7 @@ int main(int argc, char **argv)
 {
   if (argc != 2) {
     fprintf(stderr, "Missing filename argument\n");
+    return 1;
   }
   const char *filename = argv[1];
   FILE       *input = fopen(filename, "r");

@@ -11,6 +11,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if (defined(__x86_64__) || defined(__i386__))                             \
+    && (defined(__clang__) || defined(__GNUC__))
+#define PYPARSE_HAVE_X86_AVX2 1
+#include <immintrin.h>
+#else
+#define PYPARSE_HAVE_X86_AVX2 0
+#endif
+
+#if PYPARSE_HAVE_X86_AVX2 && defined(__ELF__)
+#if defined(__has_attribute)
+#if __has_attribute(ifunc)
+#define PYPARSE_HAVE_GNU_IFUNC 1
+#else
+#define PYPARSE_HAVE_GNU_IFUNC 0
+#endif
+#else
+#define PYPARSE_HAVE_GNU_IFUNC 1
+#endif
+#else
+#define PYPARSE_HAVE_GNU_IFUNC 0
+#endif
+
 #include "adt/arena.h"
 #include "diagnostics.h"
 #include "object_intern.h"
@@ -857,6 +879,262 @@ static void fstring_pop(struct scanner_state *s)
   s->fstring = s->fstring_stack[--s->fstring_stack_top];
 }
 
+static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
+                                                                   char *end)
+{
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r') break;
+    ++cursor;
+  }
+  return cursor;
+}
+
+static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
+                                                                   char *end)
+{
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r') break;
+    ++cursor;
+  }
+  return cursor;
+}
+
+static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
+                                                                 char *end)
+{
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{'
+        || c == '}') {
+      break;
+    }
+    ++cursor;
+  }
+  return cursor;
+}
+
+static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
+                                                                 char *end)
+{
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c == '{'
+        || c == '}') {
+      break;
+    }
+    ++cursor;
+  }
+  return cursor;
+}
+
+#if PYPARSE_HAVE_X86_AVX2 && PYPARSE_HAVE_GNU_IFUNC
+
+__attribute__((target("avx2")))
+static char *scan_string_plain_span_find_stop_avx2_nofmt_double(
+    char *cursor, char *end)
+{
+  const __m256i quote = _mm256_set1_epi8('"');
+  const __m256i backslash = _mm256_set1_epi8('\\');
+  const __m256i newline = _mm256_set1_epi8('\n');
+  const __m256i carriage_return = _mm256_set1_epi8('\r');
+
+  while ((size_t)(end - cursor) >= 32) {
+    __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
+    __m256i mask = _mm256_or_si256(
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, quote),
+                        _mm256_cmpeq_epi8(chunk, backslash)),
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
+                        _mm256_cmpeq_epi8(chunk, carriage_return)));
+    unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
+    if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
+    cursor += 32;
+  }
+
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r') break;
+    ++cursor;
+  }
+  return cursor;
+}
+
+__attribute__((target("avx2")))
+static char *scan_string_plain_span_find_stop_avx2_nofmt_single(
+    char *cursor, char *end)
+{
+  const __m256i quote = _mm256_set1_epi8('\'');
+  const __m256i backslash = _mm256_set1_epi8('\\');
+  const __m256i newline = _mm256_set1_epi8('\n');
+  const __m256i carriage_return = _mm256_set1_epi8('\r');
+
+  while ((size_t)(end - cursor) >= 32) {
+    __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
+    __m256i mask = _mm256_or_si256(
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, quote),
+                        _mm256_cmpeq_epi8(chunk, backslash)),
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
+                        _mm256_cmpeq_epi8(chunk, carriage_return)));
+    unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
+    if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
+    cursor += 32;
+  }
+
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r') break;
+    ++cursor;
+  }
+  return cursor;
+}
+
+__attribute__((target("avx2")))
+static char *scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor,
+                                                               char *end)
+{
+  const __m256i quote = _mm256_set1_epi8('"');
+  const __m256i backslash = _mm256_set1_epi8('\\');
+  const __m256i newline = _mm256_set1_epi8('\n');
+  const __m256i carriage_return = _mm256_set1_epi8('\r');
+  const __m256i lcurly = _mm256_set1_epi8('{');
+  const __m256i rcurly = _mm256_set1_epi8('}');
+
+  while ((size_t)(end - cursor) >= 32) {
+    __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
+    __m256i mask = _mm256_or_si256(
+        _mm256_or_si256(
+            _mm256_or_si256(_mm256_cmpeq_epi8(chunk, quote),
+                            _mm256_cmpeq_epi8(chunk, backslash)),
+            _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
+                            _mm256_cmpeq_epi8(chunk, carriage_return))),
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, lcurly),
+                        _mm256_cmpeq_epi8(chunk, rcurly)));
+    unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
+    if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
+    cursor += 32;
+  }
+
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{'
+        || c == '}') {
+      break;
+    }
+    ++cursor;
+  }
+  return cursor;
+}
+
+__attribute__((target("avx2")))
+static char *scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor,
+                                                               char *end)
+{
+  const __m256i quote = _mm256_set1_epi8('\'');
+  const __m256i backslash = _mm256_set1_epi8('\\');
+  const __m256i newline = _mm256_set1_epi8('\n');
+  const __m256i carriage_return = _mm256_set1_epi8('\r');
+  const __m256i lcurly = _mm256_set1_epi8('{');
+  const __m256i rcurly = _mm256_set1_epi8('}');
+
+  while ((size_t)(end - cursor) >= 32) {
+    __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
+    __m256i mask = _mm256_or_si256(
+        _mm256_or_si256(
+            _mm256_or_si256(_mm256_cmpeq_epi8(chunk, quote),
+                            _mm256_cmpeq_epi8(chunk, backslash)),
+            _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
+                            _mm256_cmpeq_epi8(chunk, carriage_return))),
+        _mm256_or_si256(_mm256_cmpeq_epi8(chunk, lcurly),
+                        _mm256_cmpeq_epi8(chunk, rcurly)));
+    unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
+    if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
+    cursor += 32;
+  }
+
+  while (cursor < end) {
+    char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c == '{'
+        || c == '}') {
+      break;
+    }
+    ++cursor;
+  }
+  return cursor;
+}
+#endif
+
+#if PYPARSE_HAVE_GNU_IFUNC
+static void *resolve_scan_string_plain_span_find_stop_nofmt_double(void)
+{
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2")) {
+    return (void *)scan_string_plain_span_find_stop_avx2_nofmt_double;
+  }
+  return (void *)scan_string_plain_span_find_stop_scalar_nofmt_double;
+}
+
+static void *resolve_scan_string_plain_span_find_stop_nofmt_single(void)
+{
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2")) {
+    return (void *)scan_string_plain_span_find_stop_avx2_nofmt_single;
+  }
+  return (void *)scan_string_plain_span_find_stop_scalar_nofmt_single;
+}
+
+static void *resolve_scan_string_plain_span_find_stop_fmt_double(void)
+{
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2")) {
+    return (void *)scan_string_plain_span_find_stop_avx2_fmt_double;
+  }
+  return (void *)scan_string_plain_span_find_stop_scalar_fmt_double;
+}
+
+static void *resolve_scan_string_plain_span_find_stop_fmt_single(void)
+{
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2")) {
+    return (void *)scan_string_plain_span_find_stop_avx2_fmt_single;
+  }
+  return (void *)scan_string_plain_span_find_stop_scalar_fmt_single;
+}
+
+static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
+                                                            char *end)
+    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_nofmt_double")));
+static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
+                                                            char *end)
+    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_nofmt_single")));
+static char *scan_string_plain_span_find_stop_fmt_double(char *cursor, char *end)
+    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_fmt_double")));
+static char *scan_string_plain_span_find_stop_fmt_single(char *cursor, char *end)
+    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_fmt_single")));
+#else
+static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
+                                                            char *end)
+{
+  return scan_string_plain_span_find_stop_scalar_nofmt_double(cursor, end);
+}
+
+static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
+                                                            char *end)
+{
+  return scan_string_plain_span_find_stop_scalar_nofmt_single(cursor, end);
+}
+
+static char *scan_string_plain_span_find_stop_fmt_double(char *cursor, char *end)
+{
+  return scan_string_plain_span_find_stop_scalar_fmt_double(cursor, end);
+}
+
+static char *scan_string_plain_span_find_stop_fmt_single(char *cursor, char *end)
+{
+  return scan_string_plain_span_find_stop_scalar_fmt_single(cursor, end);
+}
+#endif
+
 static bool scan_string_plain_span(struct scanner_state *s,
                                    struct arena        *strings,
                                    char                 quote_char,
@@ -867,15 +1145,17 @@ static bool scan_string_plain_span(struct scanner_state *s,
     return false;
   }
 
-  char *cursor = start;
-  while (cursor < s->buffer_end) {
-    char c = *cursor;
-    if (c == quote_char || c == '\\' || c == '\n' || c == '\r'
-        || (format && (c == '{' || c == '}'))) {
-      break;
-    }
-    ++cursor;
+  char *end = s->buffer_end;
+  char *cursor = NULL;
+  if (quote_char == '"') {
+    cursor = format ? scan_string_plain_span_find_stop_fmt_double(start, end)
+                    : scan_string_plain_span_find_stop_nofmt_double(start, end);
+  } else {
+    assert(quote_char == '\'');
+    cursor = format ? scan_string_plain_span_find_stop_fmt_single(start, end)
+                    : scan_string_plain_span_find_stop_nofmt_single(start, end);
   }
+
   size_t span_size = (size_t)(cursor - start);
   if (span_size == 0) {
     return false;

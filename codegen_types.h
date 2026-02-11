@@ -11,6 +11,8 @@ ASSUME_NONNULL_BEGIN
 
 union object;
 struct diagnostics_state;
+struct ast_statement_list;
+struct pending_finally_state;
 
 struct basic_block {
   uint8_t                     *code_bytes;
@@ -35,30 +37,31 @@ struct loop_state {
 };
 
 struct code_state {
-  struct arena        opcodes;
-  union object       *consts;
-  union object       *names;
-  union object       *varnames;
-  union object       *freevars;
-  union object       *cellvars;
-  struct basic_block *current_block;
-  struct basic_block *first_block;
-  struct basic_block *last_block;
-  struct loop_state   loop_state;
-  unsigned            cg_stack_begin;
-  uint16_t            outer_scope_id;
-  uint16_t            scope_id;
-  unsigned            argcount;
-  unsigned            positional_only_argcount;
-  unsigned            keyword_only_argcount;
-  unsigned            nlocals;
-  unsigned            stacksize;
-  unsigned            max_stacksize;
-  uint32_t            flags;
-  bool                in_function;
-  bool                in_async_function;
-  bool                in_class_body;
-  bool                setup_annotations;
+  struct arena                           opcodes;
+  union object                          *consts;
+  union object                          *names;
+  union object                          *varnames;
+  union object                          *freevars;
+  union object                          *cellvars;
+  struct basic_block                    *current_block;
+  struct basic_block                    *first_block;
+  struct basic_block                    *last_block;
+  struct loop_state                      loop_state;
+  unsigned                               cg_stack_begin;
+  uint16_t                               outer_scope_id;
+  uint16_t                               scope_id;
+  unsigned                               argcount;
+  unsigned                               positional_only_argcount;
+  unsigned                               keyword_only_argcount;
+  unsigned                               nlocals;
+  unsigned                               stacksize;
+  unsigned                               max_stacksize;
+  uint32_t                               flags;
+  bool                                   in_function;
+  bool                                   in_async_function;
+  bool                                   in_class_body;
+  bool                                   setup_annotations;
+  struct pending_finally_state *nullable pending_finally;
 };
 
 struct cg_state {

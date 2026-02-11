@@ -90,6 +90,14 @@ static void emit_comparison_multi(struct cg_state             *s,
   }
 }
 
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function);
+
+struct pending_finally_state {
+  struct ast_statement_list             *finally_body;
+  struct pending_finally_state *nullable prev;
+};
+
 void emit_comparison_multi_value(struct cg_state       *s,
                                  struct ast_comparison *comparison)
 {
@@ -1087,20 +1095,26 @@ static void emit_for_end(struct cg_state *s, struct for_while_state *state)
   emit_loop_end(s, state);
 }
 
-static bool emit_continue(struct cg_state *s)
+static bool emit_continue(struct cg_state         *s,
+                          struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   if (target == NULL) return false;
+  emit_pending_finally(s, current_function);
+  if (unreachable(s)) return true;
   if (!unreachable(s)) {
     cg_jump(s, target);
   }
   return true;
 }
 
-static bool emit_break(struct cg_state *s)
+static bool emit_break(struct cg_state         *s,
+                       struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.break_block;
   if (target == NULL) return false;
+  emit_pending_finally(s, current_function);
+  if (unreachable(s)) return true;
   if (!unreachable(s)) {
     if (s->code.loop_state.pop_on_break) {
       cg_op(s, OPCODE_POP_TOP, 0);
@@ -1420,6 +1434,8 @@ static void
                                               struct ast_def *nullable   current_function);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function);
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function);
 
 static bool symbol_array_contains(struct idynarray *array,
                                   struct symbol    *symbol)
@@ -1432,6 +1448,22 @@ static bool symbol_array_contains(struct idynarray *array,
     }
   }
   return false;
+}
+
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function)
+{
+  struct pending_finally_state *head = s->code.pending_finally;
+  for (struct pending_finally_state *state = head; state != NULL;
+       state = state->prev) {
+    s->code.pending_finally = state->prev;
+    emit_statement_list_with_function(s, state->finally_body,
+                                      current_function);
+    if (unreachable(s)) {
+      break;
+    }
+  }
+  s->code.pending_finally = head;
 }
 
 static bool symbol_array_append_unique(struct idynarray *array,
@@ -2361,6 +2393,15 @@ emit_nonlocal_statement_node(struct cg_state *s, struct location location,
 static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
                      struct ast_def *nullable current_function)
 {
+  struct pending_finally_state  finally_state;
+  struct pending_finally_state *saved_pending = s->code.pending_finally;
+  bool                          has_finally = (try_stmt->finally_body != NULL);
+  if (has_finally) {
+    finally_state.finally_body = try_stmt->finally_body;
+    finally_state.prev = saved_pending;
+    s->code.pending_finally = &finally_state;
+  }
+
   struct try_state state;
   emit_try_body_begin(s, &state);
   emit_statement_list_with_function(s, try_stmt->body, current_function);
@@ -2381,6 +2422,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   }
 
   if (try_stmt->finally_body != NULL) {
+    s->code.pending_finally = saved_pending;
     emit_try_finally_begin(s, &state);
     emit_statement_list_with_function(s, try_stmt->finally_body,
                                       current_function);
@@ -2388,6 +2430,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   }
 
   emit_try_end(s, &state);
+  s->code.pending_finally = saved_pending;
 }
 
 static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
@@ -2445,9 +2488,10 @@ static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
   }
 }
 
-static void emit_break_statement(struct cg_state *s, struct location location)
+static void emit_break_statement(struct cg_state *s, struct location location,
+                                 struct ast_def *nullable current_function)
 {
-  if (!emit_break(s)) {
+  if (!emit_break(s, current_function)) {
     diag_begin_error(s->d, location);
     diag_token_kind(s->d, T_break);
     diag_frag(s->d, " outside loop");
@@ -2455,10 +2499,11 @@ static void emit_break_statement(struct cg_state *s, struct location location)
   }
 }
 
-static void emit_continue_statement(struct cg_state *s,
-                                    struct location  location)
+static void emit_continue_statement(struct cg_state         *s,
+                                    struct location          location,
+                                    struct ast_def *nullable current_function)
 {
-  if (!emit_continue(s)) {
+  if (!emit_continue(s, current_function)) {
     diag_begin_error(s->d, location);
     diag_token_kind(s->d, T_continue);
     diag_frag(s->d, " outside loop");
@@ -2494,7 +2539,8 @@ static void emit_raise(struct cg_state *s, struct ast_raise *raise)
 }
 
 static void emit_return(struct cg_state *s, struct location location,
-                        struct ast_return *return_stmt)
+                        struct ast_return       *return_stmt,
+                        struct ast_def *nullable current_function)
 {
   if (!cg_in_function(s)) {
     diag_begin_error(s->d, location);
@@ -2507,6 +2553,19 @@ static void emit_return(struct cg_state *s, struct location location,
       emit_expression(s, return_stmt->expression);
     } else {
       cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    }
+    if (s->code.pending_finally != NULL) {
+      struct symbol *tmp
+          = symbol_table_get_or_insert(s->symbol_table, "<pyparse-return>");
+      if (cg_in_function(s)) {
+        cg_declare(s, tmp, SYMBOL_LOCAL);
+      }
+      cg_store(s, tmp);
+      emit_pending_finally(s, current_function);
+      if (unreachable(s)) {
+        return;
+      }
+      cg_load(s, tmp);
     }
     cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
     cg_block_end(s);
@@ -2548,13 +2607,13 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_augassign(s, &statement->augassign);
     return;
   case AST_STATEMENT_BREAK:
-    emit_break_statement(s, statement->base.location);
+    emit_break_statement(s, statement->base.location, current_function);
     return;
   case AST_STATEMENT_CLASS:
     emit_class(s, &statement->class_);
     return;
   case AST_STATEMENT_CONTINUE:
-    emit_continue_statement(s, statement->base.location);
+    emit_continue_statement(s, statement->base.location, current_function);
     return;
   case AST_STATEMENT_DEF:
     emit_def(s, &statement->def);
@@ -2591,7 +2650,8 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_raise(s, &statement->raise);
     return;
   case AST_STATEMENT_RETURN:
-    emit_return(s, statement->base.location, &statement->return_);
+    emit_return(s, statement->base.location, &statement->return_,
+                current_function);
     return;
   case AST_STATEMENT_TRY:
     emit_try(s, &statement->try_, current_function);

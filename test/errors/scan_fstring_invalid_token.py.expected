@@ -1,0 +1,2 @@
+test/errors/scan_fstring_invalid_token.py:1 error: invalid token inside f-string: got `,`
+test/errors/scan_fstring_invalid_token.py:1 error: expected new line, got f-string end ""

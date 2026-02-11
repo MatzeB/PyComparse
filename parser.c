@@ -1115,8 +1115,16 @@ static union ast_expression *parse_string(struct parser_state *s)
         mixed_types = scanner_location(&s->scanner);
       }
       for (;;) {
-        assert(peek(s) == T_FSTRING_START || peek(s) == T_FSTRING_FRAGMENT
-               || peek(s) == T_FSTRING_END);
+        if (peek(s) != T_FSTRING_START && peek(s) != T_FSTRING_FRAGMENT
+            && peek(s) != T_FSTRING_END) {
+          diag_begin_error(s->d, scanner_location(&s->scanner));
+          diag_frag(s->d, "invalid token inside f-string: got ");
+          diag_token_kind(s->d, peek(s));
+          diag_end(s->d);
+          idynarray_free(&elements);
+          idynarray_free(&strings);
+          return invalid_expression(s);
+        }
         string = peek_get_object(s, peek(s));
 
         if (object_string_length(string) > 0) {

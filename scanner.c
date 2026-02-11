@@ -780,6 +780,49 @@ static void fstring_pop(struct scanner_state *s)
   s->fstring = s->fstring_stack[--s->fstring_stack_top];
 }
 
+static bool scan_string_plain_span(struct scanner_state *s,
+                                   struct arena        *strings,
+                                   char                 quote_char,
+                                   bool                 format)
+{
+  if (s->c == C_EOF) {
+    return false;
+  }
+  if (s->p == NULL || s->buffer_end == NULL || s->read_buffer == NULL) {
+    return false;
+  }
+
+  char *start;
+  if (s->p > s->read_buffer && s->p[-1] == (char)s->c) {
+    start = s->p - 1;
+  } else if (s->p < s->buffer_end && s->p[0] == (char)s->c) {
+    start = s->p;
+  } else {
+    return false;
+  }
+
+  char *cursor = start;
+  while (cursor < s->buffer_end) {
+    char c = *cursor;
+    if (c == quote_char || c == '\\' || c == '\n' || c == '\r'
+        || (format && (c == '{' || c == '}'))) {
+      break;
+    }
+    ++cursor;
+  }
+  size_t span_size = (size_t)(cursor - start);
+  if (span_size == 0) {
+    return false;
+  }
+
+  char *dst = (char *)arena_grow(strings, (unsigned)span_size);
+  memcpy(dst, start, span_size);
+
+  s->p = cursor;
+  next_char(s);
+  return true;
+}
+
 static void scan_string_literal(struct scanner_state    *s,
                                 struct scan_string_flags flags)
 {
@@ -827,6 +870,9 @@ static void scan_string_literal(struct scanner_state    *s,
   }
 
   for (;;) {
+    if (scan_string_plain_span(s, strings, quote_char, flags.format)) {
+      continue;
+    }
     /* vectorize this search? */
     switch (s->c) {
     case '"':

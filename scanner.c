@@ -166,6 +166,83 @@ static void pushback_char(struct scanner_state *s, int c)
   s->c = c;
 }
 
+static inline char *nullable scanner_current_char_ptr(struct scanner_state *s)
+{
+  if (s->c == C_EOF || s->read_buffer == NULL || s->p == NULL
+      || s->buffer_end == NULL) {
+    return NULL;
+  }
+  if (s->p > s->read_buffer && s->p[-1] == (char)s->c) {
+    return s->p - 1;
+  }
+  if (s->p < s->buffer_end && s->p[0] == (char)s->c) {
+    return s->p;
+  }
+  return NULL;
+}
+
+static inline void scanner_set_current_char_ptr(struct scanner_state *s,
+                                                char                 *p)
+{
+  assert(p < s->buffer_end);
+  s->c = (unsigned char)*p;
+  s->p = p + 1;
+}
+
+static void scan_skip_inline_spaces(struct scanner_state *s)
+{
+  for (;;) {
+    if (s->c != ' ' && s->c != '\t' && s->c != '\014') {
+      return;
+    }
+
+    char *p = scanner_current_char_ptr(s);
+    if (p == NULL) {
+      next_char(s);
+      continue;
+    }
+    while (p < s->buffer_end
+           && (*p == ' ' || *p == '\t' || *p == '\014')) {
+      ++p;
+    }
+    if (p < s->buffer_end) {
+      scanner_set_current_char_ptr(s, p);
+      return;
+    }
+
+    s->p = s->buffer_end;
+    next_char(s);
+  }
+}
+
+static void scan_indentation_spaces(struct scanner_state *s, unsigned *column)
+{
+  for (;;) {
+    if (s->c != ' ') {
+      return;
+    }
+
+    char *p = scanner_current_char_ptr(s);
+    if (p == NULL) {
+      next_char(s);
+      ++*column;
+      continue;
+    }
+    char *begin = p;
+    while (p < s->buffer_end && *p == ' ') {
+      ++p;
+    }
+    *column += (unsigned)(p - begin);
+    if (p < s->buffer_end) {
+      scanner_set_current_char_ptr(s, p);
+      return;
+    }
+
+    s->p = s->buffer_end;
+    next_char(s);
+  }
+}
+
 static void arena_grow_utf8_codepoint(struct arena *strings,
                                       uint32_t      codepoint)
 {
@@ -785,19 +862,8 @@ static bool scan_string_plain_span(struct scanner_state *s,
                                    char                 quote_char,
                                    bool                 format)
 {
-  if (s->c == C_EOF) {
-    return false;
-  }
-  if (s->p == NULL || s->buffer_end == NULL || s->read_buffer == NULL) {
-    return false;
-  }
-
-  char *start;
-  if (s->p > s->read_buffer && s->p[-1] == (char)s->c) {
-    start = s->p - 1;
-  } else if (s->p < s->buffer_end && s->p[0] == (char)s->c) {
-    start = s->p;
-  } else {
+  char *start = scanner_current_char_ptr(s);
+  if (start == NULL) {
     return false;
   }
 
@@ -1020,8 +1086,7 @@ static bool scan_indentation(struct scanner_state *s)
       column = 0;
       continue;
     case ' ':
-      next_char(s);
-      ++column;
+      scan_indentation_spaces(s, &column);
       continue;
     case '\t':
       next_char(s);
@@ -1138,7 +1203,7 @@ begin_new_line:
     case ' ':
     case '\t':
     case '\014':
-      next_char(s);
+      scan_skip_inline_spaces(s);
       continue;
 
     case '#':

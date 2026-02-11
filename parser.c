@@ -2296,7 +2296,14 @@ static struct ast_statement_list *empty_statement_list(struct parser_state *s)
 static void parse_type_parameters(struct parser_state *s)
 {
   if (accept(s, '[')) {
-    unimplemented("generic type syntax");
+    diag_begin_error(s->d, scanner_location(&s->scanner));
+    diag_frag(s->d, "type parameters are not supported in Python 3.8 target");
+    diag_end(s->d);
+
+    add_anchor(s, ']');
+    eat_until_anchor(s);
+    accept(s, ']');
+    remove_anchor(s, ']');
   }
 }
 

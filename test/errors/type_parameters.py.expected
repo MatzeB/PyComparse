@@ -1,0 +1,2 @@
+test/errors/type_parameters.py:1 error: type parameters are not supported in Python 3.8 target
+test/errors/type_parameters.py:5 error: expected `(`, got `[`

@@ -2226,6 +2226,9 @@ emit_statement_list_with_function(struct cg_state           *s,
 
 static void emit_def(struct cg_state *s, struct ast_def *def)
 {
+  if (unreachable(s)) {
+    return;
+  }
   analyze_function_bindings(s, def, /*parent=*/NULL);
   for (unsigned i = 0; i < def->num_decorators; ++i) {
     emit_expression(s, def->decorators[i]);

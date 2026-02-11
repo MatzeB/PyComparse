@@ -1,0 +1,1 @@
+test/errors/stmt_async_with.py:2 error: `async with` outside async function

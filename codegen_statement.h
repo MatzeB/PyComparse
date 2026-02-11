@@ -34,6 +34,7 @@ struct make_function_state {
 struct for_while_state {
   struct basic_block *else_or_footer;
   struct loop_state   saved;
+  bool                async_for;
 };
 
 struct if_state {
@@ -58,6 +59,7 @@ struct try_state {
 
 struct with_state {
   struct basic_block *cleanup;
+  bool                async_with;
 };
 
 void          emit_module_begin(struct cg_state *s);

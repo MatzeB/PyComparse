@@ -44,6 +44,7 @@ enum generator_expression_part_type {
 
 struct generator_expression_part {
   enum generator_expression_part_type type;
+  bool                                async;
   union ast_expression *nullable      targets;
   union ast_expression               *expression;
 };

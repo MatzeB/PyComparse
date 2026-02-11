@@ -496,7 +496,7 @@ parse_generator_expression(struct parser_state     *s,
   struct idynarray                 parts;
   idynarray_init(&parts, inline_storage, sizeof(inline_storage));
 
-  while (peek(s) == T_for || peek(s) == T_if) {
+  while (peek(s) == T_for || peek(s) == T_if || peek(s) == T_async) {
     struct generator_expression_part *part
         = idynarray_append(&parts, struct generator_expression_part);
     if (peek(s) == T_for) {
@@ -506,6 +506,18 @@ parse_generator_expression(struct parser_state     *s,
       union ast_expression *expression = parse_expression(s, PREC_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_FOR;
+      part->async = false;
+      part->targets = targets;
+      part->expression = expression;
+    } else if (peek(s) == T_async) {
+      eat(s, T_async);
+      expect(s, T_for);
+      union ast_expression *targets = parse_star_expressions(s, PREC_OR);
+      expect(s, T_in);
+      union ast_expression *expression = parse_expression(s, PREC_OR);
+
+      part->type = GENERATOR_EXPRESSION_PART_FOR;
+      part->async = true;
       part->targets = targets;
       part->expression = expression;
     } else {
@@ -513,6 +525,7 @@ parse_generator_expression(struct parser_state     *s,
       union ast_expression *expression = parse_expression(s, PREC_LOGICAL_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_IF;
+      part->async = false;
       part->targets = NULL;
       part->expression = expression;
     }
@@ -553,7 +566,7 @@ static struct argument *parse_argument(struct parser_state *s,
     expression = parse_expression(s, PREC_NAMED);
   }
 
-  if (peek(s) == T_for) {
+  if (peek(s) == T_for || peek(s) == T_async) {
     union ast_expression *item = expression;
     expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
     expression->generator_expression.expression = item;
@@ -779,7 +792,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   union ast_expression *first = parse_star_expression(s, PREC_NAMED);
 
   union ast_expression *expression;
-  if (peek(s) == T_for) {
+  if (peek(s) == T_for || peek(s) == T_async) {
     /* TODO: disallow star-expression */
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
     expression->generator_expression.expression = first;
@@ -826,7 +839,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
         /*allow_starred=*/true);
     /* TODO: check that there's no `**` elements in list */
     remove_anchor(s, ',');
-  } else if (peek(s) == T_for) {
+  } else if (peek(s) == T_for || peek(s) == T_async) {
     /* set comprehension */
     expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
     expression->generator_expression.expression = first;
@@ -836,7 +849,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
     value = parse_expression(s, PREC_NAMED);
 
     /* dict comprehension */
-    if (peek(s) == T_for) {
+    if (peek(s) == T_for || peek(s) == T_async) {
       expression = parse_generator_expression(s, AST_DICT_COMPREHENSION);
       expression->generator_expression.expression = key;
       expression->generator_expression.item_value = value;
@@ -918,7 +931,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     }
   } else {
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
-    if (peek(s) == T_for) {
+    if (peek(s) == T_for || peek(s) == T_async) {
       /* TODO: disallow star-expression */
       expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
       expression->generator_expression.expression = first;
@@ -2324,10 +2337,12 @@ static union ast_statement *parse_class(struct parser_state   *s,
 static union ast_statement *parse_def(struct parser_state   *s,
                                       struct location        location,
                                       unsigned               num_decorators,
-                                      union ast_expression **decorators)
+                                      union ast_expression **decorators,
+                                      bool async_prefix_consumed)
 {
-  bool async = false;
+  bool async = async_prefix_consumed;
   if (accept(s, T_async)) {
+    assert(!async_prefix_consumed);
     async = true;
   }
   expect(s, T_def);
@@ -2399,7 +2414,8 @@ parse_decorator_statement(struct parser_state *s)
     return parse_class(s, location, num_decorators, decorator_arr);
   case T_async:
   case T_def:
-    return parse_def(s, location, num_decorators, decorator_arr);
+    return parse_def(s, location, num_decorators, decorator_arr,
+                     /*async_prefix_consumed=*/false);
   default:
     diag_begin_error(s->d, scanner_location(&s->scanner));
     diag_frag(s->d, "expected ");
@@ -2415,7 +2431,7 @@ parse_decorator_statement(struct parser_state *s)
   }
 }
 
-static union ast_statement *parse_for(struct parser_state *s)
+static union ast_statement *parse_for(struct parser_state *s, bool async)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_for);
@@ -2446,6 +2462,7 @@ static union ast_statement *parse_for(struct parser_state *s)
 
   union ast_statement *statement
       = ast_allocate_statement(s, struct ast_for, AST_STATEMENT_FOR, location);
+  statement->for_.async = async;
   statement->for_.targets = targets;
   statement->for_.expression = expression;
   statement->for_.body = body;
@@ -2612,7 +2629,7 @@ static union ast_statement *parse_while(struct parser_state *s)
   return statement;
 }
 
-static union ast_statement *parse_with(struct parser_state *s)
+static union ast_statement *parse_with(struct parser_state *s, bool async)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_with);
@@ -2646,6 +2663,7 @@ static union ast_statement *parse_with(struct parser_state *s)
 
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_with, AST_STATEMENT_WITH, location);
+  statement->with.async = async;
   statement->with.num_items = num_items;
   statement->with.items = items_arr;
   statement->with.body = body;
@@ -2696,13 +2714,42 @@ static void parse_statement(struct parser_state *s,
     *idynarray_append(statements, union ast_statement *) = parse_class(
         s, scanner_location(&s->scanner), /*num_decorators=*/0, NULL);
     break;
-  case T_async:
   case T_def:
     *idynarray_append(statements, union ast_statement *) = parse_def(
-        s, scanner_location(&s->scanner), /*num_decorators=*/0, NULL);
+        s, scanner_location(&s->scanner), /*num_decorators=*/0, NULL,
+        /*async_prefix_consumed=*/false);
     break;
+  case T_async: {
+    struct location location = scanner_location(&s->scanner);
+    eat(s, T_async);
+    if (peek(s) == T_for) {
+      *idynarray_append(statements, union ast_statement *)
+          = parse_for(s, /*async=*/true);
+    } else if (peek(s) == T_with) {
+      *idynarray_append(statements, union ast_statement *)
+          = parse_with(s, /*async=*/true);
+    } else if (peek(s) == T_def) {
+      *idynarray_append(statements, union ast_statement *)
+          = parse_def(s, location, /*num_decorators=*/0, NULL,
+                      /*async_prefix_consumed=*/true);
+    } else {
+      diag_begin_error(s->d, scanner_location(&s->scanner));
+      diag_frag(s->d, "expected ");
+      diag_token_kind(s->d, T_def);
+      diag_frag(s->d, ", ");
+      diag_token_kind(s->d, T_for);
+      diag_frag(s->d, " or ");
+      diag_token_kind(s->d, T_with);
+      diag_frag(s->d, " after ");
+      diag_token_kind(s->d, T_async);
+      diag_end(s->d);
+      eat_until_anchor(s);
+    }
+    break;
+  }
   case T_for:
-    *idynarray_append(statements, union ast_statement *) = parse_for(s);
+    *idynarray_append(statements, union ast_statement *)
+        = parse_for(s, /*async=*/false);
     break;
   case T_if:
     *idynarray_append(statements, union ast_statement *) = parse_if(s);
@@ -2714,7 +2761,8 @@ static void parse_statement(struct parser_state *s,
     *idynarray_append(statements, union ast_statement *) = parse_while(s);
     break;
   case T_with:
-    *idynarray_append(statements, union ast_statement *) = parse_with(s);
+    *idynarray_append(statements, union ast_statement *)
+        = parse_with(s, /*async=*/false);
     break;
   case T_INVALID:
     next_token(s);

@@ -110,6 +110,7 @@ struct ast_expression_statement {
 
 struct ast_for {
   struct ast_statement_base           base;
+  bool                                async;
   union ast_expression               *targets;
   union ast_expression               *expression;
   struct ast_statement_list          *body;
@@ -206,6 +207,7 @@ struct ast_with_item {
 
 struct ast_with {
   struct ast_statement_base      base;
+  bool                           async;
   unsigned                       num_items;
   struct ast_with_item *nullable items;
   struct ast_statement_list     *body;

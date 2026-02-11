@@ -27,9 +27,38 @@ emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
                       const char                      *name)
 {
+  bool async_comprehension = false;
+  bool first_part_async = false;
+  if (generator_expression->num_parts > 0
+      && generator_expression->parts[0].type
+             == GENERATOR_EXPRESSION_PART_FOR) {
+    first_part_async = generator_expression->parts[0].async;
+    for (unsigned i = 0; i < generator_expression->num_parts; ++i) {
+      struct generator_expression_part *part = &generator_expression->parts[i];
+      if (part->type == GENERATOR_EXPRESSION_PART_FOR && part->async) {
+        async_comprehension = true;
+        break;
+      }
+    }
+  }
+  if (async_comprehension && !s->code.in_async_function) {
+    struct location location = INVALID_LOCATION;
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "asynchronous comprehension outside async function");
+    diag_end(s->d);
+  }
+
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
+  s->code.in_async_function = async_comprehension;
   emit_generator_expression_code(s, generator_expression);
+  if (async_comprehension) {
+    if (s->code.flags & CO_GENERATOR) {
+      s->code.flags = (s->code.flags & ~CO_GENERATOR) | CO_ASYNC_GENERATOR;
+    } else {
+      s->code.flags |= CO_COROUTINE;
+    }
+  }
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, name);
@@ -39,8 +68,22 @@ emit_generator_helper(struct cg_state                 *s,
 
   struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
-  cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
+  if (first_part_async) {
+    cg_push(s, 8);
+    cg_pop(s, 8);
+    cg_op_pop_push(s, OPCODE_GET_AITER, 0, /*pop=*/1, /*push=*/1);
+  } else {
+    cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
+  }
   cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
+  if (async_comprehension
+      && generator_expression->base.base.type != AST_GENERATOR_EXPRESSION) {
+    cg_push(s, 4);
+    cg_pop(s, 4);
+    cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+  }
 }
 
 static void emit_expression_list_helper(

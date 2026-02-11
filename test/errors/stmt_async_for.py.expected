@@ -1,0 +1,1 @@
+test/errors/stmt_async_for.py:2 error: `async for` outside async function

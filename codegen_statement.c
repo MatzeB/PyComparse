@@ -965,6 +965,62 @@ static void emit_for_begin_impl(struct cg_state        *s,
 
   state->else_or_footer = else_block;
   state->saved = s->code.loop_state;
+  state->async_for = false;
+  s->code.loop_state = (struct loop_state){
+    .continue_block = header,
+    .break_block = footer,
+    .pop_on_break = true,
+  };
+}
+
+static void emit_for_begin_sync(struct cg_state        *s,
+                                struct for_while_state *state,
+                                union ast_expression   *targets,
+                                union ast_expression   *expression)
+{
+  if (unreachable(s)) {
+    memset(state, 0, sizeof(*state));
+    return;
+  }
+  emit_expression(s, expression);
+  cg_op(s, OPCODE_GET_ITER, 0);
+  emit_for_begin_impl(s, state, targets);
+}
+
+static void emit_for_begin_async(struct cg_state        *s,
+                                 struct for_while_state *state,
+                                 union ast_expression   *targets,
+                                 union ast_expression   *expression)
+{
+  if (unreachable(s)) {
+    memset(state, 0, sizeof(*state));
+    return;
+  }
+  cg_push(s, 8);
+  cg_pop(s, 8);
+
+  emit_expression(s, expression);
+  cg_op(s, OPCODE_GET_AITER, 0);
+
+  struct basic_block *header = cg_block_allocate(s);
+  struct basic_block *footer = cg_block_allocate(s);
+  struct basic_block *else_block = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
+
+  cg_jump(s, header);
+  cg_block_begin(s, header);
+  cg_condjump(s, OPCODE_SETUP_FINALLY, else_block, body);
+
+  cg_block_begin(s, body);
+  cg_op(s, OPCODE_GET_ANEXT, 0);
+  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+  cg_op(s, OPCODE_POP_BLOCK, 0);
+  emit_assignment(s, targets);
+
+  state->else_or_footer = else_block;
+  state->saved = s->code.loop_state;
+  state->async_for = true;
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
@@ -974,15 +1030,19 @@ static void emit_for_begin_impl(struct cg_state        *s,
 
 static void emit_for_begin(struct cg_state *s, struct for_while_state *state,
                            union ast_expression *targets,
-                           union ast_expression *expression)
+                           union ast_expression *expression, bool async,
+                           struct location location)
 {
-  if (unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
+  if (async && (!cg_in_function(s) || !s->code.in_async_function)) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`async for` outside async function");
+    diag_end(s->d);
   }
-  emit_expression(s, expression);
-  cg_op(s, OPCODE_GET_ITER, 0);
-  emit_for_begin_impl(s, state, targets);
+  if (async) {
+    emit_for_begin_async(s, state, targets, expression);
+  } else {
+    emit_for_begin_sync(s, state, targets, expression);
+  }
 }
 
 static void emit_loop_else(struct cg_state *s, struct for_while_state *state)
@@ -1015,7 +1075,11 @@ static void emit_loop_end(struct cg_state *s, struct for_while_state *state)
 static void emit_for_else(struct cg_state *s, struct for_while_state *state)
 {
   emit_loop_else(s, state);
-  cg_pop(s, 1);
+  if (state->async_for) {
+    cg_op(s, OPCODE_END_ASYNC_FOR, 0);
+  } else {
+    cg_pop(s, 1);
+  }
 }
 
 static void emit_for_end(struct cg_state *s, struct for_while_state *state)
@@ -1170,7 +1234,8 @@ static void emit_generator_expression_part(
     struct for_while_state state;
     union ast_expression  *targets = part->targets;
     assert(targets != NULL);
-    emit_for_begin(s, &state, targets, part->expression);
+    emit_for_begin(s, &state, targets, part->expression, part->async,
+                   INVALID_LOCATION);
 
     emit_generator_expression_part(s, generator_expression, part_index + 1);
 
@@ -1216,7 +1281,36 @@ void emit_generator_expression_code(
   struct generator_expression_part *part = generator_expression->parts;
   cg_op_push1(s, OPCODE_LOAD_FAST, 0);
   struct for_while_state state;
-  emit_for_begin_impl(s, &state, part->targets);
+  if (part->async) {
+    cg_push(s, 8);
+    cg_pop(s, 8);
+    state.async_for = true;
+    struct basic_block *header = cg_block_allocate(s);
+    struct basic_block *footer = cg_block_allocate(s);
+    struct basic_block *else_block = cg_block_allocate(s);
+    struct basic_block *body = cg_block_allocate(s);
+
+    cg_jump(s, header);
+    cg_block_begin(s, header);
+    cg_condjump(s, OPCODE_SETUP_FINALLY, else_block, body);
+
+    cg_block_begin(s, body);
+    cg_op(s, OPCODE_GET_ANEXT, 0);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+    cg_op(s, OPCODE_POP_BLOCK, 0);
+    emit_assignment(s, part->targets);
+
+    state.else_or_footer = else_block;
+    state.saved = s->code.loop_state;
+    s->code.loop_state = (struct loop_state){
+      .continue_block = header,
+      .break_block = footer,
+      .pop_on_break = true,
+    };
+  } else {
+    emit_for_begin_impl(s, &state, part->targets);
+  }
 
   emit_generator_expression_part(s, generator_expression, /*part_index=*/1);
 
@@ -1231,11 +1325,23 @@ void emit_generator_expression_code(
 
 static void emit_with_begin(struct cg_state *s, struct with_state *state,
                             union ast_expression *expression,
-                            union ast_expression *targets)
+                            union ast_expression *targets, bool async,
+                            struct location location)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
     return;
+  }
+  state->async_with = async;
+
+  if (async && (!cg_in_function(s) || !s->code.in_async_function)) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`async with` outside async function");
+    diag_end(s->d);
+  }
+  if (async) {
+    cg_push(s, 8);
+    cg_pop(s, 8);
   }
 
   struct basic_block *cleanup = cg_block_allocate(s);
@@ -1243,7 +1349,15 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
   state->cleanup = cleanup;
 
   emit_expression(s, expression);
-  cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
+  if (async) {
+    cg_op(s, OPCODE_BEFORE_ASYNC_WITH, 0);
+    cg_op(s, OPCODE_GET_AWAITABLE, 0);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+    cg_condjump(s, OPCODE_SETUP_ASYNC_WITH, cleanup, body);
+  } else {
+    cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
+  }
 
   cg_block_begin(s, body);
   if (targets != NULL) {
@@ -1264,6 +1378,11 @@ static void emit_with_end(struct cg_state *s, struct with_state *state)
 
   cg_block_begin(s, state->cleanup);
   cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
+  if (state->async_with) {
+    cg_op(s, OPCODE_GET_AWAITABLE, 0);
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+  }
   cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
   cg_op(s, OPCODE_END_FINALLY, 0);
 }
@@ -2157,7 +2276,8 @@ static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
                      struct ast_def *nullable current_function)
 {
   struct for_while_state state;
-  emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression);
+  emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression,
+                 for_stmt->async, for_stmt->base.location);
   emit_statement_list_with_function(s, for_stmt->body, current_function);
   emit_for_else(s, &state);
   if (for_stmt->else_body != NULL) {
@@ -2298,7 +2418,8 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
 
   for (unsigned i = 0; i < num_items; ++i) {
     struct ast_with_item *item = &with->items[i];
-    emit_with_begin(s, &states[i], item->expression, item->targets);
+    emit_with_begin(s, &states[i], item->expression, item->targets,
+                    with->async, with->base.location);
   }
   emit_statement_list_with_function(s, with->body, current_function);
   for (unsigned i = num_items; i-- > 0;) {

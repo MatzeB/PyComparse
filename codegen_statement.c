@@ -1406,6 +1406,7 @@ struct binding_scope {
   struct ast_def *nullable       def;
   struct cg_state               *cg;
   bool                           is_class;
+  bool                           class_needs_class_cell;
 
   struct symbol    *locals_inline[16];
   struct symbol    *bound_before_decl_inline[16];
@@ -1448,6 +1449,11 @@ static bool symbol_array_contains(struct idynarray *array,
     }
   }
   return false;
+}
+
+static bool is_class_symbol(struct symbol *symbol)
+{
+  return strcmp(symbol->string, "__class__") == 0;
 }
 
 static void emit_pending_finally(struct cg_state         *s,
@@ -1540,7 +1546,7 @@ static bool resolve_from_parent_scope(struct binding_scope *nullable scope,
   }
 
   if (scope->is_class) {
-    if (symbol_array_contains(&scope->cellvars, name)) {
+    if (scope->class_needs_class_cell && is_class_symbol(name)) {
       return true;
     }
     if (symbol_array_contains(&scope->freevars, name)) {
@@ -1886,7 +1892,7 @@ static void analyze_statement_collect(struct binding_scope *scope,
   }
   case AST_STATEMENT_DEL:
     analyze_assignment_target(scope, statement->del.targets,
-                              /*bind=*/false);
+                              /*bind=*/true);
     return;
   case AST_STATEMENT_EXPRESSION:
     analyze_expression(scope, statement->expression.expression);
@@ -2037,10 +2043,10 @@ static void analyze_class_bindings(struct cg_state               *s,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (strcmp(name->string, "__class__") == 0 && scope.parent != NULL
+      if (is_class_symbol(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
-        symbol_array_append_unique(&scope.parent->cellvars, name);
+        scope.parent->class_needs_class_cell = true;
         continue;
       }
       diag_begin_error(s->d, class_stmt->base.location);
@@ -2074,9 +2080,7 @@ static void analyze_class_bindings(struct cg_state               *s,
   class_stmt->num_scope_locals
       = idynarray_length(&scope.locals, struct symbol *);
   class_stmt->scope_locals = symbol_array_copy(s, &scope.locals);
-  class_stmt->num_scope_cellvars
-      = idynarray_length(&scope.cellvars, struct symbol *);
-  class_stmt->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
+  class_stmt->needs_class_cell = scope.class_needs_class_cell;
   class_stmt->num_scope_freevars
       = idynarray_length(&scope.freevars, struct symbol *);
   class_stmt->scope_freevars = symbol_array_copy(s, &scope.freevars);
@@ -2119,10 +2123,10 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (strcmp(name->string, "__class__") == 0 && scope.parent != NULL
+      if (is_class_symbol(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
-        symbol_array_append_unique(&scope.parent->cellvars, name);
+        scope.parent->class_needs_class_cell = true;
         continue;
       }
       diag_begin_error(s->d, def->base.location);
@@ -2147,10 +2151,10 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
     }
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
-    } else if (strcmp(name->string, "__class__") == 0 && scope.parent != NULL
+    } else if (is_class_symbol(name) && scope.parent != NULL
                && scope.parent->is_class) {
       symbol_array_append_unique(&scope.freevars, name);
-      symbol_array_append_unique(&scope.parent->cellvars, name);
+      scope.parent->class_needs_class_cell = true;
     }
   }
 
@@ -2170,8 +2174,10 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
 static void apply_class_bindings(struct cg_state  *s,
                                  struct ast_class *class_stmt)
 {
-  for (unsigned i = 0; i < class_stmt->num_scope_cellvars; ++i) {
-    cg_declare(s, class_stmt->scope_cellvars[i], SYMBOL_CELL);
+  if (class_stmt->needs_class_cell) {
+    struct symbol *class_symbol
+        = symbol_table_get_or_insert(s->symbol_table, "__class__");
+    cg_declare(s, class_symbol, SYMBOL_CELL);
   }
   for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
     cg_register_freevar(s, class_stmt->scope_freevars[i]);
@@ -2201,16 +2207,6 @@ static void apply_class_bindings(struct cg_state  *s,
 
     cg_declare(s, class_stmt->scope_freevars[i], SYMBOL_NONLOCAL);
   }
-}
-
-static bool class_has_class_cellvar(struct ast_class *class_stmt)
-{
-  for (unsigned i = 0; i < class_stmt->num_scope_cellvars; ++i) {
-    if (strcmp(class_stmt->scope_cellvars[i]->string, "__class__") == 0) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static void apply_function_bindings(struct cg_state *s, struct ast_def *def)
@@ -2313,7 +2309,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   apply_class_bindings(s, class_stmt);
   emit_statement_list_with_function(s, class_stmt->body,
                                     /*current_function=*/NULL);
-  if (class_has_class_cellvar(class_stmt)) {
+  if (class_stmt->needs_class_cell) {
     if (!unreachable(s)) {
       struct symbol *class_symbol
           = symbol_table_get_or_insert(s->symbol_table, "__class__");

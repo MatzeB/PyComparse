@@ -63,12 +63,11 @@ struct ast_class {
   unsigned                                  num_decorators;
   union ast_expression * nonnull * nullable decorators;
   bool                                      scope_bindings_ready;
+  bool                                      needs_class_cell;
   unsigned                                  num_scope_globals;
   struct symbol * nonnull * nullable        scope_globals;
   unsigned                                  num_scope_locals;
   struct symbol * nonnull * nullable        scope_locals;
-  unsigned                                  num_scope_cellvars;
-  struct symbol * nonnull * nullable        scope_cellvars;
   unsigned                                  num_scope_freevars;
   struct symbol * nonnull * nullable        scope_freevars;
 };

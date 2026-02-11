@@ -136,6 +136,7 @@ enum object_type object_type(const union object *object)
 
 union object *object_new_singleton(struct arena *arena, enum object_type type)
 {
+  (void)object_type_is_singleton;
   assert(object_type_is_singleton(type));
   return object_allocate_zero(arena, struct object_base, type);
 }
@@ -145,6 +146,7 @@ union object *object_new_string(struct arena *arena, enum object_type type,
 {
   assert(chars != NULL);
   assert(length < UINT32_MAX);
+  (void)object_type_is_string;
   assert(object_type_is_string(type));
   union object *object
       = object_allocate_zero(arena, struct object_string, type);

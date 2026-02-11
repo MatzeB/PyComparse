@@ -24,6 +24,7 @@ static void alloc_some(struct arena *arena)
       assert(arena_grow_current_size(arena) == 13);
       char *str = (char *)arena_grow_finish(arena);
       assert(strcmp(str, "Hello World!") == 0);
+      (void)str;
     }
   }
 }

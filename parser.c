@@ -82,6 +82,7 @@ static inline struct symbol *eat_identifier(struct parser_state *s)
 static inline union object *peek_get_object(struct parser_state *s,
                                             enum token_kind      token_kind)
 {
+  (void)token_kind;
   assert(token_kind == T_STRING || token_kind == T_INTEGER
          || token_kind == T_FLOAT || token_kind == T_FSTRING_START
          || token_kind == T_FSTRING_FRAGMENT || token_kind == T_FSTRING_END);

@@ -26,6 +26,26 @@ The build produces three main executables:
 mkdir -p build && cd build && cmake .. && make
 ```
 
+### Performance Builds
+For performance profiling/benchmarking, use an optimized CMake build and do
+not rely on the default build type:
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j
+```
+Use `build-release/parser_test` (or an equivalent `-O3 -DNDEBUG` binary) for
+`perf`/`valgrind` runs.
+
+For PGO + LTO builds, use:
+```bash
+scripts/build_pgo_lto.sh
+```
+The helper performs:
+1. Instrumented `Release` build (`PYPARSE_PGO_MODE=generate`, `PYPARSE_ENABLE_LTO=ON`)
+2. Training run (default workload or `--train-cmd`)
+3. Profile merge (`llvm-profdata`)
+4. Final optimized `Release` build (`PYPARSE_PGO_MODE=use`, `PYPARSE_PGO_DATA=...`)
+
 ### Testing
 ```bash
 uv run ./test.sh

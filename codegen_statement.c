@@ -1433,6 +1433,9 @@ static void
             emit_statement_list_with_function(struct cg_state           *s,
                                               struct ast_statement_list *statement_list,
                                               struct ast_def *nullable   current_function);
+static void emit_statement_list_with_function_from(
+    struct cg_state *s, struct ast_statement_list *statement_list,
+    struct ast_def *nullable current_function, unsigned first_statement);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function);
 static void emit_pending_finally(struct cg_state         *s,
@@ -2238,11 +2241,39 @@ static void emit_function_closure(struct cg_state            *s,
   state->closure_symbols = def->scope_freevars;
 }
 
+static union object *nullable
+statement_leading_docstring(union ast_statement *statement)
+{
+  if (ast_statement_type(statement) != AST_STATEMENT_EXPRESSION) return NULL;
+  union ast_expression *expression = statement->expression.expression;
+  if (ast_expression_type(expression) != AST_CONST) return NULL;
+  union object *doc = expression->cnst.object;
+  if (object_type(doc) != OBJECT_STRING) return NULL;
+  return doc;
+}
+
+static union object *nullable
+statement_list_leading_docstring(struct ast_statement_list *statement_list)
+{
+  if (statement_list->num_statements == 0) return NULL;
+  return statement_leading_docstring(statement_list->statements[0]);
+}
+
 void emit_statement_list(struct cg_state           *s,
                          struct ast_statement_list *statement_list)
 {
-  emit_statement_list_with_function(s, statement_list,
-                                    /*current_function=*/NULL);
+  unsigned      first_statement = 0;
+  union object *doc = statement_list_leading_docstring(statement_list);
+  if (doc != NULL) {
+    union ast_statement *first = statement_list->statements[0];
+    cg_set_lineno(s, first->base.location.line);
+    cg_load_const(s, doc);
+    cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    first_statement = 1;
+  }
+  emit_statement_list_with_function_from(s, statement_list,
+                                         /*current_function=*/NULL,
+                                         first_statement);
 }
 
 static void
@@ -2250,7 +2281,15 @@ emit_statement_list_with_function(struct cg_state           *s,
                                   struct ast_statement_list *statement_list,
                                   struct ast_def *nullable   current_function)
 {
-  for (unsigned i = 0; i < statement_list->num_statements; ++i) {
+  emit_statement_list_with_function_from(s, statement_list, current_function,
+                                         /*first_statement=*/0);
+}
+
+static void emit_statement_list_with_function_from(
+    struct cg_state *s, struct ast_statement_list *statement_list,
+    struct ast_def *nullable current_function, unsigned first_statement)
+{
+  for (unsigned i = first_statement; i < statement_list->num_statements; ++i) {
     emit_statement(s, statement_list->statements[i], current_function);
   }
 }
@@ -2269,9 +2308,12 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   emit_make_function_begin(s, &state, def->num_parameters, def->parameters,
                            def->positional_only_argcount, def->async,
                            def->return_type);
+  union object *doc = statement_list_leading_docstring(def->body);
+  cg_set_function_docstring(s, doc);
   apply_function_bindings(s, def);
   cg_set_lineno(s, def->base.location.line);
-  emit_statement_list_with_function(s, def->body, def);
+  emit_statement_list_with_function_from(s, def->body, def,
+                                         doc != NULL ? 1u : 0u);
   if (def->has_yield) {
     s->code.flags |= CO_GENERATOR;
   }
@@ -2308,9 +2350,19 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 
   apply_class_bindings(s, class_stmt);
+  union object *doc = statement_list_leading_docstring(class_stmt->body);
+  unsigned      first_statement = 0;
+  if (doc != NULL) {
+    union ast_statement *first = class_stmt->body->statements[0];
+    cg_set_lineno(s, first->base.location.line);
+    cg_load_const(s, doc);
+    cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    first_statement = 1;
+  }
   cg_set_lineno(s, class_stmt->base.location.line);
-  emit_statement_list_with_function(s, class_stmt->body,
-                                    /*current_function=*/NULL);
+  emit_statement_list_with_function_from(s, class_stmt->body,
+                                         /*current_function=*/NULL,
+                                         first_statement);
   if (class_stmt->needs_class_cell) {
     if (!unreachable(s)) {
       struct symbol *class_symbol

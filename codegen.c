@@ -8,6 +8,7 @@
 #include "adt/arena.h"
 #include "adt/dynmemory.h"
 #include "object.h"
+#include "object_intern.h"
 #include "object_types.h"
 #include "opcodes.h"
 #include "symbol_types.h"
@@ -206,6 +207,8 @@ void cg_code_begin(struct cg_state *s, bool in_function)
 
   if (in_function) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
+    object_list_append(
+        code->consts, object_intern_singleton(&s->objects, OBJECT_NONE));
   }
 
   struct basic_block *first = cg_block_allocate(s);
@@ -618,6 +621,17 @@ void cg_load_const(struct cg_state *s, union object *object)
 {
   unsigned index = cg_register_object(s, object);
   cg_op_push1(s, OPCODE_LOAD_CONST, index);
+}
+
+void cg_set_function_docstring(struct cg_state *s, union object *nullable doc)
+{
+  assert(s->code.in_function);
+  if (doc == NULL) {
+    doc = object_intern_singleton(&s->objects, OBJECT_NONE);
+  }
+  union object *consts = s->code.consts;
+  assert(object_list_length(consts) > 0);
+  consts->list.items[0] = doc;
 }
 
 static unsigned cg_append_name_from_cstring(struct cg_state *s,

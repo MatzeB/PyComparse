@@ -54,6 +54,7 @@ void          cg_push_code(struct cg_state *s);
 union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_load_const(struct cg_state *s, union object *object);
+void cg_set_function_docstring(struct cg_state *s, union object *nullable doc);
 
 bool     cg_declare(struct cg_state *s, struct symbol *name,
                     enum symbol_info_type type);

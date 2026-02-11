@@ -338,7 +338,87 @@ static void scan_identifier(struct scanner_state *s, char first_char,
   s->token.u.symbol = symbol;
 }
 
+struct bigint_accum {
+  uint16_t *nullable digits;
+  uint32_t           length;
+  uint32_t           capacity;
+};
+
+static void bigint_accum_free(struct bigint_accum *accum)
+{
+  free(accum->digits);
+  accum->digits = NULL;
+  accum->length = 0;
+  accum->capacity = 0;
+}
+
+static void bigint_accum_reserve(struct bigint_accum *accum, uint32_t minimum)
+{
+  if (minimum <= accum->capacity) return;
+  uint32_t new_capacity = accum->capacity > 0 ? accum->capacity : 16;
+  while (new_capacity < minimum) {
+    if (new_capacity > UINT32_MAX / 2) {
+      new_capacity = minimum;
+      break;
+    }
+    new_capacity *= 2;
+  }
+  uint16_t *new_digits
+      = realloc(accum->digits, (size_t)new_capacity * sizeof(*new_digits));
+  if (new_digits == NULL) {
+    internal_error("out of memory");
+  }
+  accum->digits = new_digits;
+  accum->capacity = new_capacity;
+}
+
+static void bigint_accum_append_digit(struct bigint_accum *accum, uint16_t digit)
+{
+  if (accum->length >= accum->capacity) {
+    bigint_accum_reserve(accum, accum->length + 1);
+  }
+  accum->digits[accum->length++] = digit;
+}
+
+static void bigint_accum_init_from_u64(struct bigint_accum *accum, uint64_t value)
+{
+  while (value != 0) {
+    bigint_accum_append_digit(accum, (uint16_t)(value & 0x7fff));
+    value >>= 15;
+  }
+}
+
+static void bigint_accum_mul_add(struct bigint_accum *accum, uint32_t mul,
+                                 uint32_t add)
+{
+  assert(mul <= 16);
+  uint32_t carry = add;
+  for (uint32_t i = 0; i < accum->length; ++i) {
+    uint32_t tmp = (uint32_t)accum->digits[i] * mul + carry;
+    accum->digits[i] = (uint16_t)(tmp & 0x7fff);
+    carry = tmp >> 15;
+  }
+  while (carry != 0) {
+    bigint_accum_append_digit(accum, (uint16_t)(carry & 0x7fff));
+    carry >>= 15;
+  }
+}
+
+static union object *bigint_accum_intern(struct scanner_state           *s,
+                                         const struct bigint_accum *nonnull accum)
+{
+  uint32_t length = accum->length;
+  while (length > 0 && accum->digits[length - 1] == 0) {
+    --length;
+  }
+  if (length == 0) {
+    return object_intern_int(s->objects, 0);
+  }
+  return object_intern_int_pydigits(s->objects, length, accum->digits);
+}
+
 static bool end_number_literal(struct scanner_state *s, uint64_t value,
+                               const struct bigint_accum *nullable big_value,
                                char last, bool *had_error,
                                const char *literal_kind)
 {
@@ -370,19 +450,25 @@ static bool end_number_literal(struct scanner_state *s, uint64_t value,
     diag_end(s->d);
     *had_error = true;
   }
-  s->token.u.object = object_intern_int(s->objects, value);
+  if (big_value != NULL && big_value->length > 0) {
+    s->token.u.object = bigint_accum_intern(s, big_value);
+  } else {
+    s->token.u.object = object_intern_int(s->objects, value);
+  }
   s->token.kind = T_INTEGER;
   return false;
 }
 
 static void scan_hexadecimal_integer(struct scanner_state *s)
 {
-  uint64_t value = 0;
-  bool     had_error = false;
-  char     last = 0;
+  uint64_t            value = 0;
+  bool                had_error = false;
+  bool                use_big_value = false;
+  char                last = 0;
+  struct bigint_accum big_value = { 0 };
   for (;; last = s->c) {
     next_char(s);
-    int64_t digit_value;
+    uint32_t digit_value;
     switch (s->c) {
     case '0':
     case '1':
@@ -424,24 +510,34 @@ static void scan_hexadecimal_integer(struct scanner_state *s)
       }
       continue;
     default:
-      if (end_number_literal(s, value, last, &had_error, "hexadecimal")) {
+      if (end_number_literal(s, value, use_big_value ? &big_value : NULL, last,
+                             &had_error, "hexadecimal")) {
         continue;
       }
+      bigint_accum_free(&big_value);
       return;
     }
-    if (value > ((UINT64_MAX - digit_value) >> 4)) {
-      unimplemented("arbitrary precision integer");
+    if (use_big_value) {
+      bigint_accum_mul_add(&big_value, 16, digit_value);
+      continue;
     }
-    value <<= 4;
-    value |= digit_value;
+    if (value > ((UINT64_MAX - digit_value) >> 4)) {
+      use_big_value = true;
+      bigint_accum_init_from_u64(&big_value, value);
+      bigint_accum_mul_add(&big_value, 16, digit_value);
+      continue;
+    }
+    value = (value << 4) | digit_value;
   }
 }
 
 static void scan_octal_integer(struct scanner_state *s)
 {
-  uint64_t value = 0;
-  bool     had_error = false;
-  char     last = 0;
+  uint64_t            value = 0;
+  bool                had_error = false;
+  bool                use_big_value = false;
+  char                last = 0;
+  struct bigint_accum big_value = { 0 };
   for (;; last = s->c) {
     next_char(s);
     uint64_t digit_value;
@@ -468,27 +564,37 @@ static void scan_octal_integer(struct scanner_state *s)
       }
       continue;
     default:
-      if (end_number_literal(s, value, last, &had_error, "octal")) {
+      if (end_number_literal(s, value, use_big_value ? &big_value : NULL, last,
+                             &had_error, "octal")) {
         continue;
       }
+      bigint_accum_free(&big_value);
       return;
     }
-    if (value > ((UINT64_MAX - digit_value) >> 3)) {
-      unimplemented("arbitrary precision integer");
+    if (use_big_value) {
+      bigint_accum_mul_add(&big_value, 8, (uint32_t)digit_value);
+      continue;
     }
-    value <<= 3;
-    value |= digit_value;
+    if (value > ((UINT64_MAX - digit_value) >> 3)) {
+      use_big_value = true;
+      bigint_accum_init_from_u64(&big_value, value);
+      bigint_accum_mul_add(&big_value, 8, (uint32_t)digit_value);
+      continue;
+    }
+    value = (value << 3) | digit_value;
   }
 }
 
 static void scan_binary_integer(struct scanner_state *s)
 {
-  uint64_t value = 0;
-  bool     had_error = false;
-  char     last = 0;
+  uint64_t            value = 0;
+  bool                had_error = false;
+  bool                use_big_value = false;
+  char                last = 0;
+  struct bigint_accum big_value = { 0 };
   for (;; last = s->c) {
     next_char(s);
-    int64_t digit_value;
+    uint32_t digit_value;
     switch (s->c) {
     case '0':
     case '1':
@@ -506,16 +612,24 @@ static void scan_binary_integer(struct scanner_state *s)
       }
       continue;
     default:
-      if (end_number_literal(s, value, last, &had_error, "binary")) {
+      if (end_number_literal(s, value, use_big_value ? &big_value : NULL, last,
+                             &had_error, "binary")) {
         continue;
       }
+      bigint_accum_free(&big_value);
       return;
     }
-    if (value > ((UINT64_MAX - digit_value) >> 1)) {
-      unimplemented("arbitrary precision integer");
+    if (use_big_value) {
+      bigint_accum_mul_add(&big_value, 2, digit_value);
+      continue;
     }
-    value <<= 1;
-    value |= digit_value;
+    if (value > ((UINT64_MAX - digit_value) >> 1)) {
+      use_big_value = true;
+      bigint_accum_init_from_u64(&big_value, value);
+      bigint_accum_mul_add(&big_value, 2, digit_value);
+      continue;
+    }
+    value = (value << 1) | digit_value;
   }
 }
 
@@ -647,6 +761,19 @@ static void scan_float_dot(struct scanner_state *s)
   scan_float_fraction(s);
 }
 
+static union object *scan_decimal_big_integer(struct scanner_state *s,
+                                              const char           *chars)
+{
+  struct bigint_accum big_value = { 0 };
+  for (const char *c = chars; *c != '\0'; ++c) {
+    assert('0' <= *c && *c <= '9');
+    bigint_accum_mul_add(&big_value, 10, (uint32_t)(*c - '0'));
+  }
+  union object *object = bigint_accum_intern(s, &big_value);
+  bigint_accum_free(&big_value);
+  return object;
+}
+
 static void scan_number(struct scanner_state *s)
 {
   char first = s->c;
@@ -706,21 +833,33 @@ static void scan_number(struct scanner_state *s)
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);
 
-  char *endptr;
+  char               *endptr;
+  unsigned long long  value;
   errno = 0;
-  long value = strtol(chars, &endptr, 0);
+  value = strtoull(chars, &endptr, 10);
   if (endptr == chars || *endptr != '\0') {
     /* TODO: report error */
     abort();
   }
-  if ((value == LONG_MIN || value == LONG_MAX) && errno != 0) {
+  if (errno == ERANGE) {
+    s->token.u.object = scan_decimal_big_integer(s, chars);
+    arena_free_to(strings, chars);
+    s->token.kind = T_INTEGER;
+    return;
+  }
+  if (errno != 0) {
     /* TODO: report error */
     abort();
   }
+  if (value > UINT64_MAX) {
+    s->token.u.object = scan_decimal_big_integer(s, chars);
+    arena_free_to(strings, chars);
+    s->token.kind = T_INTEGER;
+    return;
+  }
   arena_free_to(strings, chars);
 
-  assert(INT64_MIN <= value && value <= INT64_MAX);
-  s->token.u.object = object_intern_int(s->objects, (int64_t)value);
+  s->token.u.object = object_intern_int(s->objects, (uint64_t)value);
   s->token.kind = T_INTEGER;
 }
 
@@ -1974,9 +2113,15 @@ void print_token(FILE *out, const struct token *token)
   case T_FLOAT:
     fprintf(out, "%f", token->u.object->float_obj.value);
     break;
-  case T_INTEGER:
-    fprintf(out, "%" PRId64, token->u.object->int_obj.value);
+  case T_INTEGER: {
+    const struct object_int *int_obj = &token->u.object->int_obj;
+    if (int_obj->num_pydigits == 0) {
+      fprintf(out, "%" PRIu64, int_obj->value);
+    } else {
+      fprintf(out, "<int:%upydigits>", int_obj->num_pydigits);
+    }
     break;
+  }
   case T_IDENTIFIER:
     fprintf(out, "`%s`", token->u.symbol->string);
     break;

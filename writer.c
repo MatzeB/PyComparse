@@ -167,29 +167,35 @@ static void write_complex(struct writer_state         *s,
 
 static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
-  int64_t value = int_obj->value;
-  if (INT32_MIN <= value && value <= INT32_MAX) {
+  if (int_obj->num_pydigits == 0 && int_obj->value <= INT32_MAX) {
     write_char(s, OBJECT_INT);
-    write_uint32(s, (int32_t)int_obj->value);
+    write_uint32(s, (uint32_t)int_obj->value);
     return;
   }
-  bool negative = false;
-  if (value < 0) {
-    negative = true;
-    if (value == INT64_MIN) {
-      /* overflow would produce long integer */
-      unimplemented("writing long integers");
+
+  if (int_obj->num_pydigits == 0) {
+    uint64_t value = int_obj->value;
+    unsigned num_digits = 0;
+    for (uint64_t c = value; c != 0; c >>= 15) {
+      ++num_digits;
     }
-    value = -value;
+    write_char(s, 'l');
+    write_uint32(s, num_digits);
+    for (uint64_t c = value; c != 0; c >>= 15) {
+      write_uint16(s, (uint16_t)(c & 0x7fff));
+    }
+    return;
   }
-  unsigned num_digits = 0;
-  for (int64_t c = value; c != 0; c >>= 15) {
-    ++num_digits;
+
+  assert(int_obj->pydigits != NULL);
+  uint32_t num_digits = int_obj->num_pydigits;
+  while (num_digits > 0 && int_obj->pydigits[num_digits - 1] == 0) {
+    --num_digits;
   }
   write_char(s, 'l');
-  write_uint32(s, (uint32_t)(negative ? -(int32_t)num_digits : num_digits));
-  for (int64_t c = value; c != 0; c >>= 15) {
-    write_uint16(s, c & 0x7fff);
+  write_uint32(s, num_digits);
+  for (uint32_t i = 0; i < num_digits; ++i) {
+    write_uint16(s, int_obj->pydigits[i]);
   }
 }
 

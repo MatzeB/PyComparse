@@ -177,6 +177,24 @@ union object *object_new_int(struct arena *arena, uint64_t value)
   union object *object
       = object_allocate_zero(arena, struct object_int, OBJECT_INT);
   object->int_obj.value = value;
+  object->int_obj.num_pydigits = 0;
+  object->int_obj.pydigits = NULL;
+  return object;
+}
+
+union object *object_new_int_pydigits(struct arena      *arena,
+                                      uint32_t           num_pydigits,
+                                      const uint16_t *nonnull pydigits)
+{
+  assert(num_pydigits > 0);
+  union object *object
+      = object_allocate_zero(arena, struct object_int, OBJECT_INT);
+  size_t size = (size_t)num_pydigits * sizeof(pydigits[0]);
+  uint16_t *copy = (uint16_t *)arena_allocate(arena, size, alignof(uint16_t));
+  memcpy(copy, pydigits, size);
+  object->int_obj.value = 0;
+  object->int_obj.num_pydigits = num_pydigits;
+  object->int_obj.pydigits = copy;
   return object;
 }
 
@@ -232,5 +250,6 @@ double object_complex_imag(const union object *object)
 uint64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
+  assert(object->int_obj.num_pydigits == 0);
   return object->int_obj.value;
 }

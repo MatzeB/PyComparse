@@ -209,12 +209,43 @@ union object *object_intern_int(struct object_intern *s, uint64_t value)
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
     if (object_type(object) == OBJECT_INT
+        && object->int_obj.num_pydigits == 0
         && object_int_value(object) == value) {
       return object;
     }
   }
 
   union object *result = object_new_int(&s->arena, value);
+  object_list_append(s->objects, result);
+  return result;
+}
+
+union object *object_intern_int_pydigits(
+    struct object_intern *s, uint32_t num_pydigits,
+    const uint16_t *nonnull pydigits)
+{
+  assert(num_pydigits > 0);
+  while (num_pydigits > 0 && pydigits[num_pydigits - 1] == 0) {
+    --num_pydigits;
+  }
+  if (num_pydigits == 0) {
+    return object_intern_int(s, 0);
+  }
+
+  // TODO: hashmap
+  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
+    union object *object = object_list_at(s->objects, i);
+    if (object_type(object) != OBJECT_INT) continue;
+    if (object->int_obj.num_pydigits != num_pydigits) continue;
+    if (memcmp(object->int_obj.pydigits, pydigits,
+               (size_t)num_pydigits * sizeof(pydigits[0]))
+        == 0) {
+      return object;
+    }
+  }
+
+  union object *result
+      = object_new_int_pydigits(&s->arena, num_pydigits, pydigits);
   object_list_append(s->objects, result);
   return result;
 }

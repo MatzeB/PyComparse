@@ -57,6 +57,9 @@ union object *object_new_float(struct arena *arena, double value);
 union object *object_new_complex(struct arena *arena, double real,
                                  double imag);
 union object *object_new_int(struct arena *arena, uint64_t value);
+union object *object_new_int_pydigits(struct arena      *arena,
+                                      uint32_t           num_pydigits,
+                                      const uint16_t *nonnull pydigits);
 
 struct tuple_prep *object_new_tuple_begin(struct arena *arena,
                                           uint32_t      length);

@@ -2605,7 +2605,7 @@ static void emit_return(struct cg_state *s, struct location location,
     }
     if (s->code.pending_finally != NULL) {
       struct symbol *tmp
-          = symbol_table_get_or_insert(s->symbol_table, "<pyparse-return>");
+          = symbol_table_get_or_insert(s->symbol_table, "<pycomparse-return>");
       if (cg_in_function(s)) {
         cg_declare(s, tmp, SYMBOL_LOCAL);
       }

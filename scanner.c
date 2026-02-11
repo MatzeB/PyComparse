@@ -13,24 +13,24 @@
 
 #if (defined(__x86_64__) || defined(__i386__))                             \
     && (defined(__clang__) || defined(__GNUC__))
-#define PYPARSE_HAVE_X86_AVX2 1
+#define PYCOMPARSE_HAVE_X86_AVX2 1
 #include <immintrin.h>
 #else
-#define PYPARSE_HAVE_X86_AVX2 0
+#define PYCOMPARSE_HAVE_X86_AVX2 0
 #endif
 
-#if PYPARSE_HAVE_X86_AVX2 && defined(__ELF__)
+#if PYCOMPARSE_HAVE_X86_AVX2 && defined(__ELF__)
 #if defined(__has_attribute)
 #if __has_attribute(ifunc)
-#define PYPARSE_HAVE_GNU_IFUNC 1
+#define PYCOMPARSE_HAVE_GNU_IFUNC 1
 #else
-#define PYPARSE_HAVE_GNU_IFUNC 0
+#define PYCOMPARSE_HAVE_GNU_IFUNC 0
 #endif
 #else
-#define PYPARSE_HAVE_GNU_IFUNC 1
+#define PYCOMPARSE_HAVE_GNU_IFUNC 1
 #endif
 #else
-#define PYPARSE_HAVE_GNU_IFUNC 0
+#define PYCOMPARSE_HAVE_GNU_IFUNC 0
 #endif
 
 #include "adt/arena.h"
@@ -929,7 +929,7 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
   return cursor;
 }
 
-#if PYPARSE_HAVE_X86_AVX2 && PYPARSE_HAVE_GNU_IFUNC
+#if PYCOMPARSE_HAVE_X86_AVX2 && PYCOMPARSE_HAVE_GNU_IFUNC
 
 __attribute__((target("avx2")))
 static char *scan_string_plain_span_find_stop_avx2_nofmt_double(
@@ -1064,7 +1064,7 @@ static char *scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor,
 }
 #endif
 
-#if PYPARSE_HAVE_GNU_IFUNC
+#if PYCOMPARSE_HAVE_GNU_IFUNC
 static void *resolve_scan_string_plain_span_find_stop_nofmt_double(void)
 {
   __builtin_cpu_init();

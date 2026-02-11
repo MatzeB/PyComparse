@@ -41,10 +41,10 @@ For PGO + LTO builds, use:
 scripts/build_pgo_lto.sh
 ```
 The helper performs:
-1. Instrumented `Release` build (`PYPARSE_PGO_MODE=generate`, `PYPARSE_ENABLE_LTO=ON`)
+1. Instrumented `Release` build (`PYCOMPARSE_PGO_MODE=generate`, `PYCOMPARSE_ENABLE_LTO=ON`)
 2. Training run (default workload or `--train-cmd`)
 3. Profile merge (`llvm-profdata`)
-4. Final optimized `Release` build (`PYPARSE_PGO_MODE=use`, `PYPARSE_PGO_DATA=...`)
+4. Final optimized `Release` build (`PYCOMPARSE_PGO_MODE=use`, `PYCOMPARSE_PGO_DATA=...`)
 
 ### Testing
 ```bash
@@ -60,6 +60,8 @@ This script runs the parser against test files in `test/` and compares output wi
 ### Commit Messages
 - If an AI assistant (for example Codex or Claude) was used for substantial implementation work, include `Co-authored-by: <ai-name>` in the commit message body.
 - Commit messages may be verbose when that improves clarity.
+- User preference: use detailed commit messages with bullet points in the body.
+- User preference: do not mention routine/normal testing activity in commit messages.
 
 ### Running Individual Tests
 ```bash
@@ -71,7 +73,7 @@ build/parser_test test/simple.py > /tmp/output.pyc && uv run python /tmp/output.
 uv run utils/decode.py /tmp/test.py
 ```
 
-### Compile and print bytecode for pyparse
+### Compile and print bytecode for PyComparse
 - remember to build first
 ```bash
 build/parser_test /tmp/test.py | uv run utils/decode.py

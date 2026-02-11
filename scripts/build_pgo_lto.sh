@@ -47,15 +47,15 @@ done
 
 GEN_DIR="${BUILD_DIR}-gen"
 PROFRAW_DIR="${BUILD_DIR}/profraw"
-PROFDATA="${BUILD_DIR}/pyparse.profdata"
+PROFDATA="${BUILD_DIR}/pycomparse.profdata"
 
 jobs="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
 echo "[1/5] Configuring instrumented PGO build in ${GEN_DIR}"
 cmake -S . -B "${GEN_DIR}" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DPYPARSE_ENABLE_LTO=ON \
-  -DPYPARSE_PGO_MODE=generate
+  -DPYCOMPARSE_ENABLE_LTO=ON \
+  -DPYCOMPARSE_PGO_MODE=generate
 
 compiler_path="$(awk -F= '/^CMAKE_C_COMPILER:FILEPATH=/{print $2}' "${GEN_DIR}/CMakeCache.txt")"
 compiler_name="$(basename "${compiler_path}")"
@@ -71,7 +71,7 @@ rm -rf "${PROFRAW_DIR}"
 mkdir -p "${PROFRAW_DIR}"
 
 export PARSER_TEST="${GEN_DIR}/parser_test"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pyparse-%p.profraw"
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pycomparse-%p.profraw"
 
 echo "[3/5] Running training workload"
 if [[ -n "${TRAIN_CMD}" ]]; then
@@ -113,9 +113,9 @@ echo "[4/5] Merging profile data to ${PROFDATA}"
 echo "[5/5] Configuring and building optimized PGO+LTO binaries in ${BUILD_DIR}"
 cmake -S . -B "${BUILD_DIR}" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DPYPARSE_ENABLE_LTO=ON \
-  -DPYPARSE_PGO_MODE=use \
-  -DPYPARSE_PGO_DATA="${PROFDATA}"
+  -DPYCOMPARSE_ENABLE_LTO=ON \
+  -DPYCOMPARSE_PGO_MODE=use \
+  -DPYCOMPARSE_PGO_DATA="${PROFDATA}"
 cmake --build "${BUILD_DIR}" -j "${jobs}"
 
 echo "Done."

@@ -150,6 +150,21 @@ static void write_float(struct writer_state       *s,
   write_uint64(s, bits);
 }
 
+static void write_complex(struct writer_state         *s,
+                          const struct object_complex *complex)
+{
+  uint64_t real_bits;
+  uint64_t imag_bits;
+  assert(sizeof(real_bits) == sizeof(complex->real));
+  assert(sizeof(imag_bits) == sizeof(complex->imag));
+  memcpy(&real_bits, &complex->real, sizeof(real_bits));
+  memcpy(&imag_bits, &complex->imag, sizeof(imag_bits));
+
+  write_char(s, OBJECT_COMPLEX);
+  write_uint64(s, real_bits);
+  write_uint64(s, imag_bits);
+}
+
 static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
   int64_t value = int_obj->value;
@@ -231,6 +246,9 @@ static void write_object(struct writer_state *s, const union object *object)
     break;
   case OBJECT_FLOAT:
     write_float(s, &object->float_obj);
+    break;
+  case OBJECT_COMPLEX:
+    write_complex(s, &object->complex);
     break;
   case OBJECT_INT:
     write_int(s, &object->int_obj);

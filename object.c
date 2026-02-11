@@ -161,6 +161,15 @@ union object *object_new_float(struct arena *arena, double value)
   return object;
 }
 
+union object *object_new_complex(struct arena *arena, double real, double imag)
+{
+  union object *object
+      = object_allocate_zero(arena, struct object_complex, OBJECT_COMPLEX);
+  object->complex.real = real;
+  object->complex.imag = imag;
+  return object;
+}
+
 union object *object_new_int(struct arena *arena, uint64_t value)
 {
   union object *object
@@ -204,6 +213,18 @@ double object_float_value(const union object *object)
 {
   assert(object->type == OBJECT_FLOAT);
   return object->float_obj.value;
+}
+
+double object_complex_real(const union object *object)
+{
+  assert(object->type == OBJECT_COMPLEX);
+  return object->complex.real;
+}
+
+double object_complex_imag(const union object *object)
+{
+  assert(object->type == OBJECT_COMPLEX);
+  return object->complex.imag;
 }
 
 uint64_t object_int_value(const union object *object)

@@ -36,6 +36,12 @@ struct object_float {
   double             value;
 };
 
+struct object_complex {
+  struct object_base base;
+  double             real;
+  double             imag;
+};
+
 struct object_int {
   struct object_base base;
   uint64_t           value;
@@ -64,12 +70,13 @@ union object {
   char               type;
   struct object_base base;
 
-  struct object_code   code;
-  struct object_float  float_obj;
-  struct object_int    int_obj;
-  struct object_list   list;
-  struct object_string string;
-  struct object_tuple  tuple;
+  struct object_code    code;
+  struct object_complex complex;
+  struct object_float   float_obj;
+  struct object_int     int_obj;
+  struct object_list    list;
+  struct object_string  string;
+  struct object_tuple   tuple;
 };
 
 ASSUME_NONNULL_END

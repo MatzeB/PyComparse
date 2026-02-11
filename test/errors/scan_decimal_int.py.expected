@@ -9,4 +9,5 @@ test/errors/scan_decimal_int.py:15 error: invalid digit for decimal literal: `z`
 test/errors/scan_decimal_int.py:17 error: invalid digit for decimal literal: `A`
 test/errors/scan_decimal_int.py:19 error: invalid digit for decimal literal: `Z`
 test/errors/scan_decimal_int.py:21 error: invalid digit for decimal literal: `G`
+test/errors/scan_decimal_int.py:21 error: expected new line, got `fj`
 test/errors/scan_decimal_int.py:23 error: invalid digit for decimal literal: `Z`

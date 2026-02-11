@@ -1,0 +1,6 @@
+print(1j)
+print(2.5j)
+print(1e2j)
+print(.5j)
+print(10.j)
+print(1 + 2j)

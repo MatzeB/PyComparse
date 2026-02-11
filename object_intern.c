@@ -95,6 +95,26 @@ union object *object_intern_float(struct object_intern *s, double value)
   return result;
 }
 
+union object *object_intern_complex(struct object_intern *s, double real,
+                                    double imag)
+{
+  // TODO: hashmap
+  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
+    union object *object = object_list_at(s->objects, i);
+    if (object_type(object) != OBJECT_COMPLEX) continue;
+    double object_real = object_complex_real(object);
+    double object_imag = object_complex_imag(object);
+    if (memcmp(&object_real, &real, sizeof(real)) == 0
+        && memcmp(&object_imag, &imag, sizeof(imag)) == 0) {
+      return object;
+    }
+  }
+
+  union object *result = object_new_complex(&s->arena, real, imag);
+  object_list_append(s->objects, result);
+  return result;
+}
+
 union object *object_intern_int(struct object_intern *s, uint64_t value)
 {
   // TODO: hashmap

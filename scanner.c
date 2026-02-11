@@ -462,7 +462,7 @@ static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
     default:
       if ((('a' <= s->c && s->c <= 'z') || ('A' <= s->c && s->c <= 'Z')
            || ('0' <= s->c && s->c <= '9'))
-          && s->c != 'e' && s->c != 'E') {
+          && s->c != 'e' && s->c != 'E' && s->c != 'j' && s->c != 'J') {
         if (!had_error) {
           diag_begin_error(s->d, scanner_location(s));
           diag_frag(s->d, "invalid digit for decimal literal: ");
@@ -511,6 +511,11 @@ static void scan_float_fraction(struct scanner_state *s)
       next_char(s);
     } while ('0' <= s->c && s->c <= '9');
   }
+  bool is_imag = false;
+  if (s->c == 'j' || s->c == 'J') {
+    is_imag = true;
+    next_char(s);
+  }
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);
 
@@ -525,7 +530,11 @@ static void scan_float_fraction(struct scanner_state *s)
   }
   arena_free_to(strings, chars);
 
-  s->token.u.object = object_intern_float(s->objects, value);
+  if (is_imag) {
+    s->token.u.object = object_intern_complex(s->objects, 0.0, value);
+  } else {
+    s->token.u.object = object_intern_float(s->objects, value);
+  }
   s->token.kind = T_FLOAT;
 }
 
@@ -564,6 +573,27 @@ static void scan_number(struct scanner_state *s)
   struct arena *strings = s->strings;
   arena_grow_begin(strings, alignof(char));
   scan_decimal_integer(s, strings, first);
+
+  if (s->c == 'j' || s->c == 'J') {
+    next_char(s);
+    arena_grow_char(strings, '\0');
+    char *chars = (char *)arena_grow_finish(strings);
+
+    char *endptr;
+    errno = 0;
+    double value = strtod(chars, &endptr);
+    if (endptr == chars || *endptr != '\0') {
+      abort(); // TODO: error handling
+    }
+    if (errno != 0) {
+      abort(); // TODO: error handling
+    }
+    arena_free_to(strings, chars);
+
+    s->token.u.object = object_intern_complex(s->objects, 0.0, value);
+    s->token.kind = T_FLOAT;
+    return;
+  }
 
   if (s->c == '.') {
     arena_grow_char(strings, s->c);

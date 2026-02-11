@@ -64,6 +64,7 @@ This script runs the parser against test files in `test/` and compares output wi
 - Commit messages may be verbose when that improves clarity.
 - User preference: use detailed commit messages with bullet points in the body.
 - User preference: do not mention routine/normal testing activity in commit messages.
+- User preference: keep commit message line length to 80 characters.
 
 ### Running Individual Tests
 ```bash

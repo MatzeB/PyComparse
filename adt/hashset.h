@@ -16,6 +16,7 @@ struct hash_set {
 
 static inline unsigned hash_set_size(const struct hash_set *set)
 {
+  assert(set->num_deleted <= set->num_elements);
   return set->num_elements - set->num_deleted;
 }
 

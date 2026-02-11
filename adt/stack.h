@@ -1,5 +1,7 @@
 #pragma once
 
+#include <assert.h>
+#include <limits.h>
 #include <stdlib.h>
 
 #include "dynmemory.h"
@@ -13,6 +15,9 @@ struct stack {
 static inline void *stack_push(struct stack *stack, unsigned size)
 {
   unsigned old_size = stack->size;
+  if (size > UINT_MAX - old_size) {
+    abort();
+  }
   unsigned new_size = old_size + size;
   if (new_size > stack->capacity) {
     stack->data

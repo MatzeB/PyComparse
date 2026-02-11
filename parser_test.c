@@ -9,6 +9,9 @@
 #include "symbol_table_types.h"
 #include "writer.h"
 
+#include <errno.h>
+#include <string.h>
+
 int main(int argc, char **argv)
 {
   if (argc != 2) {
@@ -18,7 +21,7 @@ int main(int argc, char **argv)
   const char *filename = argv[1];
   FILE       *input = fopen(filename, "r");
   if (input == NULL) {
-    fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
+    fprintf(stderr, "Failed to open '%s': %s\n", filename, strerror(errno));
     return 1;
   }
 

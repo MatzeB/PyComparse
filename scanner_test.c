@@ -8,6 +8,9 @@
 #include "symbol_table_types.h"
 #include "token_kinds.h"
 
+#include <errno.h>
+#include <string.h>
+
 int main(int argc, char **argv)
 {
   FILE       *input = stdin;
@@ -16,7 +19,7 @@ int main(int argc, char **argv)
     filename = argv[1];
     input = fopen(filename, "r");
     if (input == NULL) {
-      fprintf(stderr, "Failed to open '%s' TODO: print error\n", filename);
+      fprintf(stderr, "Failed to open '%s': %s\n", filename, strerror(errno));
       return 1;
     }
   }

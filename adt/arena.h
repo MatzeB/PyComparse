@@ -28,6 +28,8 @@ struct arena {
   unsigned grow_alignment;
 };
 
+static const unsigned arena_max_alignment = 64;
+
 static inline void arena_init(struct arena *arena)
 {
   memset(arena, 0, sizeof(*arena));
@@ -55,11 +57,42 @@ static inline void arena_align_(struct arena *arena, unsigned alignment)
 {
   assert(alignment > 0);
   assert((alignment & (alignment - 1)) == 0 && "alignment must be power of 2");
-  // Base address is aligned by malloc rules.
-  assert(alignment <= alignof(long long) && alignment <= alignof(double)
-         && alignment <= alignof(long double));
+  assert(alignment <= arena_max_alignment);
   unsigned mask = ~(alignment - 1);
   arena->allocated = (arena->allocated + alignment - 1) & mask;
+}
+
+static __attribute__((noinline)) void *
+arena_allocate_slow_(struct arena *arena, size_t size, unsigned alignment)
+{
+  assert(size <= UINT_MAX - (alignment - 1));
+  unsigned required_size = (unsigned)size + alignment - 1;
+
+  if (arena->block == NULL
+      || required_size > arena->limit - arena->allocated) {
+    arena_allocate_block_(arena, required_size);
+  }
+  arena_align_(arena, alignment);
+  if (UNLIKELY(size > arena->limit - arena->allocated)) {
+    arena_allocate_block_(arena, required_size);
+    arena_align_(arena, alignment);
+  }
+  void *result = (char *)arena->block + arena->allocated;
+  arena->allocated += (unsigned)size;
+  return result;
+}
+
+static __attribute__((noinline)) void
+arena_grow_begin_slow_(struct arena *arena, unsigned alignment)
+{
+  unsigned required_size = alignment - 1;
+  if (arena->block == NULL
+      || required_size > arena->limit - arena->allocated) {
+    arena_allocate_block_(arena, required_size);
+  }
+  arena_align_(arena, alignment);
+  arena->grow = arena->allocated;
+  arena->grow_alignment = alignment;
 }
 
 static inline void *arena_allocate(struct arena *arena, size_t size,
@@ -67,8 +100,13 @@ static inline void *arena_allocate(struct arena *arena, size_t size,
 {
   assert(size < UINT_MAX / 2);
   assert(arena->grow == 0);
-  if (UNLIKELY(size >= arena->limit - arena->allocated)) {
-    arena_allocate_block_(arena, size);
+  assert(alignment <= arena_max_alignment);
+  assert(size <= UINT_MAX - (alignment - 1));
+
+  unsigned required_size = (unsigned)size + alignment - 1;
+  if (UNLIKELY(arena->block == NULL
+               || required_size > arena->limit - arena->allocated)) {
+    return arena_allocate_slow_(arena, size, alignment);
   }
   arena_align_(arena, alignment);
   void *result = (char *)arena->block + arena->allocated;
@@ -110,9 +148,14 @@ static inline void arena_free_to(struct arena *arena, const void *free_up_to)
 static inline void arena_grow_begin(struct arena *arena, unsigned alignment)
 {
   assert(arena->grow == 0);
+  assert(alignment > 0);
+  assert(alignment <= arena_max_alignment);
 
-  if (UNLIKELY(arena->block == NULL)) {
-    arena_allocate_block_(arena, 0);
+  unsigned required_size = alignment - 1;
+  if (UNLIKELY(arena->block == NULL
+               || required_size > arena->limit - arena->allocated)) {
+    arena_grow_begin_slow_(arena, alignment);
+    return;
   }
   arena_align_(arena, alignment);
   arena->grow = arena->allocated;

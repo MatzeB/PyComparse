@@ -22,12 +22,12 @@ union ast_expression;
 union ast_statement;
 
 struct make_function_state {
-  bool annotations;
-  bool closure;
-  bool defaults;
-  bool keyword_defaults;
-  unsigned                      num_closure_symbols;
-  struct symbol *nonnull *nullable closure_symbols;
+  bool                               annotations;
+  bool                               closure;
+  bool                               defaults;
+  bool                               keyword_defaults;
+  unsigned                           num_closure_symbols;
+  struct symbol * nonnull * nullable closure_symbols;
 };
 
 struct for_while_state {
@@ -69,16 +69,16 @@ void emit_assert(struct cg_state *s, union ast_expression *expression,
                  union ast_expression *message);
 
 void emit_assign_statement(struct cg_state *s, unsigned num_targets,
-                           union ast_expression *nonnull *nonnull targets,
-                           union ast_expression                  *value);
+                           union ast_expression * nonnull * nonnull targets,
+                           union ast_expression                    *value);
 
 bool emit_break(struct cg_state *s);
 
 void emit_class_begin(struct cg_state *s, struct symbol *name);
 void emit_class_end(struct cg_state *s, struct symbol *name,
                     struct ast_call *call, unsigned num_decorators,
-                    unsigned num_closure_symbols,
-                    struct symbol *nonnull *nullable closure_symbols);
+                    unsigned                           num_closure_symbols,
+                    struct symbol * nonnull * nullable closure_symbols);
 
 void emit_code_end(struct cg_state *s);
 
@@ -181,7 +181,7 @@ void emit_yield_statement(struct cg_state               *s,
 void emit_yield_from_statement(struct cg_state      *s,
                                union ast_expression *expression);
 
-void emit_statement_list(struct cg_state *s,
+void emit_statement_list(struct cg_state           *s,
                          struct ast_statement_list *statement_list);
 
 ASSUME_NONNULL_END

@@ -66,21 +66,25 @@ struct ast_node_base {
   uint8_t type;
 };
 
+struct ast_expression_base {
+  struct ast_node_base base;
+};
+
 struct ast_statement_base {
-  uint8_t         type;
-  struct location location;
+  struct ast_node_base base;
+  struct location      location;
 };
 
 struct ast_attr {
-  struct ast_node_base  base;
-  union ast_expression *expression;
-  struct symbol        *symbol;
+  struct ast_expression_base base;
+  union ast_expression      *expression;
+  struct symbol             *symbol;
 };
 
 struct ast_binexpr {
-  struct ast_node_base  base;
-  union ast_expression *left;
-  union ast_expression *right;
+  struct ast_expression_base base;
+  union ast_expression      *left;
+  union ast_expression      *right;
 };
 
 struct comparison_op {
@@ -89,14 +93,14 @@ struct comparison_op {
 };
 
 struct ast_comparison {
-  struct ast_node_base  base;
-  unsigned              num_operands;
-  union ast_expression *left;
-  struct comparison_op  operands[];
+  struct ast_expression_base base;
+  unsigned                   num_operands;
+  union ast_expression      *left;
+  struct comparison_op       operands[];
 };
 
 struct ast_call {
-  struct ast_node_base           base;
+  struct ast_expression_base     base;
   unsigned                       num_arguments;
   bool                           has_star_argument;
   bool                           has_kw_argument;
@@ -105,21 +109,21 @@ struct ast_call {
 };
 
 struct ast_conditional {
-  struct ast_node_base  base;
-  union ast_expression *condition;
-  union ast_expression *true_expression;
-  union ast_expression *false_expression;
+  struct ast_expression_base base;
+  union ast_expression      *condition;
+  union ast_expression      *true_expression;
+  union ast_expression      *false_expression;
 };
 
 struct ast_const {
-  struct ast_node_base base;
-  union object        *object;
+  struct ast_expression_base base;
+  union object              *object;
 };
 
 struct ast_fstring {
-  struct ast_node_base   base;
-  unsigned               num_elements;
-  struct fstring_element elements[];
+  struct ast_expression_base base;
+  unsigned                   num_elements;
+  struct fstring_element     elements[];
 };
 
 struct dict_item {
@@ -128,13 +132,13 @@ struct dict_item {
 };
 
 struct ast_dict_item_list {
-  struct ast_node_base base;
-  unsigned             num_items;
-  struct dict_item     items[];
+  struct ast_expression_base base;
+  unsigned                   num_items;
+  struct dict_item           items[];
 };
 
 struct ast_expression_list {
-  struct ast_node_base          base;
+  struct ast_expression_base    base;
   unsigned                      num_expressions;
   bool                          has_star_expression;
   union object *nullable        as_constant;
@@ -142,7 +146,7 @@ struct ast_expression_list {
 };
 
 struct ast_generator_expression {
-  struct ast_node_base             base;
+  struct ast_expression_base       base;
   unsigned                         num_parts;
   union ast_expression            *expression;
   union ast_expression *nullable   item_value;
@@ -150,38 +154,38 @@ struct ast_generator_expression {
 };
 
 struct ast_identifier {
-  struct ast_node_base base;
-  struct symbol       *symbol;
+  struct ast_expression_base base;
+  struct symbol             *symbol;
 };
 
 struct ast_lambda {
-  struct ast_node_base  base;
-  union ast_expression *expression;
-  unsigned              positional_only_argcount;
-  unsigned              num_parameters;
-  struct parameter      parameters[];
+  struct ast_expression_base base;
+  union ast_expression      *expression;
+  unsigned                   positional_only_argcount;
+  unsigned                   num_parameters;
+  struct parameter           parameters[];
 };
 
 struct ast_slice {
-  struct ast_node_base           base;
+  struct ast_expression_base     base;
   union ast_expression *nullable start;
   union ast_expression *nullable stop;
   union ast_expression *nullable step;
 };
 
 struct ast_unexpr {
-  struct ast_node_base  base;
-  union ast_expression *op;
+  struct ast_expression_base base;
+  union ast_expression      *op;
 };
 
 struct ast_expression_yield {
-  struct ast_node_base           base;
+  struct ast_expression_base     base;
   union ast_expression *nullable value;
 };
 
 union ast_expression {
-  uint8_t              type;
-  struct ast_node_base base;
+  uint8_t                    type;
+  struct ast_expression_base base;
 
   struct ast_attr                 attr;
   struct ast_binexpr              binexpr;

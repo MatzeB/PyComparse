@@ -146,7 +146,7 @@ static void emit_binexpr(struct cg_state *s, struct ast_binexpr *binexpr)
 {
   emit_expression(s, binexpr->left);
   emit_expression(s, binexpr->right);
-  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
+  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.base.type);
   cg_op_pop_push(s, opcode, 0, /*pop=*/2, /*push=*/1);
 }
 
@@ -243,7 +243,7 @@ static void emit_binexpr_assign_inner(struct cg_state    *s,
                                       struct ast_binexpr *binexpr)
 {
   emit_expression(s, binexpr->right);
-  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.type);
+  enum opcode opcode = ast_binexpr_to_opcode(binexpr->base.base.type);
   cg_op_pop1(s, opcode, 0);
 }
 

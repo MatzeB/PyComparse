@@ -53,13 +53,13 @@ union object *cg_pop_code(struct cg_state *s, const char *name);
 
 void cg_load_const(struct cg_state *s, union object *object);
 
-bool cg_declare(struct cg_state *s, struct symbol *name,
-                enum symbol_info_type type);
-bool cg_promote_to_cell(struct cg_state *s, struct symbol *name);
+bool     cg_declare(struct cg_state *s, struct symbol *name,
+                    enum symbol_info_type type);
+bool     cg_promote_to_cell(struct cg_state *s, struct symbol *name);
 unsigned cg_closure_index(struct cg_state *s, struct symbol *name);
-void cg_load(struct cg_state *s, struct symbol *name);
-void cg_store(struct cg_state *s, struct symbol *name);
-void cg_delete(struct cg_state *s, struct symbol *name);
+void     cg_load(struct cg_state *s, struct symbol *name);
+void     cg_store(struct cg_state *s, struct symbol *name);
+void     cg_delete(struct cg_state *s, struct symbol *name);
 
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
              const char *filename, struct diagnostics_state *d);

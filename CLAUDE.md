@@ -38,7 +38,7 @@ This script runs the parser against test files in `test/` and compares output wi
 ```
 
 ### Commit Messages
-- If an AI assistant (for example Codex or Claude) was used for substantial implementation work, include a short credit line in the commit message body.
+- If an AI assistant (for example Codex or Claude) was used for substantial implementation work, include `Co-authored-by: <ai-name>` in the commit message body.
 
 ### Running Individual Tests
 ```bash

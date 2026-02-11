@@ -1265,7 +1265,7 @@ static void emit_generator_expression_part(
 {
   if (part_index >= generator_expression->num_parts) {
     emit_expression(s, generator_expression->expression);
-    enum ast_expression_type type = generator_expression->base.type;
+    enum ast_expression_type type = generator_expression->base.base.type;
     if (type == AST_LIST_COMPREHENSION || type == AST_SET_COMPREHENSION
         || type == AST_DICT_COMPREHENSION) {
       /* Need to compute position of list/set in stack...
@@ -1328,7 +1328,7 @@ void emit_generator_expression_code(
   cg_declare(s, dot_zero, SYMBOL_LOCAL);
   s->code.argcount = 1;
 
-  enum ast_expression_type type = generator_expression->base.type;
+  enum ast_expression_type type = generator_expression->base.base.type;
   bool                     return_value;
   if (type == AST_LIST_COMPREHENSION) {
     cg_op_push1(s, OPCODE_BUILD_LIST, 0);

@@ -584,8 +584,7 @@ void emit_make_function_end(struct cg_state            *s,
   if (state->num_closure_symbols > 0) {
     for (unsigned i = 0; i < state->num_closure_symbols; ++i) {
       struct symbol *closure_symbol = state->closure_symbols[i];
-      cg_op_push1(s, OPCODE_LOAD_CLOSURE,
-                  cg_closure_index(s, closure_symbol));
+      cg_op_push1(s, OPCODE_LOAD_CLOSURE, cg_closure_index(s, closure_symbol));
     }
     cg_op_pop_push(s, OPCODE_BUILD_TUPLE, state->num_closure_symbols,
                    /*pop=*/state->num_closure_symbols, /*push=*/1);
@@ -1169,7 +1168,7 @@ static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
 
 void emit_class_end(struct cg_state *s, struct symbol *symbol,
                     struct ast_call *call, unsigned num_decorators,
-                    unsigned num_closure_symbols,
+                    unsigned                 num_closure_symbols,
                     struct symbol **nullable closure_symbols)
 {
   emit_code_end(s);
@@ -1418,20 +1417,20 @@ void emit_yield_from_statement(struct cg_state      *s,
 }
 
 struct binding_scope {
-  struct binding_scope   *nullable parent;
-  struct ast_statement_def *nullable def;
-  struct cg_state        *cg;
-  bool                    is_class;
+  struct binding_scope *nullable parent;
+  struct ast_def *nullable       def;
+  struct cg_state               *cg;
+  bool                           is_class;
 
-  struct symbol *locals_inline[16];
-  struct symbol *bound_before_decl_inline[16];
-  struct symbol *globals_inline[8];
-  struct symbol *nonlocals_inline[8];
-  struct symbol *freevars_inline[8];
-  struct symbol *cellvars_inline[8];
-  struct symbol *uses_inline[16];
-  struct ast_statement_def *children_inline[8];
-  struct ast_statement_class *class_children_inline[8];
+  struct symbol    *locals_inline[16];
+  struct symbol    *bound_before_decl_inline[16];
+  struct symbol    *globals_inline[8];
+  struct symbol    *nonlocals_inline[8];
+  struct symbol    *freevars_inline[8];
+  struct symbol    *cellvars_inline[8];
+  struct symbol    *uses_inline[16];
+  struct ast_def   *children_inline[8];
+  struct ast_class *class_children_inline[8];
 
   struct idynarray locals;
   struct idynarray bound_before_decl;
@@ -1444,13 +1443,15 @@ struct binding_scope {
   struct idynarray class_children;
 };
 
-static void emit_statement_list_with_function(
-    struct cg_state *s, struct ast_statement_list *statement_list,
-    struct ast_statement_def *nullable current_function);
+static void
+            emit_statement_list_with_function(struct cg_state           *s,
+                                              struct ast_statement_list *statement_list,
+                                              struct ast_def *nullable   current_function);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
-                           struct ast_statement_def *nullable current_function);
+                           struct ast_def *nullable current_function);
 
-static bool symbol_array_contains(struct idynarray *array, struct symbol *symbol)
+static bool symbol_array_contains(struct idynarray *array,
+                                  struct symbol    *symbol)
 {
   struct symbol **symbols = idynarray_data(array);
   unsigned        num_symbols = idynarray_length(array, struct symbol *);
@@ -1472,33 +1473,34 @@ static bool symbol_array_append_unique(struct idynarray *array,
   return true;
 }
 
-static struct symbol **nullable symbol_array_copy(struct cg_state *s,
+static struct symbol **nullable symbol_array_copy(struct cg_state  *s,
                                                   struct idynarray *array)
 {
   unsigned num_symbols = idynarray_length(array, struct symbol *);
   if (num_symbols == 0) return NULL;
-  size_t size = num_symbols * sizeof(struct symbol *);
-  struct symbol **result = arena_allocate(object_intern_arena(&s->objects), size,
-                                          alignof(struct symbol *));
+  size_t          size = num_symbols * sizeof(struct symbol *);
+  struct symbol **result = arena_allocate(object_intern_arena(&s->objects),
+                                          size, alignof(struct symbol *));
   memcpy(result, idynarray_data(array), size);
   return result;
 }
 
-static void binding_scope_init(struct binding_scope        *scope,
-                               struct cg_state             *cg,
+static void binding_scope_init(struct binding_scope          *scope,
+                               struct cg_state               *cg,
                                struct binding_scope *nullable parent,
-                               struct ast_statement_def *nullable def,
-                               bool                       is_class)
+                               struct ast_def *nullable def, bool is_class)
 {
   memset(scope, 0, sizeof(*scope));
   scope->cg = cg;
   scope->parent = parent;
   scope->def = def;
   scope->is_class = is_class;
-  idynarray_init(&scope->locals, scope->locals_inline, sizeof(scope->locals_inline));
+  idynarray_init(&scope->locals, scope->locals_inline,
+                 sizeof(scope->locals_inline));
   idynarray_init(&scope->bound_before_decl, scope->bound_before_decl_inline,
                  sizeof(scope->bound_before_decl_inline));
-  idynarray_init(&scope->globals, scope->globals_inline, sizeof(scope->globals_inline));
+  idynarray_init(&scope->globals, scope->globals_inline,
+                 sizeof(scope->globals_inline));
   idynarray_init(&scope->nonlocals, scope->nonlocals_inline,
                  sizeof(scope->nonlocals_inline));
   idynarray_init(&scope->freevars, scope->freevars_inline,
@@ -1564,7 +1566,8 @@ static bool resolve_from_parent_scope(struct binding_scope *nullable scope,
   return false;
 }
 
-static void scope_mark_local(struct binding_scope *scope, struct symbol *symbol)
+static void scope_mark_local(struct binding_scope *scope,
+                             struct symbol        *symbol)
 {
   if (symbol_array_contains(&scope->globals, symbol)
       || symbol_array_contains(&scope->nonlocals, symbol)) {
@@ -1582,7 +1585,7 @@ static void scope_note_use(struct binding_scope *scope, struct symbol *symbol)
 static void analyze_expression(struct binding_scope *scope,
                                union ast_expression *expression);
 static void analyze_statement_collect(struct binding_scope *scope,
-                                      union ast_statement *statement);
+                                      union ast_statement  *statement);
 
 static void analyze_assignment_target(struct binding_scope *scope,
                                       union ast_expression *target, bool bind)
@@ -1749,7 +1752,8 @@ static void analyze_expression(struct binding_scope *scope,
   case AST_DICT_COMPREHENSION: {
     /* Comprehensions have a nested scope; only the first iterable is
      * evaluated in the outer scope. */
-    struct ast_generator_expression *generator = &expression->generator_expression;
+    struct ast_generator_expression *generator
+        = &expression->generator_expression;
     if (generator->num_parts > 0
         && generator->parts[0].type == GENERATOR_EXPRESSION_PART_FOR) {
       analyze_expression(scope, generator->parts[0].expression);
@@ -1760,9 +1764,12 @@ static void analyze_expression(struct binding_scope *scope,
     /* Lambda body has its own scope. */
     return;
   case AST_SLICE:
-    if (expression->slice.start != NULL) analyze_expression(scope, expression->slice.start);
-    if (expression->slice.stop != NULL) analyze_expression(scope, expression->slice.stop);
-    if (expression->slice.step != NULL) analyze_expression(scope, expression->slice.step);
+    if (expression->slice.start != NULL)
+      analyze_expression(scope, expression->slice.start);
+    if (expression->slice.stop != NULL)
+      analyze_expression(scope, expression->slice.stop);
+    if (expression->slice.step != NULL)
+      analyze_expression(scope, expression->slice.step);
     return;
   case AST_UNEXPR_AWAIT:
   case AST_UNEXPR_INVERT:
@@ -1782,8 +1789,9 @@ static void analyze_expression(struct binding_scope *scope,
   }
 }
 
-static void analyze_statement_list_collect(struct binding_scope      *scope,
-                                           struct ast_statement_list *statement_list)
+static void
+analyze_statement_list_collect(struct binding_scope      *scope,
+                               struct ast_statement_list *statement_list)
 {
   for (unsigned i = 0; i < statement_list->num_statements; ++i) {
     analyze_statement_collect(scope, statement_list->statements[i]);
@@ -1792,8 +1800,7 @@ static void analyze_statement_list_collect(struct binding_scope      *scope,
 
 static void analyze_global_or_nonlocal(struct binding_scope *scope,
                                        struct location       location,
-                                       struct symbol        *name,
-                                       bool                  nonlocal)
+                                       struct symbol *name, bool nonlocal)
 {
   (void)location;
   if (symbol_array_contains(&scope->bound_before_decl, name)) {
@@ -1807,7 +1814,7 @@ static void analyze_global_or_nonlocal(struct binding_scope *scope,
 }
 
 static void analyze_statement_collect(struct binding_scope *scope,
-                                      union ast_statement *statement)
+                                      union ast_statement  *statement)
 {
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION:
@@ -1819,9 +1826,9 @@ static void analyze_statement_collect(struct binding_scope *scope,
     }
     return;
   case AST_STATEMENT_ASSERT:
-    analyze_expression(scope, statement->assertion.expression);
-    if (statement->assertion.message != NULL) {
-      analyze_expression(scope, statement->assertion.message);
+    analyze_expression(scope, statement->assert.expression);
+    if (statement->assert.message != NULL) {
+      analyze_expression(scope, statement->assert.message);
     }
     return;
   case AST_STATEMENT_ASSIGN:
@@ -1839,7 +1846,7 @@ static void analyze_statement_collect(struct binding_scope *scope,
   case AST_STATEMENT_PASS:
     return;
   case AST_STATEMENT_CLASS: {
-    struct ast_statement_class *class_stmt = &statement->class_stmt;
+    struct ast_class *class_stmt = &statement->class_;
     scope_mark_local(scope, class_stmt->name);
     for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
       analyze_expression(scope, class_stmt->decorators[i]);
@@ -1847,18 +1854,17 @@ static void analyze_statement_collect(struct binding_scope *scope,
     for (unsigned i = 0; i < class_stmt->call->num_arguments; ++i) {
       analyze_expression(scope, class_stmt->call->arguments[i].expression);
     }
-    *idynarray_append(&scope->class_children, struct ast_statement_class *)
-        = class_stmt;
+    *idynarray_append(&scope->class_children, struct ast_class *) = class_stmt;
     return;
   }
   case AST_STATEMENT_DEF: {
-    struct ast_statement_def *def_stmt = &statement->def_stmt;
-    scope_mark_local(scope, def_stmt->name);
-    for (unsigned i = 0; i < def_stmt->num_decorators; ++i) {
-      analyze_expression(scope, def_stmt->decorators[i]);
+    struct ast_def *def = &statement->def;
+    scope_mark_local(scope, def->name);
+    for (unsigned i = 0; i < def->num_decorators; ++i) {
+      analyze_expression(scope, def->decorators[i]);
     }
-    for (unsigned i = 0; i < def_stmt->num_parameters; ++i) {
-      struct parameter *parameter = &def_stmt->parameters[i];
+    for (unsigned i = 0; i < def->num_parameters; ++i) {
+      struct parameter *parameter = &def->parameters[i];
       if (parameter->type != NULL) {
         analyze_expression(scope, parameter->type);
       }
@@ -1866,55 +1872,57 @@ static void analyze_statement_collect(struct binding_scope *scope,
         analyze_expression(scope, parameter->initializer);
       }
     }
-    if (def_stmt->return_type != NULL) {
-      analyze_expression(scope, def_stmt->return_type);
+    if (def->return_type != NULL) {
+      analyze_expression(scope, def->return_type);
     }
-    *idynarray_append(&scope->children, struct ast_statement_def *) = def_stmt;
+    *idynarray_append(&scope->children, struct ast_def *) = def;
     return;
   }
   case AST_STATEMENT_DEL:
-    analyze_assignment_target(scope, statement->del_stmt.targets, /*bind=*/false);
+    analyze_assignment_target(scope, statement->del.targets,
+                              /*bind=*/false);
     return;
   case AST_STATEMENT_EXPRESSION:
-    analyze_expression(scope, statement->expression_stmt.expression);
+    analyze_expression(scope, statement->expression.expression);
     return;
   case AST_STATEMENT_FOR:
-    analyze_assignment_target(scope, statement->for_stmt.targets, /*bind=*/true);
-    analyze_expression(scope, statement->for_stmt.expression);
-    analyze_statement_list_collect(scope, statement->for_stmt.body);
-    if (statement->for_stmt.else_body != NULL) {
-      analyze_statement_list_collect(scope, statement->for_stmt.else_body);
+    analyze_assignment_target(scope, statement->for_.targets,
+                              /*bind=*/true);
+    analyze_expression(scope, statement->for_.expression);
+    analyze_statement_list_collect(scope, statement->for_.body);
+    if (statement->for_.else_body != NULL) {
+      analyze_statement_list_collect(scope, statement->for_.else_body);
     }
     return;
   case AST_STATEMENT_FROM_IMPORT:
-    if (!statement->from_import_stmt.import_star) {
-      for (unsigned i = 0; i < statement->from_import_stmt.num_items; ++i) {
-        struct from_import_item *item = &statement->from_import_stmt.items[i];
+    if (!statement->from_import.import_star) {
+      for (unsigned i = 0; i < statement->from_import.num_items; ++i) {
+        struct from_import_item *item = &statement->from_import.items[i];
         scope_mark_local(scope, item->as != NULL ? item->as : item->name);
       }
     }
     return;
   case AST_STATEMENT_GLOBAL:
-    for (unsigned i = 0; i < statement->global_stmt.num_names; ++i) {
+    for (unsigned i = 0; i < statement->global.num_names; ++i) {
       analyze_global_or_nonlocal(scope, statement->base.location,
-                                 statement->global_stmt.names[i],
+                                 statement->global.names[i],
                                  /*nonlocal=*/false);
     }
     return;
   case AST_STATEMENT_IF:
-    analyze_expression(scope, statement->if_stmt.condition);
-    analyze_statement_list_collect(scope, statement->if_stmt.body);
-    for (unsigned i = 0; i < statement->if_stmt.num_elifs; ++i) {
-      analyze_expression(scope, statement->if_stmt.elifs[i].condition);
-      analyze_statement_list_collect(scope, statement->if_stmt.elifs[i].body);
+    analyze_expression(scope, statement->if_.condition);
+    analyze_statement_list_collect(scope, statement->if_.body);
+    for (unsigned i = 0; i < statement->if_.num_elifs; ++i) {
+      analyze_expression(scope, statement->if_.elifs[i].condition);
+      analyze_statement_list_collect(scope, statement->if_.elifs[i].body);
     }
-    if (statement->if_stmt.else_body != NULL) {
-      analyze_statement_list_collect(scope, statement->if_stmt.else_body);
+    if (statement->if_.else_body != NULL) {
+      analyze_statement_list_collect(scope, statement->if_.else_body);
     }
     return;
   case AST_STATEMENT_IMPORT:
-    for (unsigned i = 0; i < statement->import_stmt.num_items; ++i) {
-      struct ast_import_item *item = &statement->import_stmt.items[i];
+    for (unsigned i = 0; i < statement->import.num_items; ++i) {
+      struct ast_import_item *item = &statement->import.items[i];
       struct symbol          *name = item->as;
       if (name == NULL) {
         name = item->module->symbols[0];
@@ -1923,29 +1931,29 @@ static void analyze_statement_collect(struct binding_scope *scope,
     }
     return;
   case AST_STATEMENT_NONLOCAL:
-    for (unsigned i = 0; i < statement->nonlocal_stmt.num_names; ++i) {
+    for (unsigned i = 0; i < statement->nonlocal.num_names; ++i) {
       analyze_global_or_nonlocal(scope, statement->base.location,
-                                 statement->nonlocal_stmt.names[i],
+                                 statement->nonlocal.names[i],
                                  /*nonlocal=*/true);
     }
     return;
   case AST_STATEMENT_RAISE:
-    if (statement->raise_stmt.expression != NULL) {
-      analyze_expression(scope, statement->raise_stmt.expression);
+    if (statement->raise.expression != NULL) {
+      analyze_expression(scope, statement->raise.expression);
     }
-    if (statement->raise_stmt.from != NULL) {
-      analyze_expression(scope, statement->raise_stmt.from);
+    if (statement->raise.from != NULL) {
+      analyze_expression(scope, statement->raise.from);
     }
     return;
   case AST_STATEMENT_RETURN:
-    if (statement->return_stmt.expression != NULL) {
-      analyze_expression(scope, statement->return_stmt.expression);
+    if (statement->return_.expression != NULL) {
+      analyze_expression(scope, statement->return_.expression);
     }
     return;
   case AST_STATEMENT_TRY:
-    analyze_statement_list_collect(scope, statement->try_stmt.body);
-    for (unsigned i = 0; i < statement->try_stmt.num_excepts; ++i) {
-      struct ast_try_except *except_stmt = &statement->try_stmt.excepts[i];
+    analyze_statement_list_collect(scope, statement->try_.body);
+    for (unsigned i = 0; i < statement->try_.num_excepts; ++i) {
+      struct ast_try_except *except_stmt = &statement->try_.excepts[i];
       if (except_stmt->match != NULL) {
         analyze_expression(scope, except_stmt->match);
       }
@@ -1954,48 +1962,47 @@ static void analyze_statement_collect(struct binding_scope *scope,
       }
       analyze_statement_list_collect(scope, except_stmt->body);
     }
-    if (statement->try_stmt.else_body != NULL) {
-      analyze_statement_list_collect(scope, statement->try_stmt.else_body);
+    if (statement->try_.else_body != NULL) {
+      analyze_statement_list_collect(scope, statement->try_.else_body);
     }
-    if (statement->try_stmt.finally_body != NULL) {
-      analyze_statement_list_collect(scope, statement->try_stmt.finally_body);
+    if (statement->try_.finally_body != NULL) {
+      analyze_statement_list_collect(scope, statement->try_.finally_body);
     }
     return;
   case AST_STATEMENT_WHILE:
-    analyze_expression(scope, statement->while_stmt.condition);
-    analyze_statement_list_collect(scope, statement->while_stmt.body);
-    if (statement->while_stmt.else_body != NULL) {
-      analyze_statement_list_collect(scope, statement->while_stmt.else_body);
+    analyze_expression(scope, statement->while_.condition);
+    analyze_statement_list_collect(scope, statement->while_.body);
+    if (statement->while_.else_body != NULL) {
+      analyze_statement_list_collect(scope, statement->while_.else_body);
     }
     return;
   case AST_STATEMENT_WITH:
-    for (unsigned i = 0; i < statement->with_stmt.num_items; ++i) {
-      analyze_expression(scope, statement->with_stmt.items[i].expression);
-      if (statement->with_stmt.items[i].targets != NULL) {
-        analyze_assignment_target(scope, statement->with_stmt.items[i].targets,
+    for (unsigned i = 0; i < statement->with.num_items; ++i) {
+      analyze_expression(scope, statement->with.items[i].expression);
+      if (statement->with.items[i].targets != NULL) {
+        analyze_assignment_target(scope, statement->with.items[i].targets,
                                   /*bind=*/true);
       }
     }
-    analyze_statement_list_collect(scope, statement->with_stmt.body);
+    analyze_statement_list_collect(scope, statement->with.body);
     return;
   case AST_STATEMENT_YIELD:
   case AST_STATEMENT_YIELD_FROM:
-    if (statement->yield_stmt.expression != NULL) {
-      analyze_expression(scope, statement->yield_stmt.expression);
+    if (statement->yield.expression != NULL) {
+      analyze_expression(scope, statement->yield.expression);
     }
     return;
   }
 }
 
-static void analyze_function_bindings(struct cg_state *s,
-                                      struct ast_statement_def *def_stmt,
+static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
                                       struct binding_scope *nullable parent);
-static void analyze_class_bindings(struct cg_state *s,
-                                   struct ast_statement_class *class_stmt,
+static void analyze_class_bindings(struct cg_state               *s,
+                                   struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent);
 
-static void analyze_class_bindings(struct cg_state *s,
-                                   struct ast_statement_class *class_stmt,
+static void analyze_class_bindings(struct cg_state               *s,
+                                   struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent)
 {
   if (class_stmt->scope_bindings_ready) {
@@ -2006,23 +2013,21 @@ static void analyze_class_bindings(struct cg_state *s,
   binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/true);
   analyze_statement_list_collect(&scope, class_stmt->body);
 
-  struct ast_statement_class **class_children
-      = idynarray_data(&scope.class_children);
-  unsigned num_class_children
-      = idynarray_length(&scope.class_children, struct ast_statement_class *);
+  struct ast_class **class_children = idynarray_data(&scope.class_children);
+  unsigned           num_class_children
+      = idynarray_length(&scope.class_children, struct ast_class *);
   for (unsigned i = 0; i < num_class_children; ++i) {
     analyze_class_bindings(s, class_children[i], &scope);
   }
 
-  struct ast_statement_def **children = idynarray_data(&scope.children);
-  unsigned                  num_children
-      = idynarray_length(&scope.children, struct ast_statement_def *);
+  struct ast_def **children = idynarray_data(&scope.children);
+  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
   for (unsigned i = 0; i < num_children; ++i) {
     analyze_function_bindings(s, children[i], &scope);
   }
 
   struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned        num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
+  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
@@ -2051,55 +2056,55 @@ static void analyze_class_bindings(struct cg_state *s,
     }
   }
 
-  class_stmt->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
+  class_stmt->num_scope_globals
+      = idynarray_length(&scope.globals, struct symbol *);
   class_stmt->scope_globals = symbol_array_copy(s, &scope.globals);
-  class_stmt->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
+  class_stmt->num_scope_locals
+      = idynarray_length(&scope.locals, struct symbol *);
   class_stmt->scope_locals = symbol_array_copy(s, &scope.locals);
-  class_stmt->num_scope_freevars = idynarray_length(&scope.freevars, struct symbol *);
+  class_stmt->num_scope_freevars
+      = idynarray_length(&scope.freevars, struct symbol *);
   class_stmt->scope_freevars = symbol_array_copy(s, &scope.freevars);
   class_stmt->scope_bindings_ready = true;
 
   binding_scope_free(&scope);
 }
 
-static void analyze_function_bindings(struct cg_state *s,
-                                      struct ast_statement_def *def_stmt,
+static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
                                       struct binding_scope *nullable parent)
 {
-  if (def_stmt->scope_bindings_ready) {
+  if (def->scope_bindings_ready) {
     return;
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, def_stmt, /*is_class=*/false);
+  binding_scope_init(&scope, s, parent, def, /*is_class=*/false);
 
-  for (unsigned i = 0; i < def_stmt->num_parameters; ++i) {
-    scope_mark_local(&scope, def_stmt->parameters[i].name);
+  for (unsigned i = 0; i < def->num_parameters; ++i) {
+    scope_mark_local(&scope, def->parameters[i].name);
   }
 
-  analyze_statement_list_collect(&scope, def_stmt->body);
+  analyze_statement_list_collect(&scope, def->body);
 
-  struct ast_statement_class **class_children
-      = idynarray_data(&scope.class_children);
-  unsigned num_class_children
-      = idynarray_length(&scope.class_children, struct ast_statement_class *);
+  struct ast_class **class_children = idynarray_data(&scope.class_children);
+  unsigned           num_class_children
+      = idynarray_length(&scope.class_children, struct ast_class *);
   for (unsigned i = 0; i < num_class_children; ++i) {
     analyze_class_bindings(s, class_children[i], &scope);
   }
 
-  struct ast_statement_def **children = idynarray_data(&scope.children);
-  unsigned                  num_children
-      = idynarray_length(&scope.children, struct ast_statement_def *);
+  struct ast_def **children = idynarray_data(&scope.children);
+  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
   for (unsigned i = 0; i < num_children; ++i) {
     analyze_function_bindings(s, children[i], &scope);
   }
 
   struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned        num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
+  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      diag_begin_error(s->d, def_stmt->base.location);
+      diag_begin_error(s->d, def->base.location);
       diag_frag(s->d, "no binding for nonlocal ");
       diag_symbol(s->d, name);
       diag_frag(s->d, " found");
@@ -2124,21 +2129,21 @@ static void analyze_function_bindings(struct cg_state *s,
     }
   }
 
-  def_stmt->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
-  def_stmt->scope_globals = symbol_array_copy(s, &scope.globals);
-  def_stmt->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
-  def_stmt->scope_locals = symbol_array_copy(s, &scope.locals);
-  def_stmt->num_scope_cellvars = idynarray_length(&scope.cellvars, struct symbol *);
-  def_stmt->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
-  def_stmt->num_scope_freevars = idynarray_length(&scope.freevars, struct symbol *);
-  def_stmt->scope_freevars = symbol_array_copy(s, &scope.freevars);
-  def_stmt->scope_bindings_ready = true;
+  def->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
+  def->scope_globals = symbol_array_copy(s, &scope.globals);
+  def->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
+  def->scope_locals = symbol_array_copy(s, &scope.locals);
+  def->num_scope_cellvars = idynarray_length(&scope.cellvars, struct symbol *);
+  def->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
+  def->num_scope_freevars = idynarray_length(&scope.freevars, struct symbol *);
+  def->scope_freevars = symbol_array_copy(s, &scope.freevars);
+  def->scope_bindings_ready = true;
 
   binding_scope_free(&scope);
 }
 
-static void apply_class_bindings(struct cg_state *s,
-                                 struct ast_statement_class *class_stmt)
+static void apply_class_bindings(struct cg_state  *s,
+                                 struct ast_class *class_stmt)
 {
   for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
     cg_register_freevar(s, class_stmt->scope_freevars[i]);
@@ -2170,34 +2175,33 @@ static void apply_class_bindings(struct cg_state *s,
   }
 }
 
-static void apply_function_bindings(struct cg_state *s,
-                                    struct ast_statement_def *def_stmt)
+static void apply_function_bindings(struct cg_state *s, struct ast_def *def)
 {
-  for (unsigned i = 0; i < def_stmt->num_scope_globals; ++i) {
-    cg_declare(s, def_stmt->scope_globals[i], SYMBOL_GLOBAL);
+  for (unsigned i = 0; i < def->num_scope_globals; ++i) {
+    cg_declare(s, def->scope_globals[i], SYMBOL_GLOBAL);
   }
-  for (unsigned i = 0; i < def_stmt->num_scope_freevars; ++i) {
-    cg_declare(s, def_stmt->scope_freevars[i], SYMBOL_NONLOCAL);
+  for (unsigned i = 0; i < def->num_scope_freevars; ++i) {
+    cg_declare(s, def->scope_freevars[i], SYMBOL_NONLOCAL);
   }
-  for (unsigned i = 0; i < def_stmt->num_scope_locals; ++i) {
-    cg_declare(s, def_stmt->scope_locals[i], SYMBOL_LOCAL);
+  for (unsigned i = 0; i < def->num_scope_locals; ++i) {
+    cg_declare(s, def->scope_locals[i], SYMBOL_LOCAL);
   }
-  for (unsigned i = 0; i < def_stmt->num_scope_cellvars; ++i) {
-    cg_promote_to_cell(s, def_stmt->scope_cellvars[i]);
+  for (unsigned i = 0; i < def->num_scope_cellvars; ++i) {
+    cg_promote_to_cell(s, def->scope_cellvars[i]);
   }
 }
 
 static void emit_function_closure(struct cg_state            *s,
                                   struct make_function_state *state,
-                                  struct ast_statement_def   *def_stmt)
+                                  struct ast_def             *def)
 {
   (void)s;
-  unsigned num_freevars = def_stmt->num_scope_freevars;
+  unsigned num_freevars = def->num_scope_freevars;
   if (num_freevars == 0) {
     return;
   }
   state->num_closure_symbols = num_freevars;
-  state->closure_symbols = def_stmt->scope_freevars;
+  state->closure_symbols = def->scope_freevars;
 }
 
 static void emit_break_statement(struct cg_state *s, struct location location)
@@ -2210,7 +2214,8 @@ static void emit_break_statement(struct cg_state *s, struct location location)
   }
 }
 
-static void emit_continue_statement(struct cg_state *s, struct location location)
+static void emit_continue_statement(struct cg_state *s,
+                                    struct location  location)
 {
   if (!emit_continue(s)) {
     diag_begin_error(s->d, location);
@@ -2246,9 +2251,9 @@ static void emit_nonlocal_statement_checked(struct cg_state *s,
   }
 }
 
-static void emit_return_statement_checked(struct cg_state               *s,
-                                          struct location                location,
-                                          union ast_expression *nullable expression)
+static void
+emit_return_statement_checked(struct cg_state *s, struct location location,
+                              union ast_expression *nullable expression)
 {
   if (!cg_in_function(s)) {
     diag_begin_error(s->d, location);
@@ -2259,16 +2264,17 @@ static void emit_return_statement_checked(struct cg_state               *s,
   emit_return_statement(s, expression);
 }
 
-void emit_statement_list(struct cg_state *s,
+void emit_statement_list(struct cg_state           *s,
                          struct ast_statement_list *statement_list)
 {
   emit_statement_list_with_function(s, statement_list,
                                     /*current_function=*/NULL);
 }
 
-static void emit_statement_list_with_function(
-    struct cg_state *s, struct ast_statement_list *statement_list,
-    struct ast_statement_def *nullable current_function)
+static void
+emit_statement_list_with_function(struct cg_state           *s,
+                                  struct ast_statement_list *statement_list,
+                                  struct ast_def *nullable   current_function)
 {
   for (unsigned i = 0; i < statement_list->num_statements; ++i) {
     emit_statement(s, statement_list->statements[i], current_function);
@@ -2276,7 +2282,7 @@ static void emit_statement_list_with_function(
 }
 
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
-                           struct ast_statement_def *nullable current_function)
+                           struct ast_def *nullable current_function)
 {
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION: {
@@ -2289,12 +2295,12 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_ASSERT: {
-    struct ast_statement_assert *assertion = &statement->assertion;
+    struct ast_assert *assertion = &statement->assert;
     emit_assert(s, assertion->expression, assertion->message);
     return;
   }
   case AST_STATEMENT_ASSIGN: {
-    struct ast_statement_assign *assign = &statement->assign;
+    struct ast_assignment *assign = &statement->assign;
     emit_assign_statement(s, assign->num_targets, assign->targets,
                           assign->value);
     return;
@@ -2306,7 +2312,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_break_statement(s, statement->base.location);
     return;
   case AST_STATEMENT_CLASS: {
-    struct ast_statement_class *class_stmt = &statement->class_stmt;
+    struct ast_class *class_stmt = &statement->class_;
     analyze_class_bindings(s, class_stmt, /*parent=*/NULL);
     for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
       emit_expression(s, class_stmt->decorators[i]);
@@ -2316,8 +2322,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_statement_list_with_function(s, class_stmt->body,
                                       /*current_function=*/NULL);
     emit_class_end(s, class_stmt->name, class_stmt->call,
-                   class_stmt->num_decorators,
-                   class_stmt->num_scope_freevars,
+                   class_stmt->num_decorators, class_stmt->num_scope_freevars,
                    class_stmt->scope_freevars);
     return;
   }
@@ -2325,33 +2330,32 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_continue_statement(s, statement->base.location);
     return;
   case AST_STATEMENT_DEF: {
-    struct ast_statement_def *def_stmt = &statement->def_stmt;
-    analyze_function_bindings(s, def_stmt, /*parent=*/NULL);
-    for (unsigned i = 0; i < def_stmt->num_decorators; ++i) {
-      emit_expression(s, def_stmt->decorators[i]);
+    struct ast_def *def = &statement->def;
+    analyze_function_bindings(s, def, /*parent=*/NULL);
+    for (unsigned i = 0; i < def->num_decorators; ++i) {
+      emit_expression(s, def->decorators[i]);
     }
     struct make_function_state state;
-    emit_def_begin(s, &state, def_stmt->num_parameters, def_stmt->parameters,
-                   def_stmt->positional_only_argcount, def_stmt->return_type);
-    apply_function_bindings(s, def_stmt);
-    emit_statement_list_with_function(s, def_stmt->body, def_stmt);
-    if (def_stmt->has_yield) {
+    emit_def_begin(s, &state, def->num_parameters, def->parameters,
+                   def->positional_only_argcount, def->return_type);
+    apply_function_bindings(s, def);
+    emit_statement_list_with_function(s, def->body, def);
+    if (def->has_yield) {
       s->code.flags |= CO_GENERATOR;
     }
-    emit_function_closure(s, &state, def_stmt);
-    emit_def_end(s, &state, def_stmt->name, def_stmt->num_decorators,
-                 def_stmt->async);
+    emit_function_closure(s, &state, def);
+    emit_def_end(s, &state, def->name, def->num_decorators, def->async);
     return;
   }
   case AST_STATEMENT_DEL:
-    emit_del(s, statement->del_stmt.targets);
+    emit_del(s, statement->del.targets);
     return;
   case AST_STATEMENT_EXPRESSION:
-    emit_expression_statement(s, statement->expression_stmt.expression);
+    emit_expression_statement(s, statement->expression.expression);
     return;
   case AST_STATEMENT_FOR: {
-    struct ast_statement_for *for_stmt = &statement->for_stmt;
-    struct for_while_state    state;
+    struct ast_for        *for_stmt = &statement->for_;
+    struct for_while_state state;
     emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression);
     emit_statement_list_with_function(s, for_stmt->body, current_function);
     emit_for_else(s, &state);
@@ -2363,7 +2367,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_FROM_IMPORT: {
-    struct ast_statement_from_import *from_import = &statement->from_import_stmt;
+    struct ast_from_import *from_import = &statement->from_import;
     if (from_import->import_star) {
       emit_from_import_star_statement(s, from_import->num_prefix_dots,
                                       from_import->module);
@@ -2375,7 +2379,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_GLOBAL: {
-    struct ast_statement_global *global = &statement->global_stmt;
+    struct ast_global *global = &statement->global;
     for (unsigned i = 0; i < global->num_names; ++i) {
       emit_global_statement_checked(s, statement->base.location,
                                     global->names[i]);
@@ -2383,8 +2387,8 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_IF: {
-    struct ast_statement_if *if_stmt = &statement->if_stmt;
-    struct if_state          state;
+    struct ast_if  *if_stmt = &statement->if_;
+    struct if_state state;
     emit_if_begin(s, &state, if_stmt->condition);
     emit_statement_list_with_function(s, if_stmt->body, current_function);
     for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
@@ -2401,7 +2405,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_IMPORT: {
-    struct ast_statement_import *import_stmt = &statement->import_stmt;
+    struct ast_import *import_stmt = &statement->import;
     for (unsigned i = 0; i < import_stmt->num_items; ++i) {
       struct ast_import_item *item = &import_stmt->items[i];
       emit_import_statement(s, item->module, item->as);
@@ -2409,7 +2413,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_NONLOCAL: {
-    struct ast_statement_nonlocal *nonlocal = &statement->nonlocal_stmt;
+    struct ast_statement_nonlocal *nonlocal = &statement->nonlocal;
     for (unsigned i = 0; i < nonlocal->num_names; ++i) {
       emit_nonlocal_statement_checked(s, statement->base.location,
                                       nonlocal->names[i]);
@@ -2419,17 +2423,17 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
   case AST_STATEMENT_PASS:
     return;
   case AST_STATEMENT_RAISE: {
-    struct ast_statement_raise *raise = &statement->raise_stmt;
+    struct ast_raise *raise = &statement->raise;
     emit_raise_statement(s, raise->expression, raise->from);
     return;
   }
   case AST_STATEMENT_RETURN:
     emit_return_statement_checked(s, statement->base.location,
-                                  statement->return_stmt.expression);
+                                  statement->return_.expression);
     return;
   case AST_STATEMENT_TRY: {
-    struct ast_statement_try *try_stmt = &statement->try_stmt;
-    struct try_state          state;
+    struct ast_try  *try_stmt = &statement->try_;
+    struct try_state state;
     emit_try_body_begin(s, &state);
     emit_statement_list_with_function(s, try_stmt->body, current_function);
     emit_try_body_end(s, &state);
@@ -2460,8 +2464,8 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_WHILE: {
-    struct ast_statement_while *while_stmt = &statement->while_stmt;
-    struct for_while_state      state;
+    struct ast_while      *while_stmt = &statement->while_;
+    struct for_while_state state;
     emit_while_begin(s, &state, while_stmt->condition);
     emit_statement_list_with_function(s, while_stmt->body, current_function);
     emit_while_else(s, &state);
@@ -2473,9 +2477,9 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_WITH: {
-    struct ast_statement_with *with_stmt = &statement->with_stmt;
-    unsigned                  num_items = with_stmt->num_items;
-    struct with_state        *states = NULL;
+    struct ast_with   *with = &statement->with;
+    unsigned           num_items = with->num_items;
+    struct with_state *states = NULL;
     if (num_items > 0) {
       states = (struct with_state *)calloc(num_items, sizeof(*states));
       if (states == NULL) {
@@ -2484,10 +2488,10 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     }
 
     for (unsigned i = 0; i < num_items; ++i) {
-      struct ast_with_item *item = &with_stmt->items[i];
+      struct ast_with_item *item = &with->items[i];
       emit_with_begin(s, &states[i], item->expression, item->targets);
     }
-    emit_statement_list_with_function(s, with_stmt->body, current_function);
+    emit_statement_list_with_function(s, with->body, current_function);
     for (unsigned i = num_items; i-- > 0;) {
       emit_with_end(s, &states[i]);
     }
@@ -2495,10 +2499,10 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     return;
   }
   case AST_STATEMENT_YIELD:
-    emit_yield_statement(s, statement->yield_stmt.expression);
+    emit_yield_statement(s, statement->yield.expression);
     return;
   case AST_STATEMENT_YIELD_FROM:
-    emit_yield_from_statement(s, statement->yield_stmt.expression);
+    emit_yield_from_statement(s, statement->yield.expression);
     return;
   default:
     internal_error("invalid statement");

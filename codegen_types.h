@@ -37,9 +37,10 @@ struct basic_block {
 };
 
 struct loop_state {
-  struct basic_block *nullable continue_block;
-  struct basic_block *nullable break_block;
-  bool                         pop_on_break;
+  struct basic_block              *nullable continue_block;
+  struct basic_block              *nullable break_block;
+  struct pending_finally_state    *nullable pending_at_loop;
+  bool                                      pop_on_break;
 };
 
 struct code_state {

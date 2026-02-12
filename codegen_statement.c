@@ -92,12 +92,25 @@ static void emit_comparison_multi(struct cg_state             *s,
   }
 }
 
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function);
+static void emit_pending_finally(
+    struct cg_state                    *s,
+    struct ast_def              *nullable current_function,
+    struct pending_finally_state *nullable stop);
+
+enum pending_cleanup_kind {
+  CLEANUP_POP_BLOCK,
+  CLEANUP_POP_EXCEPT,
+  CLEANUP_FINALLY,
+  CLEANUP_EXCEPT_AS,
+  CLEANUP_WITH,
+};
 
 struct pending_finally_state {
-  struct ast_statement_list             *finally_body;
-  struct pending_finally_state *nullable prev;
+  enum pending_cleanup_kind               kind;
+  struct ast_statement_list   *nullable    finally_body;
+  struct symbol               *nullable    as_symbol;
+  bool                                     async_with;
+  struct pending_finally_state *nullable   prev;
 };
 
 void emit_comparison_multi_value(struct cg_state       *s,
@@ -1016,6 +1029,7 @@ static void emit_for_begin_impl(struct cg_state        *s,
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
+    .pending_at_loop = s->code.pending_finally,
     .pop_on_break = true,
   };
 }
@@ -1071,6 +1085,7 @@ static void emit_for_begin_async(struct cg_state        *s,
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
+    .pending_at_loop = s->code.pending_finally,
     .pop_on_break = true,
   };
 }
@@ -1139,7 +1154,8 @@ static bool emit_continue(struct cg_state         *s,
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   if (target == NULL) return false;
-  emit_pending_finally(s, current_function);
+  emit_pending_finally(s, current_function,
+                       s->code.loop_state.pending_at_loop);
   if (unreachable(s)) return true;
   if (!unreachable(s)) {
     cg_jump(s, target);
@@ -1152,7 +1168,8 @@ static bool emit_break(struct cg_state         *s,
 {
   struct basic_block *target = s->code.loop_state.break_block;
   if (target == NULL) return false;
-  emit_pending_finally(s, current_function);
+  emit_pending_finally(s, current_function,
+                       s->code.loop_state.pending_at_loop);
   if (unreachable(s)) return true;
   if (!unreachable(s)) {
     if (s->code.loop_state.pop_on_break) {
@@ -1188,6 +1205,7 @@ static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
+    .pending_at_loop = s->code.pending_finally,
     .pop_on_break = false,
   };
 }
@@ -1359,6 +1377,7 @@ void emit_generator_expression_code(
     s->code.loop_state = (struct loop_state){
       .continue_block = header,
       .break_block = footer,
+      .pending_at_loop = s->code.pending_finally,
       .pop_on_break = true,
     };
   } else {
@@ -1479,8 +1498,10 @@ static void emit_statement_list_with_function_from(
     struct ast_def *nullable current_function, unsigned first_statement);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function);
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function);
+static void emit_pending_finally(
+    struct cg_state                    *s,
+    struct ast_def              *nullable current_function,
+    struct pending_finally_state *nullable stop);
 
 static bool symbol_array_contains(struct idynarray *array,
                                   struct symbol    *symbol)
@@ -1500,15 +1521,48 @@ static bool is_class_symbol(struct symbol *symbol)
   return strcmp(symbol->string, "__class__") == 0;
 }
 
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function)
+static void emit_pending_finally(
+    struct cg_state                    *s,
+    struct ast_def              *nullable current_function,
+    struct pending_finally_state *nullable stop)
 {
   struct pending_finally_state *head = s->code.pending_finally;
-  for (struct pending_finally_state *state = head; state != NULL;
-       state = state->prev) {
+  for (struct pending_finally_state *state = head;
+       state != NULL && state != stop; state = state->prev) {
     s->code.pending_finally = state->prev;
-    emit_statement_list_with_function(s, state->finally_body,
-                                      current_function);
+    switch (state->kind) {
+    case CLEANUP_POP_BLOCK:
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      break;
+    case CLEANUP_POP_EXCEPT:
+      cg_op(s, OPCODE_POP_EXCEPT, 0);
+      break;
+    case CLEANUP_FINALLY:
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      emit_statement_list_with_function(s, state->finally_body,
+                                        current_function);
+      break;
+    case CLEANUP_EXCEPT_AS:
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      cg_load_const(s,
+                    object_intern_singleton(&s->objects, OBJECT_NONE));
+      cg_store(s, state->as_symbol);
+      cg_delete(s, state->as_symbol);
+      break;
+    case CLEANUP_WITH:
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      cg_op(s, OPCODE_BEGIN_FINALLY, 0);
+      cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
+      if (state->async_with) {
+        cg_op(s, OPCODE_GET_AWAITABLE, 0);
+        cg_load_const(s,
+                      object_intern_singleton(&s->objects, OBJECT_NONE));
+        cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+      }
+      cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
+      cg_op(s, OPCODE_POP_FINALLY, 0);
+      break;
+    }
     if (unreachable(s)) {
       break;
     }
@@ -2867,13 +2921,30 @@ emit_nonlocal_statement_node(struct cg_state *s, struct location location,
 static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
                      struct ast_def *nullable current_function)
 {
-  struct pending_finally_state  finally_state;
   struct pending_finally_state *saved_pending = s->code.pending_finally;
   bool                          has_finally = (try_stmt->finally_body != NULL);
+  bool                          has_except = (try_stmt->num_excepts > 0);
+
+  /* Push cleanup entries for break/continue/return inside the try body.
+   * Order: finally (outermost) then except POP_BLOCK (innermost). */
+  struct pending_finally_state finally_cleanup;
   if (has_finally) {
-    finally_state.finally_body = try_stmt->finally_body;
-    finally_state.prev = saved_pending;
-    s->code.pending_finally = &finally_state;
+    finally_cleanup = (struct pending_finally_state){
+        .kind = CLEANUP_FINALLY,
+        .finally_body = try_stmt->finally_body,
+        .prev = saved_pending,
+    };
+    s->code.pending_finally = &finally_cleanup;
+  }
+
+  struct pending_finally_state except_cleanup;
+  struct pending_finally_state *pre_body_pending = s->code.pending_finally;
+  if (has_except) {
+    except_cleanup = (struct pending_finally_state){
+        .kind = CLEANUP_POP_BLOCK,
+        .prev = pre_body_pending,
+    };
+    s->code.pending_finally = &except_cleanup;
   }
 
   struct try_state state;
@@ -2881,10 +2952,38 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   emit_statement_list_with_function(s, try_stmt->body, current_function);
   emit_try_body_end(s, &state);
 
+  /* Pop the except SETUP_FINALLY cleanup before entering except handlers. */
+  if (has_except) {
+    s->code.pending_finally = pre_body_pending;
+  }
+
   for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
     struct ast_try_except *except_stmt = &try_stmt->excepts[i];
     emit_try_except_begin(s, &state, except_stmt->match, except_stmt->as);
+
+    /* Push cleanup entries for break/continue/return inside the except
+     * handler body.  Innermost first: as-cleanup, then POP_EXCEPT. */
+    struct pending_finally_state *pre_handler_pending = s->code.pending_finally;
+    struct pending_finally_state  pop_except_cleanup = {
+        .kind = CLEANUP_POP_EXCEPT,
+        .prev = s->code.pending_finally,
+    };
+    struct pending_finally_state as_cleanup;
+    if (except_stmt->as != NULL) {
+      as_cleanup = (struct pending_finally_state){
+          .kind = CLEANUP_EXCEPT_AS,
+          .as_symbol = except_stmt->as,
+          .prev = &pop_except_cleanup,
+      };
+      s->code.pending_finally = &as_cleanup;
+    } else {
+      s->code.pending_finally = &pop_except_cleanup;
+    }
+
     emit_statement_list_with_function(s, except_stmt->body, current_function);
+
+    /* Restore before emit_try_except_end emits its own cleanup. */
+    s->code.pending_finally = pre_handler_pending;
     emit_try_except_end(s, &state, except_stmt->as);
   }
 
@@ -2933,15 +3032,33 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
     }
   }
 
+  struct pending_finally_state *with_cleanups = NULL;
+  if (num_items > 0) {
+    with_cleanups = (struct pending_finally_state *)calloc(
+        num_items, sizeof(*with_cleanups));
+    if (with_cleanups == NULL) {
+      internal_error("out of memory");
+    }
+  }
+
+  struct pending_finally_state *saved_pending = s->code.pending_finally;
   for (unsigned i = 0; i < num_items; ++i) {
     struct ast_with_item *item = &with->items[i];
     emit_with_begin(s, &states[i], item->expression, item->targets,
                     with->async, with->base.location);
+    with_cleanups[i] = (struct pending_finally_state){
+        .kind = CLEANUP_WITH,
+        .async_with = with->async,
+        .prev = s->code.pending_finally,
+    };
+    s->code.pending_finally = &with_cleanups[i];
   }
   emit_statement_list_with_function(s, with->body, current_function);
+  s->code.pending_finally = saved_pending;
   for (unsigned i = num_items; i-- > 0;) {
     emit_with_end(s, &states[i]);
   }
+  free(with_cleanups);
   free(states);
 }
 
@@ -3035,7 +3152,7 @@ static void emit_return(struct cg_state *s, struct location location,
         cg_declare(s, tmp, SYMBOL_LOCAL);
       }
       cg_store(s, tmp);
-      emit_pending_finally(s, current_function);
+      emit_pending_finally(s, current_function, /*stop=*/NULL);
       if (unreachable(s)) {
         return;
       }

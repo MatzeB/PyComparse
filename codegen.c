@@ -189,6 +189,7 @@ bool cg_in_block(struct cg_state *s)
 
 void cg_code_begin(struct cg_state *s, bool in_function)
 {
+  uint32_t           inherited_future_flags = s->code.flags & CO_FUTURE_MASK;
   struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
   arena_init(&code->opcodes);
@@ -204,11 +205,12 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   code->scope_id = s->next_scope_id++;
   code->cg_stack_begin = stack_size(&s->stack);
   code->in_function = in_function;
+  code->flags |= inherited_future_flags;
 
   if (in_function) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
-    object_list_append(
-        code->consts, object_intern_singleton(&s->objects, OBJECT_NONE));
+    object_list_append(code->consts,
+                       object_intern_singleton(&s->objects, OBJECT_NONE));
   }
 
   struct basic_block *first = cg_block_allocate(s);

@@ -70,7 +70,7 @@ struct code_state {
   struct pending_finally_state *nullable pending_finally;
   unsigned                               current_lineno;
   unsigned                               first_lineno;
-  struct lnotab_mark           *nullable lnotab_marks;
+  struct lnotab_mark *nullable           lnotab_marks;
   unsigned                               lnotab_marks_length;
   unsigned                               lnotab_marks_capacity;
 };

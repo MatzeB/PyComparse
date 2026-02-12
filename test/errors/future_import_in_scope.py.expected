@@ -1,0 +1,1 @@
+test/errors/future_import_in_scope.py:2 error: from __future__ imports must occur at the beginning of the file

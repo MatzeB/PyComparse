@@ -1,0 +1,1 @@
+test/errors/future_import_star.py:1 error: future feature * is not defined

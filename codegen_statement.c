@@ -1696,6 +1696,17 @@ static void analyze_expression(struct binding_scope *scope,
   switch (ast_expression_type(expression)) {
   case AST_IDENTIFIER:
     scope_note_use(scope, expression->identifier.symbol);
+    /* When 'super' is referenced inside a function, CPython implicitly adds
+     * __class__ as a free variable so that zero-argument super() can find the
+     * enclosing class at runtime.  Mirror that behaviour here: add __class__
+     * as a use which the normal binding resolution will propagate to the
+     * enclosing class scope's cell variables. */
+    if (scope->def != NULL
+        && strcmp(expression->identifier.symbol->string, "super") == 0) {
+      struct symbol *class_sym
+          = symbol_table_get_or_insert(scope->cg->symbol_table, "__class__");
+      scope_note_use(scope, class_sym);
+    }
     return;
   case AST_ATTR:
     analyze_expression(scope, expression->attr.expression);

@@ -442,6 +442,11 @@ static void emit_none(struct cg_state *s)
   cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
 }
 
+static void emit_invalid(struct cg_state *s, struct ast_const *expression)
+{
+  cg_load_const(s, expression->object);
+}
+
 static void emit_slice(struct cg_state *s, struct ast_slice *slice)
 {
   union ast_expression *start = slice->start;
@@ -901,8 +906,10 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
     emit_conditional(s, &expression->conditional);
     return;
   case AST_CONST:
-  case AST_INVALID:
     cg_load_const(s, expression->cnst.object);
+    return;
+  case AST_INVALID:
+    emit_invalid(s, &expression->cnst);
     return;
   case AST_DICT_COMPREHENSION:
     emit_dictionary_comprehension(s, &expression->generator_expression);

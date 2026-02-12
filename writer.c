@@ -292,5 +292,12 @@ void write_module(FILE *out, const union object *object)
   struct writer_state s;
   s.out = out;
   write_header(&s);
+  write_single_object(out, object);
+}
+
+void write_single_object(FILE *out, const union object *object)
+{
+  struct writer_state s;
+  s.out = out;
   write_object(&s, object);
 }

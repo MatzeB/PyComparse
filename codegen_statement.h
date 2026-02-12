@@ -12,6 +12,7 @@ ASSUME_NONNULL_BEGIN
 struct ast_call;
 struct ast_comparison;
 struct ast_generator_expression;
+struct ast_lambda;
 struct ast_statement_list;
 struct basic_block;
 struct cg_state;
@@ -90,6 +91,9 @@ void emit_make_function_begin(struct cg_state            *s,
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,
                             struct symbol              *symbol);
+
+void analyze_lambda_bindings(struct cg_state   *s,
+                             struct ast_lambda *lambda);
 
 void emit_statement_list(struct cg_state           *s,
                          struct ast_statement_list *statement_list);

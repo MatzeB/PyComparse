@@ -405,6 +405,8 @@ static void emit_dictionary_display(struct cg_state           *s,
 
 static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
 {
+  analyze_lambda_bindings(s, lambda);
+
   struct make_function_state state;
   emit_make_function_begin(s, &state, lambda->num_parameters,
                            lambda->parameters,
@@ -412,8 +414,29 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
                            /*async_function=*/false,
                            /*return_type=*/NULL,
                            "<lambda>");
+
+  /* Apply scope bindings (mirrors apply_function_bindings for defs). */
+  for (unsigned i = 0; i < lambda->num_scope_globals; ++i) {
+    cg_declare(s, lambda->scope_globals[i], SYMBOL_GLOBAL);
+  }
+  for (unsigned i = 0; i < lambda->num_scope_freevars; ++i) {
+    cg_declare(s, lambda->scope_freevars[i], SYMBOL_NONLOCAL);
+  }
+  for (unsigned i = 0; i < lambda->num_scope_locals; ++i) {
+    cg_declare(s, lambda->scope_locals[i], SYMBOL_LOCAL);
+  }
+  for (unsigned i = 0; i < lambda->num_scope_cellvars; ++i) {
+    cg_promote_to_cell(s, lambda->scope_cellvars[i]);
+  }
+
   emit_expression(s, lambda->expression);
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
+
+  /* Set up closure (mirrors emit_function_closure for defs). */
+  if (lambda->num_scope_freevars > 0) {
+    state.num_closure_symbols = lambda->num_scope_freevars;
+    state.closure_symbols = lambda->scope_freevars;
+  }
 
   struct symbol *symbol
       = symbol_table_get_or_insert(s->symbol_table, "<lambda>");

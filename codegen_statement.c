@@ -1454,8 +1454,9 @@ struct binding_scope {
   struct symbol    *freevars_inline[8];
   struct symbol    *cellvars_inline[8];
   struct symbol    *uses_inline[16];
-  struct ast_def   *children_inline[8];
-  struct ast_class *class_children_inline[8];
+  struct ast_def    *children_inline[8];
+  struct ast_class  *class_children_inline[8];
+  struct ast_lambda *lambda_children_inline[8];
 
   struct idynarray locals;
   struct idynarray bound_before_decl;
@@ -1466,6 +1467,7 @@ struct binding_scope {
   struct idynarray uses;
   struct idynarray children;
   struct idynarray class_children;
+  struct idynarray lambda_children;
 };
 
 static void
@@ -1563,10 +1565,14 @@ static void binding_scope_init(struct binding_scope          *scope,
                  sizeof(scope->children_inline));
   idynarray_init(&scope->class_children, scope->class_children_inline,
                  sizeof(scope->class_children_inline));
+  idynarray_init(&scope->lambda_children, scope->lambda_children_inline,
+                 sizeof(scope->lambda_children_inline));
 }
 
 static void binding_scope_free(struct binding_scope *scope)
 {
+  idynarray_clear(&scope->lambda_children);
+  idynarray_free(&scope->lambda_children);
   idynarray_clear(&scope->class_children);
   idynarray_free(&scope->class_children);
   idynarray_clear(&scope->children);
@@ -1701,7 +1707,7 @@ static void analyze_expression(struct binding_scope *scope,
      * enclosing class at runtime.  Mirror that behaviour here: add __class__
      * as a use which the normal binding resolution will propagate to the
      * enclosing class scope's cell variables. */
-    if (scope->def != NULL
+    if (!scope->is_class
         && strcmp(expression->identifier.symbol->string, "super") == 0) {
       struct symbol *class_sym
           = symbol_table_get_or_insert(scope->cg->symbol_table, "__class__");
@@ -1825,9 +1831,22 @@ static void analyze_expression(struct binding_scope *scope,
     }
     return;
   }
-  case AST_LAMBDA:
-    /* Lambda body has its own scope. */
+  case AST_LAMBDA: {
+    /* Lambda body has its own scope; analyse parameter defaults/annotations
+     * in the *outer* scope and register the lambda for later analysis. */
+    struct ast_lambda *lambda = &expression->lambda;
+    for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+      struct parameter *parameter = &lambda->parameters[i];
+      if (parameter->type != NULL) {
+        analyze_expression(scope, parameter->type);
+      }
+      if (parameter->initializer != NULL) {
+        analyze_expression(scope, parameter->initializer);
+      }
+    }
+    *idynarray_append(&scope->lambda_children, struct ast_lambda *) = lambda;
     return;
+  }
   case AST_SLICE:
     if (expression->slice.start != NULL)
       analyze_expression(scope, expression->slice.start);
@@ -2065,6 +2084,9 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
 static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent);
+static void analyze_lambda_bindings_inner(struct cg_state               *s,
+                                          struct ast_lambda             *lambda,
+                                          struct binding_scope *nullable parent);
 
 static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
@@ -2089,6 +2111,14 @@ static void analyze_class_bindings(struct cg_state               *s,
   unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
   for (unsigned i = 0; i < num_children; ++i) {
     analyze_function_bindings(s, children[i], &scope);
+  }
+
+  struct ast_lambda **lambda_children_cls
+      = idynarray_data(&scope.lambda_children);
+  unsigned num_lambda_children_cls
+      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
+  for (unsigned i = 0; i < num_lambda_children_cls; ++i) {
+    analyze_lambda_bindings_inner(s, lambda_children_cls[i], &scope);
   }
 
   struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
@@ -2171,6 +2201,14 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
     analyze_function_bindings(s, children[i], &scope);
   }
 
+  struct ast_lambda **lambda_children_fn
+      = idynarray_data(&scope.lambda_children);
+  unsigned num_lambda_children_fn
+      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
+  for (unsigned i = 0; i < num_lambda_children_fn; ++i) {
+    analyze_lambda_bindings_inner(s, lambda_children_fn[i], &scope);
+  }
+
   struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
   unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
   for (unsigned i = 0; i < num_nonlocals; ++i) {
@@ -2222,6 +2260,101 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
   def->scope_bindings_ready = true;
 
   binding_scope_free(&scope);
+}
+
+static void
+analyze_lambda_bindings_inner(struct cg_state               *s,
+                              struct ast_lambda             *lambda,
+                              struct binding_scope *nullable parent)
+{
+  if (lambda->scope_bindings_ready) {
+    return;
+  }
+
+  struct binding_scope scope;
+  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false);
+
+  for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+    scope_mark_local(&scope, lambda->parameters[i].name);
+  }
+
+  analyze_expression(&scope, lambda->expression);
+
+  struct ast_class **class_children = idynarray_data(&scope.class_children);
+  unsigned           num_class_children
+      = idynarray_length(&scope.class_children, struct ast_class *);
+  for (unsigned i = 0; i < num_class_children; ++i) {
+    analyze_class_bindings(s, class_children[i], &scope);
+  }
+
+  struct ast_def **children = idynarray_data(&scope.children);
+  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
+  for (unsigned i = 0; i < num_children; ++i) {
+    analyze_function_bindings(s, children[i], &scope);
+  }
+
+  struct ast_lambda **lambda_children
+      = idynarray_data(&scope.lambda_children);
+  unsigned num_lambda_children
+      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
+  for (unsigned i = 0; i < num_lambda_children; ++i) {
+    analyze_lambda_bindings_inner(s, lambda_children[i], &scope);
+  }
+
+  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
+  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
+  for (unsigned i = 0; i < num_nonlocals; ++i) {
+    struct symbol *name = nonlocals[i];
+    if (!resolve_from_parent_scope(scope.parent, name)) {
+      if (is_class_symbol(name) && scope.parent != NULL
+          && scope.parent->is_class) {
+        symbol_array_append_unique(&scope.freevars, name);
+        scope.parent->class_needs_class_cell = true;
+        continue;
+      }
+    } else {
+      symbol_array_append_unique(&scope.freevars, name);
+    }
+  }
+
+  struct symbol **uses = idynarray_data(&scope.uses);
+  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
+  for (unsigned i = 0; i < num_uses; ++i) {
+    struct symbol *name = uses[i];
+    if (symbol_array_contains(&scope.locals, name)
+        || symbol_array_contains(&scope.globals, name)
+        || symbol_array_contains(&scope.nonlocals, name)
+        || symbol_array_contains(&scope.freevars, name)) {
+      continue;
+    }
+    if (resolve_from_parent_scope(scope.parent, name)) {
+      symbol_array_append_unique(&scope.freevars, name);
+    } else if (is_class_symbol(name) && scope.parent != NULL
+               && scope.parent->is_class) {
+      symbol_array_append_unique(&scope.freevars, name);
+      scope.parent->class_needs_class_cell = true;
+    }
+  }
+
+  lambda->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
+  lambda->scope_globals = symbol_array_copy(s, &scope.globals);
+  lambda->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
+  lambda->scope_locals = symbol_array_copy(s, &scope.locals);
+  lambda->num_scope_cellvars
+      = idynarray_length(&scope.cellvars, struct symbol *);
+  lambda->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
+  lambda->num_scope_freevars
+      = idynarray_length(&scope.freevars, struct symbol *);
+  lambda->scope_freevars = symbol_array_copy(s, &scope.freevars);
+  lambda->scope_bindings_ready = true;
+
+  binding_scope_free(&scope);
+}
+
+void analyze_lambda_bindings(struct cg_state  *s,
+                             struct ast_lambda *lambda)
+{
+  analyze_lambda_bindings_inner(s, lambda, /*parent=*/NULL);
 }
 
 static void apply_class_bindings(struct cg_state  *s,

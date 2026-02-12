@@ -133,11 +133,20 @@ struct ast_identifier {
 };
 
 struct ast_lambda {
-  struct ast_expression_base base;
-  union ast_expression      *expression;
-  unsigned                   positional_only_argcount;
-  unsigned                   num_parameters;
-  struct parameter           parameters[];
+  struct ast_expression_base            base;
+  union ast_expression                 *expression;
+  unsigned                              positional_only_argcount;
+  unsigned                              num_parameters;
+  bool                                  scope_bindings_ready;
+  unsigned                              num_scope_globals;
+  struct symbol * nonnull * nullable    scope_globals;
+  unsigned                              num_scope_locals;
+  struct symbol * nonnull * nullable    scope_locals;
+  unsigned                              num_scope_cellvars;
+  struct symbol * nonnull * nullable    scope_cellvars;
+  unsigned                              num_scope_freevars;
+  struct symbol * nonnull * nullable    scope_freevars;
+  struct parameter                      parameters[];
 };
 
 struct ast_slice {

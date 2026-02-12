@@ -1,0 +1,1 @@
+test/errors/future_barry_bang_equals.py:3 error: with Barry as BDFL, use `<>` instead of `!=`

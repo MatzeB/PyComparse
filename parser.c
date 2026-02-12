@@ -1384,6 +1384,7 @@ parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
 
 static int parse_compare_op(struct parser_state *s)
 {
+  bool future_barry_as_bdfl = (s->future_flags & CO_FUTURE_BARRY_AS_BDFL) != 0;
   switch (peek(s)) {
   case '<':
     next_token(s);
@@ -1391,12 +1392,28 @@ static int parse_compare_op(struct parser_state *s)
   case T_LESS_THAN_EQUALS:
     next_token(s);
     return COMPARE_OP_LE;
+  case T_LESS_THAN_GREATER_THAN:
+    if (future_barry_as_bdfl) {
+      next_token(s);
+      return COMPARE_OP_NE;
+    }
+    return -1;
   case T_EQUALS_EQUALS:
     next_token(s);
     return COMPARE_OP_EQ;
-  case T_EXCLAMATIONMARK_EQUALS:
+  case T_EXCLAMATIONMARK_EQUALS: {
+    struct location location = scanner_location(&s->scanner);
     next_token(s);
+    if (future_barry_as_bdfl) {
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "with Barry as BDFL, use ");
+      diag_token_kind(s->d, T_LESS_THAN_GREATER_THAN);
+      diag_frag(s->d, " instead of ");
+      diag_token_kind(s->d, T_EXCLAMATIONMARK_EQUALS);
+      diag_end(s->d);
+    }
     return COMPARE_OP_NE;
+  }
   case '>':
     next_token(s);
     return COMPARE_OP_GT;
@@ -1753,6 +1770,8 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   [ T_GREATER_THAN_GREATER_THAN]
     = { .func = parse_shift_right,        .precedence = PREC_SHIFT      },
   [T_LESS_THAN_EQUALS]
+    = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
+  [T_LESS_THAN_GREATER_THAN]
     = { .func = parse_comparison,         .precedence = PREC_COMPARISON },
   [T_LESS_THAN_LESS_THAN_EQUALS]
     = { .func = parse_shift_left_assign,  .precedence = PREC_ASSIGN     },
@@ -2313,13 +2332,72 @@ parse_simple_statements(struct parser_state *s)
 
 static struct ast_statement_list *parse_suite(struct parser_state *s);
 static void                       parse_statement(struct parser_state *s,
-                                                  struct idynarray    *statements);
+                                                  struct idynarray *statements, bool top_level);
 
-static void append_statement_list(struct idynarray          *statements,
-                                  struct ast_statement_list *list)
+static bool statement_is_future_import(union ast_statement *statement)
+{
+  if (ast_statement_type(statement) != AST_STATEMENT_FROM_IMPORT) return false;
+  struct ast_from_import *from_import = &statement->from_import;
+  if (from_import->num_prefix_dots != 0) return false;
+  struct dotted_name *module = from_import->module;
+  return module != NULL && module->num_symbols == 1
+         && strcmp(module->symbols[0]->string, "__future__") == 0;
+}
+
+static bool statement_is_docstring(union ast_statement *statement)
+{
+  if (ast_statement_type(statement) != AST_STATEMENT_EXPRESSION) return false;
+  union ast_expression *expression = statement->expression.expression;
+  if (ast_expression_type(expression) != AST_CONST) return false;
+  return object_type(expression->cnst.object) == OBJECT_STRING;
+}
+
+static void
+parser_handle_top_level_future_statement(struct parser_state *s,
+                                         union ast_statement *statement)
+{
+  if (!s->top_level_future_imports_allowed) {
+    s->top_level_seen_any_statement = true;
+    return;
+  }
+
+  if (statement_is_future_import(statement)) {
+    struct ast_from_import *from_import = &statement->from_import;
+    if (!from_import->import_star) {
+      for (unsigned i = 0; i < from_import->num_items; ++i) {
+        struct from_import_item *item = &from_import->items[i];
+        if (strcmp(item->name->string, "barry_as_FLUFL") == 0) {
+          s->future_flags |= CO_FUTURE_BARRY_AS_BDFL;
+        }
+      }
+    }
+    s->top_level_seen_any_statement = true;
+    return;
+  }
+
+  if (s->top_level_seen_any_statement || !statement_is_docstring(statement)) {
+    s->top_level_future_imports_allowed = false;
+  }
+  s->top_level_seen_any_statement = true;
+}
+
+static void append_statement(struct parser_state *s,
+                             struct idynarray    *statements,
+                             union ast_statement *statement, bool top_level)
+{
+  if (top_level) {
+    parser_handle_top_level_future_statement(s, statement);
+  }
+  *idynarray_append(statements, union ast_statement *) = statement;
+}
+
+static void append_statement_list(struct parser_state       *s,
+                                  struct idynarray          *statements,
+                                  struct ast_statement_list *list,
+                                  bool                       top_level)
 {
   for (unsigned i = 0; i < list->num_statements; ++i) {
-    *idynarray_append(statements, union ast_statement *) = list->statements[i];
+    append_statement(s, statements, list->statements[i], top_level);
   }
 }
 
@@ -2727,7 +2805,7 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
     do {
-      parse_statement(s, &statements);
+      parse_statement(s, &statements, /*top_level=*/false);
     } while (!accept(s, T_DEDENT));
 
     struct ast_statement_list *result = ast_statement_list_from_array(
@@ -2741,39 +2819,43 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
 }
 
 static void parse_statement(struct parser_state *s,
-                            struct idynarray    *statements)
+                            struct idynarray *statements, bool top_level)
 {
   add_anchor(s, T_NEWLINE);
   switch (peek(s)) {
   case '@': {
     union ast_statement *statement = parse_decorator_statement(s);
     if (statement != NULL) {
-      *idynarray_append(statements, union ast_statement *) = statement;
+      append_statement(s, statements, statement, top_level);
     }
     break;
   }
   case T_class:
-    *idynarray_append(statements, union ast_statement *) = parse_class(
-        s, scanner_location(&s->scanner), /*num_decorators=*/0, NULL);
+    append_statement(s, statements,
+                     parse_class(s, scanner_location(&s->scanner),
+                                 /*num_decorators=*/0, NULL),
+                     top_level);
     break;
   case T_def:
-    *idynarray_append(statements, union ast_statement *) = parse_def(
-        s, scanner_location(&s->scanner), /*num_decorators=*/0, NULL,
-        /*async_prefix_consumed=*/false);
+    append_statement(s, statements,
+                     parse_def(s, scanner_location(&s->scanner),
+                               /*num_decorators=*/0, NULL,
+                               /*async_prefix_consumed=*/false),
+                     top_level);
     break;
   case T_async: {
     struct location location = scanner_location(&s->scanner);
     eat(s, T_async);
     if (peek(s) == T_for) {
-      *idynarray_append(statements, union ast_statement *)
-          = parse_for(s, /*async=*/true);
+      append_statement(s, statements, parse_for(s, /*async=*/true), top_level);
     } else if (peek(s) == T_with) {
-      *idynarray_append(statements, union ast_statement *)
-          = parse_with(s, /*async=*/true);
+      append_statement(s, statements, parse_with(s, /*async=*/true),
+                       top_level);
     } else if (peek(s) == T_def) {
-      *idynarray_append(statements, union ast_statement *)
-          = parse_def(s, location, /*num_decorators=*/0, NULL,
-                      /*async_prefix_consumed=*/true);
+      append_statement(s, statements,
+                       parse_def(s, location, /*num_decorators=*/0, NULL,
+                                 /*async_prefix_consumed=*/true),
+                       top_level);
     } else {
       diag_begin_error(s->d, scanner_location(&s->scanner));
       diag_frag(s->d, "expected ");
@@ -2790,21 +2872,19 @@ static void parse_statement(struct parser_state *s,
     break;
   }
   case T_for:
-    *idynarray_append(statements, union ast_statement *)
-        = parse_for(s, /*async=*/false);
+    append_statement(s, statements, parse_for(s, /*async=*/false), top_level);
     break;
   case T_if:
-    *idynarray_append(statements, union ast_statement *) = parse_if(s);
+    append_statement(s, statements, parse_if(s), top_level);
     break;
   case T_try:
-    *idynarray_append(statements, union ast_statement *) = parse_try(s);
+    append_statement(s, statements, parse_try(s), top_level);
     break;
   case T_while:
-    *idynarray_append(statements, union ast_statement *) = parse_while(s);
+    append_statement(s, statements, parse_while(s), top_level);
     break;
   case T_with:
-    *idynarray_append(statements, union ast_statement *)
-        = parse_with(s, /*async=*/false);
+    append_statement(s, statements, parse_with(s, /*async=*/false), top_level);
     break;
   case T_INVALID:
     next_token(s);
@@ -2813,7 +2893,7 @@ static void parse_statement(struct parser_state *s,
     break;
   default: {
     struct ast_statement_list *simple = parse_simple_statements(s);
-    append_statement_list(statements, simple);
+    append_statement_list(s, statements, simple, top_level);
     break;
   }
   }
@@ -2833,7 +2913,7 @@ union object *parse(struct parser_state *s, const char *filename)
   add_anchor(s, T_EOF);
   while (peek(s) != T_EOF) {
     if (accept(s, T_NEWLINE)) continue;
-    parse_statement(s, &statements);
+    parse_statement(s, &statements, /*top_level=*/true);
   }
 
 #ifndef NDEBUG
@@ -2866,6 +2946,7 @@ void parser_init(struct parser_state *s, struct diagnostics_state *diagnostics)
   memset(s, 0, sizeof(*s));
   arena_init(&s->ast);
   s->d = diagnostics;
+  s->top_level_future_imports_allowed = true;
   memset(s->anchor_set, 0, sizeof(s->anchor_set));
 }
 

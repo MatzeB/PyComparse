@@ -2744,9 +2744,86 @@ static void emit_global_statement_node(struct cg_state   *s,
   }
 }
 
+static bool statement_list_has_scope_annotation(
+    const struct ast_statement_list *nullable statements);
+
+static bool statement_has_scope_annotation(const union ast_statement *statement)
+{
+  switch (ast_statement_type((union ast_statement *)statement)) {
+  case AST_STATEMENT_ANNOTATION:
+    return true;
+  case AST_STATEMENT_IF: {
+    const struct ast_if *if_stmt = &statement->if_;
+    if (statement_list_has_scope_annotation(if_stmt->body)) return true;
+    for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
+      if (statement_list_has_scope_annotation(if_stmt->elifs[i].body)) {
+        return true;
+      }
+    }
+    return statement_list_has_scope_annotation(if_stmt->else_body);
+  }
+  case AST_STATEMENT_FOR:
+    return statement_list_has_scope_annotation(statement->for_.body)
+           || statement_list_has_scope_annotation(statement->for_.else_body);
+  case AST_STATEMENT_WHILE:
+    return statement_list_has_scope_annotation(statement->while_.body)
+           || statement_list_has_scope_annotation(statement->while_.else_body);
+  case AST_STATEMENT_WITH:
+    return statement_list_has_scope_annotation(statement->with.body);
+  case AST_STATEMENT_TRY:
+    if (statement_list_has_scope_annotation(statement->try_.body)) return true;
+    for (unsigned i = 0; i < statement->try_.num_excepts; ++i) {
+      if (statement_list_has_scope_annotation(statement->try_.excepts[i].body)) {
+        return true;
+      }
+    }
+    return statement_list_has_scope_annotation(statement->try_.else_body)
+           || statement_list_has_scope_annotation(statement->try_.finally_body);
+  default:
+    return false;
+  }
+}
+
+static bool statement_list_has_scope_annotation(
+    const struct ast_statement_list *nullable statements)
+{
+  if (statements == NULL) return false;
+  for (unsigned i = 0; i < statements->num_statements; ++i) {
+    if (statement_has_scope_annotation(statements->statements[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
                     struct ast_def *nullable current_function)
 {
+  /* Keep symbol analysis unchanged but avoid emitting dead branches for
+   * if-statements with compile-time boolean conditions and no elifs. */
+  if (if_stmt->num_elifs == 0) {
+    union object *condition_constant
+        = ast_expression_as_constant(if_stmt->condition);
+    if (condition_constant != NULL) {
+      if (current_function == NULL
+          && (statement_list_has_scope_annotation(if_stmt->body)
+              || statement_list_has_scope_annotation(if_stmt->else_body))) {
+        s->code.setup_annotations = true;
+      }
+      if (object_type(condition_constant) == OBJECT_TRUE) {
+        emit_statement_list_with_function(s, if_stmt->body, current_function);
+        return;
+      }
+      if (object_type(condition_constant) == OBJECT_FALSE) {
+        if (if_stmt->else_body != NULL) {
+          emit_statement_list_with_function(s, if_stmt->else_body,
+                                            current_function);
+        }
+        return;
+      }
+    }
+  }
+
   struct if_state state;
   emit_if_begin(s, &state, if_stmt->condition);
   emit_statement_list_with_function(s, if_stmt->body, current_function);

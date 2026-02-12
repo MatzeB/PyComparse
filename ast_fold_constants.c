@@ -35,7 +35,7 @@ fold_expression_nullable(struct constant_fold_state *s,
 
 static inline bool object_as_fast_int(const union object *object, int64_t *value)
 {
-  if (object_type(object) != OBJECT_INT || object->int_obj.num_pydigits != 0) {
+  if (object_type(object) != OBJECT_INT) {
     return false;
   }
   *value = object_int_value(object);
@@ -189,24 +189,26 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
   }
 
   union object *object = ast_expression_as_constant(expression->unexpr.op);
-  if (object == NULL || object_type(object) != OBJECT_INT) {
+  if (object == NULL) {
+    return NULL;
+  }
+  enum object_type object_kind = object_type(object);
+  if (type == AST_UNEXPR_PLUS) {
+    if (object_kind == OBJECT_INT || object_kind == OBJECT_BIG_INT) {
+      return object;
+    }
+    return NULL;
+  }
+  if (object_kind != OBJECT_INT) {
     return NULL;
   }
 
   if (type == AST_UNEXPR_NEGATIVE) {
-    if (object->int_obj.num_pydigits != 0) {
-      return NULL;
-    }
     int64_t value = object_int_value(object);
-    if (value == INT64_MIN) {
-      return NULL;
-    }
+    assert(value != INT64_MIN);
     return object_intern_int(s->intern, -value);
   }
   if (type == AST_UNEXPR_INVERT) {
-    if (object->int_obj.num_pydigits != 0) {
-      return NULL;
-    }
     int64_t value = object_int_value(object);
     if (value == INT64_MAX) {
       return NULL;

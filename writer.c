@@ -172,43 +172,44 @@ static void write_complex(struct writer_state         *s,
 
 static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
-  if (int_obj->num_pydigits == 0) {
-    int64_t value = int_obj->value;
-    assert(value != INT64_MIN);
-    if (value >= INT32_MIN && value <= INT32_MAX) {
-      write_char(s, OBJECT_INT);
-      write_int32(s, (int32_t)value);
-      return;
-    }
-
-    uint64_t magnitude;
-    int32_t  sign = 1;
-    if (value < 0) {
-      sign = -1;
-      magnitude = (uint64_t)(-value);
-    } else {
-      magnitude = (uint64_t)value;
-    }
-
-    uint32_t num_digits = 0;
-    for (uint64_t c = magnitude; c != 0; c >>= 15) {
-      ++num_digits;
-    }
-    if (num_digits > INT32_MAX) {
-      internal_error("integer too large to marshal");
-    }
-
-    write_char(s, 'l');
-    write_int32(s, (int32_t)num_digits * sign);
-    for (uint64_t c = magnitude; c != 0; c >>= 15) {
-      write_uint16(s, (uint16_t)(c & 0x7fff));
-    }
+  int64_t value = int_obj->value;
+  assert(value != INT64_MIN);
+  if (value >= INT32_MIN && value <= INT32_MAX) {
+    write_char(s, OBJECT_INT);
+    write_int32(s, (int32_t)value);
     return;
   }
 
-  assert(int_obj->pydigits != NULL);
-  uint32_t num_digits = int_obj->num_pydigits;
-  while (num_digits > 0 && int_obj->pydigits[num_digits - 1] == 0) {
+  uint64_t magnitude;
+  int32_t  sign = 1;
+  if (value < 0) {
+    sign = -1;
+    magnitude = (uint64_t)(-value);
+  } else {
+    magnitude = (uint64_t)value;
+  }
+
+  uint32_t num_digits = 0;
+  for (uint64_t c = magnitude; c != 0; c >>= 15) {
+    ++num_digits;
+  }
+  if (num_digits > INT32_MAX) {
+    internal_error("integer too large to marshal");
+  }
+
+  write_char(s, 'l');
+  write_int32(s, (int32_t)num_digits * sign);
+  for (uint64_t c = magnitude; c != 0; c >>= 15) {
+    write_uint16(s, (uint16_t)(c & 0x7fff));
+  }
+}
+
+static void write_big_int(struct writer_state            *s,
+                          const struct object_big_int *big_int)
+{
+  assert(big_int->pydigits != NULL);
+  uint32_t num_digits = big_int->num_pydigits;
+  while (num_digits > 0 && big_int->pydigits[num_digits - 1] == 0) {
     --num_digits;
   }
   write_char(s, 'l');
@@ -217,7 +218,7 @@ static void write_int(struct writer_state *s, const struct object_int *int_obj)
   }
   write_int32(s, (int32_t)num_digits);
   for (uint32_t i = 0; i < num_digits; ++i) {
-    write_uint16(s, int_obj->pydigits[i]);
+    write_uint16(s, big_int->pydigits[i]);
   }
 }
 
@@ -280,6 +281,9 @@ static void write_object(struct writer_state *s, const union object *object)
     break;
   case OBJECT_INT:
     write_int(s, &object->int_obj);
+    break;
+  case OBJECT_BIG_INT:
+    write_big_int(s, &object->big_int);
     break;
   case OBJECT_NULL:
   default:

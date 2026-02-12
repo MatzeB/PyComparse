@@ -134,21 +134,17 @@ static void append_escaped_fstring_fragment(struct unparse_state *s,
   }
 }
 
-static void append_int_pydigits(struct unparse_state    *s,
-                                const struct object_int *int_obj)
+static void append_big_int_pydigits(struct unparse_state    *s,
+                                    const struct object_big_int *big_int)
 {
-  uint32_t num_pydigits = int_obj->num_pydigits;
-  if (num_pydigits == 0) {
-    append_int64(s, int_obj->value);
-    return;
-  }
+  uint32_t num_pydigits = big_int->num_pydigits;
 
   uint16_t *digits
       = (uint16_t *)malloc((size_t)num_pydigits * sizeof(uint16_t));
   if (digits == NULL) {
     internal_error("out of memory");
   }
-  memcpy(digits, int_obj->pydigits, (size_t)num_pydigits * sizeof(uint16_t));
+  memcpy(digits, big_int->pydigits, (size_t)num_pydigits * sizeof(uint16_t));
 
   size_t max_decimal_digits = (size_t)num_pydigits * 5;
   char  *decimal_rev = (char *)malloc(max_decimal_digits + 1);
@@ -530,7 +526,10 @@ static void unparse_expression_prec(struct unparse_state   *s,
       append_cstring(s, "...");
       break;
     case OBJECT_INT:
-      append_int_pydigits(s, &object->int_obj);
+      append_int64(s, object->int_obj.value);
+      break;
+    case OBJECT_BIG_INT:
+      append_big_int_pydigits(s, &object->big_int);
       break;
     case OBJECT_FLOAT: {
       char buffer[128];

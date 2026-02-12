@@ -44,9 +44,12 @@ struct object_complex {
 
 struct object_int {
   struct object_base base;
-  /* Fast path: if num_pydigits == 0, value holds the full signed integer. */
   int64_t value;
-  /* Slow path: marshal-format base-2^15 digits for arbitrary-size integers. */
+};
+
+struct object_big_int {
+  struct object_base          base;
+  /* Marshal-format base-2^15 digits for arbitrary-size non-small integers. */
   uint32_t                 num_pydigits;
   const uint16_t *nullable pydigits;
 };
@@ -78,6 +81,7 @@ union object {
   struct object_complex complex;
   struct object_float   float_obj;
   struct object_int     int_obj;
+  struct object_big_int big_int;
   struct object_list    list;
   struct object_string  string;
   struct object_tuple   tuple;

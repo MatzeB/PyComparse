@@ -416,7 +416,7 @@ static union object *bigint_accum_intern(struct scanner_state           *s,
   if (length == 0) {
     return object_intern_int(s->objects, 0);
   }
-  return object_intern_int_pydigits(s->objects, length, accum->digits);
+  return object_intern_big_int(s->objects, length, accum->digits);
 }
 
 static bool end_number_literal(struct scanner_state *s, uint64_t value,
@@ -2121,12 +2121,18 @@ void print_token(FILE *out, const struct token *token)
     fprintf(out, "%f", token->u.object->float_obj.value);
     break;
   case T_INTEGER: {
-    const struct object_int *int_obj = &token->u.object->int_obj;
-    if (int_obj->num_pydigits == 0) {
+    const union object *integer = token->u.object;
+    if (integer->type == OBJECT_INT) {
+      const struct object_int *int_obj = &integer->int_obj;
       fprintf(out, "%" PRId64, int_obj->value);
-    } else {
-      fprintf(out, "<int:%upydigits>", int_obj->num_pydigits);
+      break;
     }
+    if (integer->type == OBJECT_BIG_INT) {
+      const struct object_big_int *big_int = &integer->big_int;
+      fprintf(out, "<bigint:%upydigits>", big_int->num_pydigits);
+      break;
+    }
+    internal_error("invalid integer object type");
     break;
   }
   case T_IDENTIFIER:

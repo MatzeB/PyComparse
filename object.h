@@ -51,6 +51,7 @@ enum object_type {
   OBJECT_LIST = '[',
   OBJECT_ELLIPSIS = '.',
   OBJECT_INT = 'i',
+  OBJECT_BIG_INT = 'I',
 };
 
 union object *object_new_singleton(struct arena *arena, enum object_type type);
@@ -62,9 +63,9 @@ union object *object_new_float(struct arena *arena, double value);
 union object *object_new_complex(struct arena *arena, double real,
                                  double imag);
 union object *object_new_int(struct arena *arena, int64_t value);
-union object *object_new_int_pydigits(struct arena           *arena,
-                                      uint32_t                num_pydigits,
-                                      const uint16_t *nonnull pydigits);
+union object *object_new_big_int(struct arena           *arena,
+                                 uint32_t                num_pydigits,
+                                 const uint16_t *nonnull pydigits);
 
 struct tuple_prep *object_new_tuple_begin(struct arena *arena,
                                           uint32_t      length);

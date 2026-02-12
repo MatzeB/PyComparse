@@ -209,9 +209,7 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
-    if (object_type(object) == OBJECT_INT
-        && object->int_obj.num_pydigits == 0
-        && object_int_value(object) == value) {
+    if (object_type(object) == OBJECT_INT && object_int_value(object) == value) {
       return object;
     }
   }
@@ -221,9 +219,9 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   return result;
 }
 
-union object *object_intern_int_pydigits(
-    struct object_intern *s, uint32_t num_pydigits,
-    const uint16_t *nonnull pydigits)
+union object *object_intern_big_int(struct object_intern *s,
+                                    uint32_t              num_pydigits,
+                                    const uint16_t *nonnull pydigits)
 {
   assert(num_pydigits > 0);
   while (num_pydigits > 0 && pydigits[num_pydigits - 1] == 0) {
@@ -236,17 +234,16 @@ union object *object_intern_int_pydigits(
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
-    if (object_type(object) != OBJECT_INT) continue;
-    if (object->int_obj.num_pydigits != num_pydigits) continue;
-    if (memcmp(object->int_obj.pydigits, pydigits,
+    if (object_type(object) != OBJECT_BIG_INT) continue;
+    if (object->big_int.num_pydigits != num_pydigits) continue;
+    if (memcmp(object->big_int.pydigits, pydigits,
                (size_t)num_pydigits * sizeof(pydigits[0]))
         == 0) {
       return object;
     }
   }
 
-  union object *result
-      = object_new_int_pydigits(&s->arena, num_pydigits, pydigits);
+  union object *result = object_new_big_int(&s->arena, num_pydigits, pydigits);
   object_list_append(s->objects, result);
   return result;
 }

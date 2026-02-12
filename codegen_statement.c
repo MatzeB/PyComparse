@@ -839,7 +839,11 @@ static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
 static void emit_try_finally_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
-  if (unreachable(s)) return;
+  if (unreachable(s)) {
+    /* The finally token we model at setup is consumed even on abrupt exits. */
+    cg_pop(s, 1);
+    return;
+  }
   cg_op_pop1(s, OPCODE_END_FINALLY, 0);
 
   struct basic_block *footer = state->footer;

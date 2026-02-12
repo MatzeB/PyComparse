@@ -581,7 +581,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
      * control-flow. Keep a small conservative headroom for SETUP_FINALLY
      * paths so emitted code has sufficient stack.
      */
-    stacksize += 2;
+    stacksize += 5;
   }
   object->code.stacksize = stacksize;
   object->code.flags = s->code.flags;

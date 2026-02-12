@@ -65,6 +65,8 @@ void     cg_load(struct cg_state *s, struct symbol *name);
 void     cg_store(struct cg_state *s, struct symbol *name);
 void     cg_delete(struct cg_state *s, struct symbol *name);
 
+const char *cg_build_qualname(struct cg_state *s, const char *name);
+
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
              const char *filename, struct diagnostics_state *d);
 void cg_free(struct cg_state *s);

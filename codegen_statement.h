@@ -29,6 +29,7 @@ struct make_function_state {
   bool                               keyword_defaults;
   unsigned                           num_closure_symbols;
   struct symbol * nonnull * nullable closure_symbols;
+  const char                        *qualname;
 };
 
 struct for_while_state {
@@ -84,7 +85,8 @@ void emit_make_function_begin(struct cg_state            *s,
                               struct parameter           *parameters,
                               unsigned positional_only_argcount,
                               bool     async_function,
-                              union ast_expression *nullable return_type);
+                              union ast_expression *nullable return_type,
+                              const char                    *name);
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,
                             struct symbol              *symbol);

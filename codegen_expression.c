@@ -13,6 +13,7 @@
 #include "codegen.h"
 #include "codegen_statement.h"
 #include "codegen_types.h"
+#include "object_intern.h"
 #include "diagnostics.h"
 #include "object.h"
 #include "object_types.h"
@@ -48,9 +49,22 @@ emit_generator_helper(struct cg_state                 *s,
     diag_end(s->d);
   }
 
+  const char *qualname = cg_build_qualname(s, name);
+
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
   s->code.in_async_function = async_comprehension;
+
+  /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
+  {
+    size_t qlen = strlen(qualname);
+    struct arena *arena = object_intern_arena(&s->objects);
+    char *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
+    memcpy(prefix, qualname, qlen);
+    memcpy(prefix + qlen, ".<locals>.", 11);
+    s->code.qualname_prefix = prefix;
+  }
+
   emit_generator_expression_code(s, generator_expression);
   if (async_comprehension) {
     if (s->code.flags & CO_GENERATOR) {
@@ -63,7 +77,7 @@ emit_generator_helper(struct cg_state                 *s,
 
   union object *code = cg_pop_code(s, name);
   cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, name));
+  cg_load_const(s, object_intern_cstring(&s->objects, qualname));
   cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
 
   struct generator_expression_part *part = &generator_expression->parts[0];
@@ -396,7 +410,8 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
                            lambda->parameters,
                            lambda->positional_only_argcount,
                            /*async_function=*/false,
-                           /*return_type=*/NULL);
+                           /*return_type=*/NULL,
+                           "<lambda>");
   emit_expression(s, lambda->expression);
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
 

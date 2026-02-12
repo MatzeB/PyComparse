@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "adt/idynarray.h"
 #include "ast.h"
@@ -523,7 +524,8 @@ void emit_make_function_begin(struct cg_state            *s,
                               struct parameter           *parameters,
                               unsigned positional_only_argcount,
                               bool     async_function,
-                              union ast_expression *nullable return_type)
+                              union ast_expression *nullable return_type,
+                              const char                    *name)
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) {
@@ -533,9 +535,22 @@ void emit_make_function_begin(struct cg_state            *s,
   emit_parameter_defaults(s, state, num_parameters, parameters);
   emit_function_annotations(s, state, num_parameters, parameters, return_type);
 
+  const char *qualname = cg_build_qualname(s, name);
+  state->qualname = qualname;
+
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
   s->code.in_async_function = async_function;
+
+  /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
+  {
+    size_t qlen = strlen(qualname);
+    struct arena *arena = object_intern_arena(&s->objects);
+    char *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
+    memcpy(prefix, qualname, qlen);
+    memcpy(prefix + qlen, ".<locals>.", 11);
+    s->code.qualname_prefix = prefix;
+  }
 
   unsigned       keyword_only_idx = num_parameters;
   struct symbol *variable_arguments_name = NULL;
@@ -593,7 +608,7 @@ void emit_make_function_end(struct cg_state            *s,
   }
 
   cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, symbol->string));
+  cg_load_const(s, object_intern_cstring(&s->objects, state->qualname));
   uint32_t flags = 0;
   unsigned operands = 2;
   if (state->annotations) {
@@ -2429,7 +2444,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   struct make_function_state state;
   emit_make_function_begin(s, &state, def->num_parameters, def->parameters,
                            def->positional_only_argcount, def->async,
-                           def->return_type);
+                           def->return_type, def->name->string);
   union object *doc = statement_list_leading_docstring(def->body);
   cg_set_function_docstring(s, doc);
   apply_function_bindings(s, def);
@@ -2461,14 +2476,25 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   }
 
   cg_op_push1(s, OPCODE_LOAD_BUILD_CLASS, 0);
+  const char *class_qualname = cg_build_qualname(s, class_stmt->name->string);
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/false);
   s->code.in_class_body = true;
 
+  /* Set class body's qualname prefix: class_qualname + "." */
+  {
+    size_t qlen = strlen(class_qualname);
+    struct arena *arena = object_intern_arena(&s->objects);
+    char *prefix = arena_allocate(arena, qlen + 2, 1);
+    memcpy(prefix, class_qualname, qlen);
+    prefix[qlen] = '.';
+    prefix[qlen + 1] = '\0';
+    s->code.qualname_prefix = prefix;
+  }
+
   cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
-  cg_load_const(s,
-                object_intern_cstring(&s->objects, class_stmt->name->string));
+  cg_load_const(s, object_intern_cstring(&s->objects, class_qualname));
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 
   apply_class_bindings(s, class_stmt);

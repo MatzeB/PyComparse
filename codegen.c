@@ -615,6 +615,20 @@ union object *cg_pop_code(struct cg_state *s, const char *name)
   return object;
 }
 
+const char *cg_build_qualname(struct cg_state *s, const char *name)
+{
+  const char *prefix = s->code.qualname_prefix;
+  if (prefix == NULL)
+    return name;
+  size_t plen = strlen(prefix);
+  size_t nlen = strlen(name);
+  struct arena *arena = object_intern_arena(&s->objects);
+  char *buf = arena_allocate(arena, plen + nlen + 1, 1);
+  memcpy(buf, prefix, plen);
+  memcpy(buf + plen, name, nlen + 1);
+  return buf;
+}
+
 void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
              const char *filename, struct diagnostics_state *diagnostics)
 {

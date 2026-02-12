@@ -91,4 +91,40 @@ void          object_list_append(union object *list, union object *object);
 union object *object_list_at(union object *list, uint32_t index);
 uint32_t      object_list_length(union object *list);
 
+uint32_t object_code_argcount(const union object *object);
+uint32_t object_code_posonlyargcount(const union object *object);
+uint32_t object_code_kwonlyargcount(const union object *object);
+uint32_t object_code_nlocals(const union object *object);
+uint32_t object_code_stacksize(const union object *object);
+uint32_t object_code_flags(const union object *object);
+uint32_t object_code_firstlineno(const union object *object);
+
+union object *object_code_code(union object *object);
+union object *object_code_consts(union object *object);
+union object *object_code_names(union object *object);
+union object *object_code_varnames(union object *object);
+union object *object_code_freevars(union object *object);
+union object *object_code_cellvars(union object *object);
+union object *object_code_filename(union object *object);
+union object *object_code_name(union object *object);
+union object *object_code_lnotab(union object *object);
+
+void object_code_set_argcount(union object *object, uint32_t value);
+void object_code_set_posonlyargcount(union object *object, uint32_t value);
+void object_code_set_kwonlyargcount(union object *object, uint32_t value);
+void object_code_set_nlocals(union object *object, uint32_t value);
+void object_code_set_stacksize(union object *object, uint32_t value);
+void object_code_set_flags(union object *object, uint32_t value);
+void object_code_set_firstlineno(union object *object, uint32_t value);
+
+void object_code_set_code(union object *object, union object *value);
+void object_code_set_consts(union object *object, union object *value);
+void object_code_set_names(union object *object, union object *value);
+void object_code_set_varnames(union object *object, union object *value);
+void object_code_set_freevars(union object *object, union object *value);
+void object_code_set_cellvars(union object *object, union object *value);
+void object_code_set_filename(union object *object, union object *value);
+void object_code_set_name(union object *object, union object *value);
+void object_code_set_lnotab(union object *object, union object *value);
+
 ASSUME_NONNULL_END

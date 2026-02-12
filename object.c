@@ -250,3 +250,195 @@ int64_t object_int_value(const union object *object)
   assert(object->type == OBJECT_INT);
   return object->int_obj.value;
 }
+
+uint32_t object_code_argcount(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.argcount;
+}
+
+uint32_t object_code_posonlyargcount(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.posonlyargcount;
+}
+
+uint32_t object_code_kwonlyargcount(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.kwonlyargcount;
+}
+
+uint32_t object_code_nlocals(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.nlocals;
+}
+
+uint32_t object_code_stacksize(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.stacksize;
+}
+
+uint32_t object_code_flags(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.flags;
+}
+
+uint32_t object_code_firstlineno(const union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.firstlineno;
+}
+
+union object *object_code_code(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.code;
+}
+
+union object *object_code_consts(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.consts;
+}
+
+union object *object_code_names(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.names;
+}
+
+union object *object_code_varnames(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.varnames;
+}
+
+union object *object_code_freevars(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.freevars;
+}
+
+union object *object_code_cellvars(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.cellvars;
+}
+
+union object *object_code_filename(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.filename;
+}
+
+union object *object_code_name(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.name;
+}
+
+union object *object_code_lnotab(union object *object)
+{
+  assert(object->type == OBJECT_CODE);
+  return object->code.lnotab;
+}
+
+void object_code_set_argcount(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.argcount = value;
+}
+
+void object_code_set_posonlyargcount(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.posonlyargcount = value;
+}
+
+void object_code_set_kwonlyargcount(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.kwonlyargcount = value;
+}
+
+void object_code_set_nlocals(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.nlocals = value;
+}
+
+void object_code_set_stacksize(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.stacksize = value;
+}
+
+void object_code_set_flags(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.flags = value;
+}
+
+void object_code_set_firstlineno(union object *object, uint32_t value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.firstlineno = value;
+}
+
+void object_code_set_code(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.code = value;
+}
+
+void object_code_set_consts(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.consts = value;
+}
+
+void object_code_set_names(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.names = value;
+}
+
+void object_code_set_varnames(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.varnames = value;
+}
+
+void object_code_set_freevars(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.freevars = value;
+}
+
+void object_code_set_cellvars(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.cellvars = value;
+}
+
+void object_code_set_filename(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.filename = value;
+}
+
+void object_code_set_name(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.name = value;
+}
+
+void object_code_set_lnotab(union object *object, union object *value)
+{
+  assert(object->type == OBJECT_CODE);
+  object->code.lnotab = value;
+}

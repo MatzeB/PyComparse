@@ -2,6 +2,8 @@ test/errors/def_parameters.py:1 error: parameter without default follows paramet
 test/errors/def_parameters.py:4 error: `*` argument may appear only once
 test/errors/def_parameters.py:7 error: `*` argument may appear only once
 test/errors/def_parameters.py:10 error: duplicate argument `a`
+test/errors/def_parameters.py:13 error: named arguments must follow bare *
+test/errors/def_parameters.py:16 error: named arguments must follow bare *
 test/errors/def_parameters.py:25 error: `**` argument may appear only once
 test/errors/def_parameters.py:28 error: `/` must be ahead of `**`-parameter
 test/errors/def_parameters.py:28 error: expected `:`, got `;`

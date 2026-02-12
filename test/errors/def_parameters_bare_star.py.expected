@@ -1,0 +1,1 @@
+test/errors/def_parameters_bare_star.py:1 error: named arguments must follow bare *

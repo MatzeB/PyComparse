@@ -633,6 +633,8 @@ static void parse_parameters(struct parser_state *s,
   bool     had_default = false;
   bool     had_variable_args = false;
   bool     had_variable_keyword_args = false;
+  bool     need_kwonly_after_bare_star = false;
+  struct location bare_star_location = { 0 };
 
   add_anchor(s, end);
 
@@ -674,14 +676,21 @@ static void parse_parameters(struct parser_state *s,
         variant = PARAMETER_STAR;
         had_variable_args = true;
       }
+      struct location star_location = scanner_location(&s->scanner);
       eat(s, '*');
       if (peek(s) != T_IDENTIFIER) {
-        /* TODO: report error if there isn't at least one more
-         * parameter (that is not **kwargs) following. */
+        need_kwonly_after_bare_star = true;
+        bare_star_location = star_location;
         break;
       }
       goto parameter;
     case T_ASTERISK_ASTERISK:
+      if (need_kwonly_after_bare_star) {
+        diag_begin_error(s->d, bare_star_location);
+        diag_frag(s->d, "named arguments must follow bare *");
+        diag_end(s->d);
+        need_kwonly_after_bare_star = false;
+      }
       if (had_variable_keyword_args) {
         diag_begin_error(s->d, scanner_location(&s->scanner));
         diag_token_kind(s->d, T_ASTERISK_ASTERISK);
@@ -698,6 +707,9 @@ static void parse_parameters(struct parser_state *s,
     parameter: {
       struct location location = scanner_location(&s->scanner);
       struct symbol  *name = parse_identifier(s);
+      if (need_kwonly_after_bare_star && variant == PARAMETER_NORMAL) {
+        need_kwonly_after_bare_star = false;
+      }
 
       union ast_expression *type = NULL;
       bool                  allow_type_annotations = (end != ':');
@@ -752,6 +764,12 @@ static void parse_parameters(struct parser_state *s,
       break;
     }
     if (!accept(s, ',')) break;
+  }
+
+  if (need_kwonly_after_bare_star) {
+    diag_begin_error(s->d, bare_star_location);
+    diag_frag(s->d, "named arguments must follow bare *");
+    diag_end(s->d);
   }
 
   if (!accept(s, end)) {

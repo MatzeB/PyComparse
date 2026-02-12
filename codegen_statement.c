@@ -672,6 +672,8 @@ static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
 
   cg_block_begin(s, excepts);
   cg_push(s, 3); /* runtime pushes traceback, value, type when entering */
+  /* SETUP_FINALLY exception state is larger than what we model explicitly. */
+  cg_mark_max_stack_extra(s, 5);
 
   if (match != NULL) {
     struct basic_block *excepts_next = cg_block_allocate(s);
@@ -790,6 +792,8 @@ static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_body,
               /*fallthrough=*/setup_finally->next);
   cg_push(s, 1);
+  /* BEGIN/END_FINALLY protocol uses 6 stack entries; we model one token. */
+  cg_mark_max_stack_extra(s, 5);
 
   struct basic_block *enter_finally = state->enter_finally;
   struct basic_block *excepts = state->excepts;

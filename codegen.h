@@ -28,6 +28,7 @@ unsigned cg_register_freevar(struct cg_state *s, struct symbol *symbol);
 void cg_op(struct cg_state *s, enum opcode opcoode, uint32_t arg);
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
+void cg_mark_max_stack_extra(struct cg_state *s, unsigned extra);
 void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
                     unsigned pop, unsigned push);
 void cg_op_pop1(struct cg_state *s, enum opcode opcode, uint32_t arg);

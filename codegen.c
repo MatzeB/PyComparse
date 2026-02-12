@@ -66,6 +66,14 @@ void cg_pop(struct cg_state *s, unsigned n)
   s->code.stacksize -= n;
 }
 
+void cg_mark_max_stack_extra(struct cg_state *s, unsigned extra)
+{
+  unsigned with_extra = s->code.stacksize + extra;
+  if (with_extra > s->code.max_stacksize) {
+    s->code.max_stacksize = with_extra;
+  }
+}
+
 void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
                     unsigned pop, unsigned push)
 {
@@ -315,6 +323,24 @@ static struct basic_block *skip_empty_blocks(struct basic_block *target)
   return target;
 }
 
+static bool code_uses_setup_finally(struct basic_block *first_block)
+{
+  for (struct basic_block *block = first_block; block != NULL;
+       block = block->next) {
+    if (block->jump_opcode == OPCODE_SETUP_FINALLY) {
+      return true;
+    }
+    unsigned code_length = block->code_length;
+    uint8_t *code = block->code_bytes;
+    for (unsigned i = 0; i + 1 < code_length; i += 2) {
+      if (code[i] == OPCODE_SETUP_FINALLY) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 union object *cg_code_end(struct cg_state *s, const char *name)
 {
   assert(s->code.stacksize == 0);
@@ -548,7 +574,16 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.posonlyargcount = s->code.positional_only_argcount;
   object->code.kwonlyargcount = s->code.keyword_only_argcount;
   object->code.nlocals = object_list_length(s->code.varnames);
-  object->code.stacksize = s->code.max_stacksize;
+  unsigned stacksize = s->code.max_stacksize;
+  if (code_uses_setup_finally(first_block)) {
+    /*
+     * Our linear stack simulation intentionally approximates exceptional
+     * control-flow. Keep a small conservative headroom for SETUP_FINALLY
+     * paths so emitted code has sufficient stack.
+     */
+    stacksize += 2;
+  }
+  object->code.stacksize = stacksize;
   object->code.flags = s->code.flags;
   object->code.firstlineno = first_lineno;
   object->code.code = code;

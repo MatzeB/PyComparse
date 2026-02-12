@@ -9,6 +9,7 @@
 #include "adt/arena.h"
 #include "adt/idynarray.h"
 #include "ast.h"
+#include "ast_fold_constants.h"
 #include "ast_expression_types.h"
 #include "ast_statement_types.h"
 #include "ast_types.h"
@@ -2930,6 +2931,7 @@ union object *parse(struct parser_state *s, const char *filename)
       s, idynarray_data(&statements),
       idynarray_length(&statements, union ast_statement *));
   idynarray_free(&statements);
+  module = ast_fold_constants(&s->cg.objects, &s->ast, module);
 
   emit_module_begin(&s->cg);
   emit_statement_list(&s->cg, module);

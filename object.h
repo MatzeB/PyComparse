@@ -61,7 +61,7 @@ union object *object_new_string(struct arena *arena, enum object_type type,
 union object *object_new_float(struct arena *arena, double value);
 union object *object_new_complex(struct arena *arena, double real,
                                  double imag);
-union object *object_new_int(struct arena *arena, uint64_t value);
+union object *object_new_int(struct arena *arena, int64_t value);
 union object *object_new_int_pydigits(struct arena           *arena,
                                       uint32_t                num_pydigits,
                                       const uint16_t *nonnull pydigits);
@@ -84,7 +84,7 @@ union object *object_tuple_at(union object *object, uint32_t index);
 double   object_float_value(const union object *object);
 double   object_complex_real(const union object *object);
 double   object_complex_imag(const union object *object);
-uint64_t object_int_value(const union object *object);
+int64_t object_int_value(const union object *object);
 
 void          object_list_append(union object *list, union object *object);
 union object *object_list_at(union object *list, uint32_t index);

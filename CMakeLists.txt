@@ -107,6 +107,8 @@ add_executable(parser_test
   adt/stack.h
   ast.c
   ast.h
+  ast_fold_constants.c
+  ast_fold_constants.h
   ast_unparse.c
   ast_unparse.h
   ast_types.h

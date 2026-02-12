@@ -172,8 +172,9 @@ union object *object_new_complex(struct arena *arena, double real, double imag)
   return object;
 }
 
-union object *object_new_int(struct arena *arena, uint64_t value)
+union object *object_new_int(struct arena *arena, int64_t value)
 {
+  assert(value != INT64_MIN);
   union object *object
       = object_allocate_zero(arena, struct object_int, OBJECT_INT);
   object->int_obj.value = value;
@@ -247,7 +248,7 @@ double object_complex_imag(const union object *object)
   return object->complex.imag;
 }
 
-uint64_t object_int_value(const union object *object)
+int64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
   assert(object->int_obj.num_pydigits == 0);

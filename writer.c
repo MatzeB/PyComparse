@@ -52,6 +52,11 @@ static void write_uint32(struct writer_state *s, uint32_t value)
   write_uint8(s, (uint8_t)(value >> 24));
 }
 
+static void write_int32(struct writer_state *s, int32_t value)
+{
+  write_uint32(s, (uint32_t)value);
+}
+
 static void write_uint16(struct writer_state *s, uint16_t value)
 {
   write_uint8(s, (uint8_t)(value >> 0));
@@ -167,21 +172,35 @@ static void write_complex(struct writer_state         *s,
 
 static void write_int(struct writer_state *s, const struct object_int *int_obj)
 {
-  if (int_obj->num_pydigits == 0 && int_obj->value <= INT32_MAX) {
-    write_char(s, OBJECT_INT);
-    write_uint32(s, (uint32_t)int_obj->value);
-    return;
-  }
-
   if (int_obj->num_pydigits == 0) {
-    uint64_t value = int_obj->value;
-    unsigned num_digits = 0;
-    for (uint64_t c = value; c != 0; c >>= 15) {
+    int64_t value = int_obj->value;
+    assert(value != INT64_MIN);
+    if (value >= INT32_MIN && value <= INT32_MAX) {
+      write_char(s, OBJECT_INT);
+      write_int32(s, (int32_t)value);
+      return;
+    }
+
+    uint64_t magnitude;
+    int32_t  sign = 1;
+    if (value < 0) {
+      sign = -1;
+      magnitude = (uint64_t)(-value);
+    } else {
+      magnitude = (uint64_t)value;
+    }
+
+    uint32_t num_digits = 0;
+    for (uint64_t c = magnitude; c != 0; c >>= 15) {
       ++num_digits;
     }
+    if (num_digits > INT32_MAX) {
+      internal_error("integer too large to marshal");
+    }
+
     write_char(s, 'l');
-    write_uint32(s, num_digits);
-    for (uint64_t c = value; c != 0; c >>= 15) {
+    write_int32(s, (int32_t)num_digits * sign);
+    for (uint64_t c = magnitude; c != 0; c >>= 15) {
       write_uint16(s, (uint16_t)(c & 0x7fff));
     }
     return;
@@ -193,7 +212,10 @@ static void write_int(struct writer_state *s, const struct object_int *int_obj)
     --num_digits;
   }
   write_char(s, 'l');
-  write_uint32(s, num_digits);
+  if (num_digits > INT32_MAX) {
+    internal_error("integer too large to marshal");
+  }
+  write_int32(s, (int32_t)num_digits);
   for (uint32_t i = 0; i < num_digits; ++i) {
     write_uint16(s, int_obj->pydigits[i]);
   }

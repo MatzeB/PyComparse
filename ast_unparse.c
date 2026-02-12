@@ -64,10 +64,10 @@ static void append_cstring(struct unparse_state *s, const char *cstring)
   append_mem(s, cstring, strlen(cstring));
 }
 
-static void append_uint64(struct unparse_state *s, uint64_t value)
+static void append_int64(struct unparse_state *s, int64_t value)
 {
   char buffer[32];
-  int  length = snprintf(buffer, sizeof(buffer), "%" PRIu64, value);
+  int  length = snprintf(buffer, sizeof(buffer), "%" PRId64, value);
   if (length <= 0 || (size_t)length >= sizeof(buffer)) {
     internal_error("failed to unparse integer");
   }
@@ -139,7 +139,7 @@ static void append_int_pydigits(struct unparse_state    *s,
 {
   uint32_t num_pydigits = int_obj->num_pydigits;
   if (num_pydigits == 0) {
-    append_uint64(s, int_obj->value);
+    append_int64(s, int_obj->value);
     return;
   }
 

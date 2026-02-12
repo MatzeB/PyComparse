@@ -168,6 +168,13 @@ static inline unsigned arena_grow_current_size(const struct arena *arena)
   return arena->grow - arena->allocated;
 }
 
+static inline void arena_grow_truncate(struct arena *arena, unsigned size)
+{
+  assert(arena->grow != 0);
+  assert(size <= arena_grow_current_size(arena));
+  arena->grow = arena->allocated + size;
+}
+
 static inline void *arena_grow_current_base(const struct arena *arena)
 {
   assert(arena->grow != 0);

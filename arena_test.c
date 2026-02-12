@@ -26,6 +26,19 @@ static void alloc_some(struct arena *arena)
       assert(strcmp(str, "Hello World!") == 0);
       (void)str;
     }
+
+    if (rand() % 10 == 0) {
+      arena_grow_begin(arena, 1);
+      for (char *c = "abcdef"; *c != '\0'; ++c) {
+        arena_grow_char(arena, *c);
+      }
+      arena_grow_truncate(arena, 3);
+      arena_grow_char(arena, 'x');
+      arena_grow_char(arena, '\0');
+      char *str = (char *)arena_grow_finish(arena);
+      assert(strcmp(str, "abcx") == 0);
+      (void)str;
+    }
   }
 }
 

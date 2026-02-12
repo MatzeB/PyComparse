@@ -2,10 +2,10 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "adt/arena.h"
@@ -68,15 +68,31 @@ static void append_int64(struct unparse_state *s, int64_t value)
 {
   char buffer[32];
   int  length = snprintf(buffer, sizeof(buffer), "%" PRId64, value);
-  if (length <= 0 || (size_t)length >= sizeof(buffer)) {
-    internal_error("failed to unparse integer");
-  }
+  assert(length > 0);
+  assert((size_t)length < sizeof(buffer));
   append_mem(s, buffer, (size_t)length);
 }
 
-static void append_escaped_char(struct unparse_state *s, unsigned char c)
+static void append_float(struct unparse_state *s,
+                         const struct object_float *float_obj)
 {
-  switch (c) {
+  char buffer[128];
+  int  length = snprintf(buffer, sizeof(buffer), "%.17g", float_obj->value);
+  if (length <= 0 || (size_t)length >= sizeof(buffer)) {
+    internal_error("failed to format float");
+  }
+  append_mem(s, buffer, (size_t)length);
+  if (strchr(buffer, '.') == NULL && strchr(buffer, 'e') == NULL
+      && strchr(buffer, 'E') == NULL && strcmp(buffer, "inf") != 0
+      && strcmp(buffer, "-inf") != 0 && strcmp(buffer, "nan") != 0) {
+    append_cstring(s, ".0");
+  }
+}
+
+static void append_escaped_char(struct unparse_state *s, char c)
+{
+  unsigned char uc = (unsigned char)c;
+  switch (uc) {
   case '\\':
     append_cstring(s, "\\\\");
     return;
@@ -96,26 +112,22 @@ static void append_escaped_char(struct unparse_state *s, unsigned char c)
     break;
   }
 
-  if (c < 0x20 || c >= 0x7f) {
+  if (uc < 0x20 || uc >= 0x7f) {
     static const char hexdigits[] = "0123456789abcdef";
     append_cstring(s, "\\x");
-    append_char(s, hexdigits[(c >> 4) & 0xf]);
-    append_char(s, hexdigits[c & 0xf]);
+    append_char(s, hexdigits[(uc >> 4) & 0xf]);
+    append_char(s, hexdigits[uc & 0xf]);
     return;
   }
   append_char(s, (char)c);
 }
 
 static void append_escaped_string_literal(struct unparse_state *s,
-                                          bool bytes_prefix, const char *chars,
-                                          uint32_t length)
+                                          const struct object_string *string)
 {
-  if (bytes_prefix) {
-    append_char(s, 'b');
-  }
   append_char(s, '\'');
-  for (uint32_t i = 0; i < length; ++i) {
-    append_escaped_char(s, (unsigned char)chars[i]);
+  for (uint32_t i = 0; i < string->length; ++i) {
+    append_escaped_char(s, string->chars[i]);
   }
   append_char(s, '\'');
 }
@@ -124,10 +136,10 @@ static void append_escaped_fstring_fragment(struct unparse_state *s,
                                             const char *chars, uint32_t length)
 {
   for (uint32_t i = 0; i < length; ++i) {
-    unsigned char c = (unsigned char)chars[i];
+    char c = chars[i];
     if (c == '{' || c == '}') {
-      append_char(s, (char)c);
-      append_char(s, (char)c);
+      append_char(s, c);
+      append_char(s, c);
       continue;
     }
     append_escaped_char(s, c);
@@ -138,22 +150,32 @@ static void append_big_int_pydigits(struct unparse_state    *s,
                                     const struct object_big_int *big_int)
 {
   uint32_t num_pydigits = big_int->num_pydigits;
-
-  uint16_t *digits
-      = (uint16_t *)malloc((size_t)num_pydigits * sizeof(uint16_t));
-  if (digits == NULL) {
-    internal_error("out of memory");
+  assert(num_pydigits > 0);
+  size_t max_decimal_digits = (size_t)num_pydigits * 5u;
+  size_t digits_size = (size_t)num_pydigits * sizeof(uint16_t);
+  size_t alignment_padding = _Alignof(uint16_t) - 1u;
+  if (max_decimal_digits > SIZE_MAX - alignment_padding) {
+    internal_error("integer too large to unparse");
   }
-  memcpy(digits, big_int->pydigits, (size_t)num_pydigits * sizeof(uint16_t));
-
-  size_t max_decimal_digits = (size_t)num_pydigits * 5;
-  char  *decimal_rev = (char *)malloc(max_decimal_digits + 1);
-  if (decimal_rev == NULL) {
-    free(digits);
-    internal_error("out of memory");
+  size_t scratch_size = max_decimal_digits + alignment_padding;
+  if (scratch_size > SIZE_MAX - digits_size) {
+    internal_error("integer too large to unparse");
+  }
+  scratch_size += digits_size;
+  if (scratch_size > UINT_MAX || max_decimal_digits > UINT_MAX) {
+    internal_error("integer too large to unparse");
   }
 
-  size_t decimal_length = 0;
+  unsigned output_offset = arena_grow_current_size(s->arena);
+  char    *scratch = (char *)arena_grow(s->arena, (unsigned)scratch_size);
+  char    *decimal_rev = scratch;
+  uintptr_t digits_unaligned = (uintptr_t)(scratch + max_decimal_digits);
+  uintptr_t digits_aligned
+      = (digits_unaligned + alignment_padding) & ~(uintptr_t)alignment_padding;
+  uint16_t *digits = (uint16_t *)digits_aligned;
+  memcpy(digits, big_int->pydigits, digits_size);
+
+  unsigned decimal_length = 0;
   while (num_pydigits > 0) {
     uint32_t carry = 0;
     for (uint32_t i = num_pydigits; i-- > 0;) {
@@ -166,12 +188,15 @@ static void append_big_int_pydigits(struct unparse_state    *s,
       --num_pydigits;
     }
   }
+  assert(decimal_length > 0);
 
-  for (size_t i = decimal_length; i-- > 0;) {
-    append_char(s, decimal_rev[i]);
+  for (unsigned i = 0, e = decimal_length / 2; i < e; ++i) {
+    char tmp = decimal_rev[i];
+    decimal_rev[i] = decimal_rev[decimal_length - 1 - i];
+    decimal_rev[decimal_length - 1 - i] = tmp;
   }
-  free(decimal_rev);
-  free(digits);
+
+  arena_grow_truncate(s->arena, output_offset + decimal_length);
 }
 
 static enum unparse_precedence
@@ -497,6 +522,196 @@ static void unparse_generator_parts(struct unparse_state            *s,
   }
 }
 
+static void unparse_constant_object(struct unparse_state *s, union object *object)
+{
+  switch ((enum object_type)object->type) {
+  case OBJECT_NONE:
+    append_cstring(s, "None");
+    break;
+  case OBJECT_TRUE:
+    append_cstring(s, "True");
+    break;
+  case OBJECT_FALSE:
+    append_cstring(s, "False");
+    break;
+  case OBJECT_ELLIPSIS:
+    append_cstring(s, "...");
+    break;
+  case OBJECT_INT:
+    append_int64(s, object->int_obj.value);
+    break;
+  case OBJECT_BIG_INT:
+    append_big_int_pydigits(s, &object->big_int);
+    break;
+  case OBJECT_FLOAT:
+    append_float(s, &object->float_obj);
+    break;
+  case OBJECT_STRING:
+    append_escaped_string_literal(s, &object->string);
+    break;
+  case OBJECT_BYTES:
+    append_char(s, 'b');
+    append_escaped_string_literal(s, &object->string);
+    break;
+  default:
+    internal_error("invalid constant type for unparse");
+  }
+}
+
+static void unparse_subscript_expression(struct unparse_state *s,
+                                         struct ast_binexpr  *subscript)
+{
+  unparse_expression_prec(s, subscript->left, UNPARSE_PREC_ATOM);
+  append_char(s, '[');
+  if (ast_expression_type(subscript->right) == AST_EXPRESSION_LIST) {
+    struct ast_expression_list *items = &subscript->right->expression_list;
+    for (unsigned i = 0; i < items->num_expressions; ++i) {
+      if (i > 0) append_cstring(s, ", ");
+      unparse_subscript_item(s, items->expressions[i]);
+    }
+    if (items->num_expressions == 1) {
+      append_char(s, ',');
+    }
+  } else {
+    unparse_subscript_item(s, subscript->right);
+  }
+  append_char(s, ']');
+}
+
+static void unparse_call_expression(struct unparse_state *s, struct ast_call *call)
+{
+  assert(call->callee != NULL);
+  unparse_expression_prec(s, call->callee, UNPARSE_PREC_ATOM);
+  append_char(s, '(');
+  for (unsigned i = 0; i < call->num_arguments; ++i) {
+    if (i > 0) append_cstring(s, ", ");
+    struct argument      *argument = &call->arguments[i];
+    union ast_expression *arg_expression = argument->expression;
+    if (argument->name != NULL) {
+      append_cstring(s, argument->name->string);
+      append_char(s, '=');
+      unparse_expression_prec(s, arg_expression, UNPARSE_PREC_ROOT);
+      continue;
+    }
+    if (ast_expression_type(arg_expression) == AST_UNEXPR_STAR) {
+      append_char(s, '*');
+      unparse_expression_prec(s, arg_expression->unexpr.op, UNPARSE_PREC_ROOT);
+      continue;
+    }
+    if (ast_expression_type(arg_expression) == AST_UNEXPR_STAR_STAR) {
+      append_cstring(s, "**");
+      unparse_expression_prec(s, arg_expression->unexpr.op, UNPARSE_PREC_ROOT);
+      continue;
+    }
+    unparse_expression_prec(s, arg_expression, UNPARSE_PREC_ROOT);
+  }
+  append_char(s, ')');
+}
+
+static void unparse_comparison_expression(struct unparse_state     *s,
+                                          struct ast_comparison *comparison)
+{
+  unparse_expression_prec(s, comparison->left, UNPARSE_PREC_COMPARISON + 1);
+  for (unsigned i = 0; i < comparison->num_operands; ++i) {
+    struct comparison_op *operand = &comparison->operands[i];
+    append_char(s, ' ');
+    append_cstring(s, comparison_op_name(operand->op));
+    append_char(s, ' ');
+    unparse_expression_prec(s, operand->operand, UNPARSE_PREC_COMPARISON + 1);
+  }
+}
+
+static void unparse_conditional_expression(struct unparse_state   *s,
+                                           struct ast_conditional *conditional)
+{
+  unparse_expression_prec(s, conditional->true_expression,
+                          UNPARSE_PREC_CONDITIONAL + 1);
+  append_cstring(s, " if ");
+  unparse_expression_prec(s, conditional->condition, UNPARSE_PREC_LOGICAL_OR);
+  append_cstring(s, " else ");
+  unparse_expression_prec(s, conditional->false_expression,
+                          UNPARSE_PREC_CONDITIONAL);
+}
+
+static void unparse_lambda_expression(struct unparse_state *s,
+                                      struct ast_lambda    *lambda)
+{
+  append_cstring(s, "lambda");
+  if (lambda->num_parameters > 0) {
+    append_char(s, ' ');
+    for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+      if (i > 0) append_cstring(s, ", ");
+      unparse_parameter(s, &lambda->parameters[i]);
+      if (i + 1 == lambda->positional_only_argcount) {
+        append_cstring(s, ", /");
+      }
+    }
+  }
+  append_cstring(s, ": ");
+  unparse_expression_prec(s, lambda->expression, UNPARSE_PREC_ROOT);
+}
+
+static void unparse_dict_display_expression(struct unparse_state *s,
+                                            struct ast_dict_item_list *dict)
+{
+  append_char(s, '{');
+  for (unsigned i = 0; i < dict->num_items; ++i) {
+    if (i > 0) append_cstring(s, ", ");
+    struct dict_item *item = &dict->items[i];
+    if (item->key == NULL) {
+      append_cstring(s, "**");
+      union ast_expression *value = item->value;
+      if (ast_expression_type(value) == AST_UNEXPR_STAR_STAR) {
+        value = value->unexpr.op;
+      }
+      unparse_expression_prec(s, value, UNPARSE_PREC_ROOT);
+    } else {
+      unparse_expression_prec(s, item->key, UNPARSE_PREC_ROOT);
+      append_cstring(s, ": ");
+      unparse_expression_prec(s, item->value, UNPARSE_PREC_ROOT);
+    }
+  }
+  append_char(s, '}');
+}
+
+static void unparse_fstring_expression(struct unparse_state *s,
+                                       struct ast_fstring   *fstring)
+{
+  append_cstring(s, "f'");
+  for (unsigned i = 0; i < fstring->num_elements; ++i) {
+    struct fstring_element *element = &fstring->elements[i];
+    if (!element->is_expression) {
+      union object *string = element->u.string;
+      append_escaped_fstring_fragment(s, string->string.chars,
+                                      string->string.length);
+      continue;
+    }
+    append_char(s, '{');
+    unparse_expression_prec(s, element->u.expression, UNPARSE_PREC_ROOT);
+    switch (element->conversion) {
+    case FORMAT_VALUE_NONE:
+      break;
+    case FORMAT_VALUE_STR:
+      append_cstring(s, "!s");
+      break;
+    case FORMAT_VALUE_REPR:
+      append_cstring(s, "!r");
+      break;
+    case FORMAT_VALUE_ASCII:
+      append_cstring(s, "!a");
+      break;
+    default:
+      internal_error("invalid f-string conversion");
+    }
+    if (element->format_spec != NULL) {
+      append_char(s, ':');
+      unparse_fstring_format_spec(s, element->format_spec);
+    }
+    append_char(s, '}');
+  }
+  append_char(s, '\'');
+}
+
 static void unparse_expression_prec(struct unparse_state   *s,
                                     union ast_expression   *expression,
                                     enum unparse_precedence parent_precedence)
@@ -510,153 +725,29 @@ static void unparse_expression_prec(struct unparse_state   *s,
   case AST_IDENTIFIER:
     append_cstring(s, expression->identifier.symbol->string);
     break;
-  case AST_CONST: {
-    union object *object = expression->cnst.object;
-    switch ((enum object_type)object->type) {
-    case OBJECT_NONE:
-      append_cstring(s, "None");
-      break;
-    case OBJECT_TRUE:
-      append_cstring(s, "True");
-      break;
-    case OBJECT_FALSE:
-      append_cstring(s, "False");
-      break;
-    case OBJECT_ELLIPSIS:
-      append_cstring(s, "...");
-      break;
-    case OBJECT_INT:
-      append_int64(s, object->int_obj.value);
-      break;
-    case OBJECT_BIG_INT:
-      append_big_int_pydigits(s, &object->big_int);
-      break;
-    case OBJECT_FLOAT: {
-      char buffer[128];
-      int  length
-          = snprintf(buffer, sizeof(buffer), "%.17g", object->float_obj.value);
-      if (length <= 0 || (size_t)length >= sizeof(buffer)) {
-        internal_error("failed to format float");
-      }
-      append_mem(s, buffer, (size_t)length);
-      if (strchr(buffer, '.') == NULL && strchr(buffer, 'e') == NULL
-          && strchr(buffer, 'E') == NULL && strcmp(buffer, "inf") != 0
-          && strcmp(buffer, "-inf") != 0 && strcmp(buffer, "nan") != 0) {
-        append_cstring(s, ".0");
-      }
-      break;
-    }
-    case OBJECT_STRING:
-      append_escaped_string_literal(s, /*bytes_prefix=*/false,
-                                    object->string.chars,
-                                    object->string.length);
-      break;
-    case OBJECT_BYTES:
-      append_escaped_string_literal(s, /*bytes_prefix=*/true,
-                                    object->string.chars,
-                                    object->string.length);
-      break;
-    default:
-      internal_error("invalid constant type for unparse");
-    }
+  case AST_CONST:
+    unparse_constant_object(s, expression->cnst.object);
     break;
-  }
   case AST_ATTR:
     unparse_expression_prec(s, expression->attr.expression, UNPARSE_PREC_ATOM);
     append_char(s, '.');
     append_cstring(s, expression->attr.symbol->string);
     break;
   case AST_BINEXPR_SUBSCRIPT:
-    unparse_expression_prec(s, expression->binexpr.left, UNPARSE_PREC_ATOM);
-    append_char(s, '[');
-    if (ast_expression_type(expression->binexpr.right)
-        == AST_EXPRESSION_LIST) {
-      struct ast_expression_list *items
-          = &expression->binexpr.right->expression_list;
-      for (unsigned i = 0; i < items->num_expressions; ++i) {
-        if (i > 0) append_cstring(s, ", ");
-        unparse_subscript_item(s, items->expressions[i]);
-      }
-      if (items->num_expressions == 1) {
-        append_char(s, ',');
-      }
-    } else {
-      unparse_subscript_item(s, expression->binexpr.right);
-    }
-    append_char(s, ']');
+    unparse_subscript_expression(s, &expression->binexpr);
     break;
-  case AST_CALL: {
-    struct ast_call *call = &expression->call;
-    assert(call->callee != NULL);
-    unparse_expression_prec(s, call->callee, UNPARSE_PREC_ATOM);
-    append_char(s, '(');
-    for (unsigned i = 0; i < call->num_arguments; ++i) {
-      if (i > 0) append_cstring(s, ", ");
-      struct argument      *argument = &call->arguments[i];
-      union ast_expression *arg_expression = argument->expression;
-      if (argument->name != NULL) {
-        append_cstring(s, argument->name->string);
-        append_char(s, '=');
-        unparse_expression_prec(s, arg_expression, UNPARSE_PREC_ROOT);
-        continue;
-      }
-      if (ast_expression_type(arg_expression) == AST_UNEXPR_STAR) {
-        append_char(s, '*');
-        unparse_expression_prec(s, arg_expression->unexpr.op,
-                                UNPARSE_PREC_ROOT);
-        continue;
-      }
-      if (ast_expression_type(arg_expression) == AST_UNEXPR_STAR_STAR) {
-        append_cstring(s, "**");
-        unparse_expression_prec(s, arg_expression->unexpr.op,
-                                UNPARSE_PREC_ROOT);
-        continue;
-      }
-      unparse_expression_prec(s, arg_expression, UNPARSE_PREC_ROOT);
-    }
-    append_char(s, ')');
+  case AST_CALL:
+    unparse_call_expression(s, &expression->call);
     break;
-  }
-  case AST_COMPARISON: {
-    struct ast_comparison *comparison = &expression->comparison;
-    unparse_expression_prec(s, comparison->left, UNPARSE_PREC_COMPARISON + 1);
-    for (unsigned i = 0; i < comparison->num_operands; ++i) {
-      struct comparison_op *operand = &comparison->operands[i];
-      append_char(s, ' ');
-      append_cstring(s, comparison_op_name(operand->op));
-      append_char(s, ' ');
-      unparse_expression_prec(s, operand->operand,
-                              UNPARSE_PREC_COMPARISON + 1);
-    }
+  case AST_COMPARISON:
+    unparse_comparison_expression(s, &expression->comparison);
     break;
-  }
   case AST_CONDITIONAL:
-    unparse_expression_prec(s, expression->conditional.true_expression,
-                            UNPARSE_PREC_CONDITIONAL + 1);
-    append_cstring(s, " if ");
-    unparse_expression_prec(s, expression->conditional.condition,
-                            UNPARSE_PREC_LOGICAL_OR);
-    append_cstring(s, " else ");
-    unparse_expression_prec(s, expression->conditional.false_expression,
-                            UNPARSE_PREC_CONDITIONAL);
+    unparse_conditional_expression(s, &expression->conditional);
     break;
-  case AST_LAMBDA: {
-    struct ast_lambda *lambda = &expression->lambda;
-    append_cstring(s, "lambda");
-    if (lambda->num_parameters > 0) {
-      append_char(s, ' ');
-      for (unsigned i = 0; i < lambda->num_parameters; ++i) {
-        if (i > 0) append_cstring(s, ", ");
-        unparse_parameter(s, &lambda->parameters[i]);
-        if (i + 1 == lambda->positional_only_argcount) {
-          append_cstring(s, ", /");
-        }
-      }
-    }
-    append_cstring(s, ": ");
-    unparse_expression_prec(s, lambda->expression, UNPARSE_PREC_ROOT);
+  case AST_LAMBDA:
+    unparse_lambda_expression(s, &expression->lambda);
     break;
-  }
   case AST_EXPRESSION_LIST:
     unparse_tuple_items(s, &expression->expression_list,
                         /*wrap_parentheses=*/true);
@@ -667,28 +758,9 @@ static void unparse_expression_prec(struct unparse_state   *s,
   case AST_SET_DISPLAY:
     unparse_expression_list(s, &expression->expression_list, '{', '}');
     break;
-  case AST_DICT_DISPLAY: {
-    struct ast_dict_item_list *dict = &expression->dict_item_list;
-    append_char(s, '{');
-    for (unsigned i = 0; i < dict->num_items; ++i) {
-      if (i > 0) append_cstring(s, ", ");
-      struct dict_item *item = &dict->items[i];
-      if (item->key == NULL) {
-        append_cstring(s, "**");
-        union ast_expression *value = item->value;
-        if (ast_expression_type(value) == AST_UNEXPR_STAR_STAR) {
-          value = value->unexpr.op;
-        }
-        unparse_expression_prec(s, value, UNPARSE_PREC_ROOT);
-      } else {
-        unparse_expression_prec(s, item->key, UNPARSE_PREC_ROOT);
-        append_cstring(s, ": ");
-        unparse_expression_prec(s, item->value, UNPARSE_PREC_ROOT);
-      }
-    }
-    append_char(s, '}');
+  case AST_DICT_DISPLAY:
+    unparse_dict_display_expression(s, &expression->dict_item_list);
     break;
-  }
   case AST_GENERATOR_EXPRESSION:
     append_char(s, '(');
     unparse_expression_prec(s, expression->generator_expression.expression,
@@ -720,43 +792,9 @@ static void unparse_expression_prec(struct unparse_state   *s,
     unparse_generator_parts(s, &expression->generator_expression);
     append_char(s, '}');
     break;
-  case AST_FSTRING: {
-    struct ast_fstring *fstring = &expression->fstring;
-    append_cstring(s, "f'");
-    for (unsigned i = 0; i < fstring->num_elements; ++i) {
-      struct fstring_element *element = &fstring->elements[i];
-      if (!element->is_expression) {
-        union object *string = element->u.string;
-        append_escaped_fstring_fragment(s, string->string.chars,
-                                        string->string.length);
-        continue;
-      }
-      append_char(s, '{');
-      unparse_expression_prec(s, element->u.expression, UNPARSE_PREC_ROOT);
-      switch (element->conversion) {
-      case FORMAT_VALUE_NONE:
-        break;
-      case FORMAT_VALUE_STR:
-        append_cstring(s, "!s");
-        break;
-      case FORMAT_VALUE_REPR:
-        append_cstring(s, "!r");
-        break;
-      case FORMAT_VALUE_ASCII:
-        append_cstring(s, "!a");
-        break;
-      default:
-        internal_error("invalid f-string conversion");
-      }
-      if (element->format_spec != NULL) {
-        append_char(s, ':');
-        unparse_fstring_format_spec(s, element->format_spec);
-      }
-      append_char(s, '}');
-    }
-    append_char(s, '\'');
+  case AST_FSTRING:
+    unparse_fstring_expression(s, &expression->fstring);
     break;
-  }
   case AST_UNEXPR_AWAIT:
     append_cstring(s, "await ");
     unparse_expression_prec(s, expression->unexpr.op, UNPARSE_PREC_AWAIT);

@@ -60,11 +60,19 @@ This script runs the parser against test files in `test/` and compares output wi
 ```
 
 ### Commit Messages
-- If an AI assistant (for example Codex or Claude) was used for substantial implementation work, include `Co-authored-by: <ai-name>` in the commit message body.
+- If an AI assistant was used for substantial implementation work, include `Co-authored-by: ` tag with `Codex <codex@openai.com>` or `Claude <noreply@anthropic.com>` at end of commit message.
 - Commit messages may be verbose when that improves clarity.
 - User preference: use detailed commit messages with bullet points in the body.
 - User preference: do not mention routine/normal testing activity in commit messages.
 - User preference: keep commit message line length to 80 characters.
+
+## Development
+
+- Do NOT use plain `python3` as a reference. It is likely not version 3.8 so 
+  has different behavior what is expected for pycomparse. Use something like 
+  `uv run python` to get a python with the right version.
+- Every commit adding a new feature or fixing an important bug should have a test
+  (unless it is especially hard/impossible to test).
 
 ### Running Individual Tests
 ```bash

@@ -25,7 +25,7 @@ Compile and run a sample input:
 ```sh
 ./build/scanner_test
 ./build/parser_test test/hello.py > /tmp/test.pyc
-python3 /tmp/test.pyc
+uv python /tmp/test.pyc
 ```
 
 ## Testing

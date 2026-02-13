@@ -1424,6 +1424,11 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
   state->cleanup = cleanup;
 
   emit_expression(s, expression);
+  /*
+   * SETUP_WITH / SETUP_ASYNC_WITH push additional exception-handler state that
+   * our linear stack simulation does not model explicitly.
+   */
+  cg_mark_max_stack_extra(s, 8);
   if (async) {
     cg_op(s, OPCODE_BEFORE_ASYNC_WITH, 0);
     cg_op(s, OPCODE_GET_AWAITABLE, 0);
@@ -1433,6 +1438,7 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
   } else {
     cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
   }
+  cg_push(s, 1);
 
   cg_block_begin(s, body);
   if (targets != NULL) {
@@ -1460,6 +1466,7 @@ static void emit_with_end(struct cg_state *s, struct with_state *state)
   }
   cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
   cg_op(s, OPCODE_END_FINALLY, 0);
+  cg_pop(s, 1);
 }
 
 struct binding_scope {

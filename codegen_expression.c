@@ -385,13 +385,34 @@ static void emit_dictionary_display(struct cg_state           *s,
       ++non_star_star_end;
     }
     unsigned num_build_map_items = non_star_star_end - idx;
-    for (unsigned i = idx; i < non_star_star_end; i++) {
-      item = &items[i];
-      emit_expression(s, item->key);
-      emit_expression(s, item->value);
+    bool all_const_keys = num_build_map_items > 1;
+    for (unsigned i = idx; i < non_star_star_end && all_const_keys; i++) {
+      all_const_keys = ast_expression_as_constant(items[i].key) != NULL;
     }
-    cg_op_pop_push(s, OPCODE_BUILD_MAP, num_build_map_items,
-                   /*pop=*/num_build_map_items * 2, /*push=*/1);
+    if (all_const_keys) {
+      struct tuple_prep *keys_prep
+          = object_intern_tuple_begin(&s->objects, num_build_map_items);
+      for (unsigned i = idx; i < non_star_star_end; i++) {
+        item = &items[i];
+        union object *key = ast_expression_as_constant(item->key);
+        assert(key != NULL);
+        object_new_tuple_set_at(keys_prep, i - idx, key);
+        emit_expression(s, item->value);
+      }
+      union object *keys = object_intern_tuple_end(&s->objects, keys_prep,
+                                                   /*may_free_arena=*/true);
+      cg_load_const(s, keys);
+      cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_build_map_items,
+                     /*pop=*/num_build_map_items + 1, /*push=*/1);
+    } else {
+      for (unsigned i = idx; i < non_star_star_end; i++) {
+        item = &items[i];
+        emit_expression(s, item->key);
+        emit_expression(s, item->value);
+      }
+      cg_op_pop_push(s, OPCODE_BUILD_MAP, num_build_map_items,
+                     /*pop=*/num_build_map_items * 2, /*push=*/1);
+    }
     ++num_maps;
     idx = non_star_star_end;
   }

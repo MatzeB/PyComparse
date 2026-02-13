@@ -122,6 +122,7 @@ struct ast_expression_list {
 struct ast_generator_expression {
   struct ast_expression_base       base;
   unsigned                         num_parts;
+  bool                             is_async;
   union ast_expression            *expression;
   union ast_expression *nullable   item_value;
   struct generator_expression_part parts[];

@@ -26,23 +26,24 @@
 static void
 emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
-                      const char                      *name)
+                      const char                      *name,
+                      bool                             is_generator_expression);
+
+static void
+emit_generator_helper(struct cg_state                 *s,
+                      struct ast_generator_expression *generator_expression,
+                      const char                      *name,
+                      bool                             is_generator_expression)
 {
-  bool async_comprehension = false;
+  bool async_comprehension = generator_expression->is_async;
   bool first_part_async = false;
   if (generator_expression->num_parts > 0
       && generator_expression->parts[0].type
              == GENERATOR_EXPRESSION_PART_FOR) {
     first_part_async = generator_expression->parts[0].async;
-    for (unsigned i = 0; i < generator_expression->num_parts; ++i) {
-      struct generator_expression_part *part = &generator_expression->parts[i];
-      if (part->type == GENERATOR_EXPRESSION_PART_FOR && part->async) {
-        async_comprehension = true;
-        break;
-      }
-    }
   }
-  if (async_comprehension && !s->code.in_async_function) {
+  if (async_comprehension && !is_generator_expression
+      && !s->code.in_async_function) {
     struct location location = INVALID_LOCATION;
     diag_begin_error(s->d, location);
     diag_frag(s->d, "asynchronous comprehension outside async function");
@@ -90,8 +91,7 @@ emit_generator_helper(struct cg_state                 *s,
     cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
   }
   cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
-  if (async_comprehension
-      && generator_expression->base.base.type != AST_GENERATOR_EXPRESSION) {
+  if (async_comprehension && !is_generator_expression) {
     cg_push(s, 4);
     cg_pop(s, 4);
     cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
@@ -355,7 +355,8 @@ static void emit_unexpr(struct cg_state *s, struct ast_unexpr *unexpr,
 static void emit_dictionary_comprehension(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  emit_generator_helper(s, generator_expression, "<dictcomp>");
+  emit_generator_helper(s, generator_expression, "<dictcomp>",
+                        /*is_generator_expression=*/false);
 }
 
 static void emit_dictionary_display(struct cg_state           *s,
@@ -467,7 +468,8 @@ static void
 emit_list_comprehension(struct cg_state                 *s,
                         struct ast_generator_expression *generator_expression)
 {
-  emit_generator_helper(s, generator_expression, "<listcomp>");
+  emit_generator_helper(s, generator_expression, "<listcomp>",
+                        /*is_generator_expression=*/false);
 }
 
 static void emit_list_display(struct cg_state            *s,
@@ -481,7 +483,8 @@ static void
 emit_set_comprehension(struct cg_state                 *s,
                        struct ast_generator_expression *generator_expression)
 {
-  emit_generator_helper(s, generator_expression, "<setcomp>");
+  emit_generator_helper(s, generator_expression, "<setcomp>",
+                        /*is_generator_expression=*/false);
 }
 
 static void emit_set_display(struct cg_state            *s,
@@ -859,7 +862,8 @@ static void emit_fstring(struct cg_state *s, struct ast_fstring *fstring)
 static void emit_generator_expression(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  emit_generator_helper(s, generator_expression, "<genexpr>");
+  emit_generator_helper(s, generator_expression, "<genexpr>",
+                        /*is_generator_expression=*/true);
 }
 
 void emit_yield(struct cg_state *s, union ast_expression *nullable value,

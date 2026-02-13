@@ -264,6 +264,20 @@ static void expect(struct parser_state *s, enum token_kind expected_token_kind)
   }
 }
 
+static bool await_tracking_begin(struct parser_state *s)
+{
+  bool saved = s->parsed_await_expression;
+  s->parsed_await_expression = false;
+  return saved;
+}
+
+static bool await_tracking_end(struct parser_state *s, bool saved)
+{
+  bool parsed_await_expression = s->parsed_await_expression;
+  s->parsed_await_expression = saved || parsed_await_expression;
+  return parsed_await_expression;
+}
+
 static union ast_expression *
 ast_allocate_expression_(struct parser_state *s, size_t size,
                          enum ast_expression_type type)
@@ -485,6 +499,7 @@ parse_generator_expression(struct parser_state     *s,
   struct generator_expression_part inline_storage[4];
   struct idynarray                 parts;
   idynarray_init(&parts, inline_storage, sizeof(inline_storage));
+  bool is_async = false;
 
   while (peek(s) == T_for || peek(s) == T_if || peek(s) == T_async) {
     struct generator_expression_part *part
@@ -493,31 +508,38 @@ parse_generator_expression(struct parser_state     *s,
       eat(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
       expect(s, T_in);
+      bool await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_FOR;
       part->async = false;
       part->targets = targets;
       part->expression = expression;
+      is_async |= await_tracking_end(s, await_saved);
     } else if (peek(s) == T_async) {
       eat(s, T_async);
       expect(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
       expect(s, T_in);
+      bool await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_FOR;
       part->async = true;
       part->targets = targets;
       part->expression = expression;
+      is_async = true;
+      is_async |= await_tracking_end(s, await_saved);
     } else {
       eat(s, T_if);
+      bool await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_LOGICAL_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_IF;
       part->async = false;
       part->targets = NULL;
       part->expression = expression;
+      is_async |= await_tracking_end(s, await_saved);
     }
   }
 
@@ -527,15 +549,30 @@ parse_generator_expression(struct parser_state     *s,
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_generator_expression) + parts_size, type);
   expression->generator_expression.num_parts = num_parts;
+  expression->generator_expression.is_async = is_async;
   memcpy(expression->generator_expression.parts, idynarray_data(&parts),
          parts_size);
   idynarray_free(&parts);
   return expression;
 }
 
+static void set_generator_expression_item(
+    union ast_expression *expression, union ast_expression *item,
+    bool item_has_await, union ast_expression *nullable item_value,
+    bool item_value_has_await)
+{
+  struct ast_generator_expression *generator = &expression->generator_expression;
+  generator->expression = item;
+  generator->item_value = item_value;
+  if (item_has_await || item_value_has_await) {
+    generator->is_async = true;
+  }
+}
+
 static struct argument *parse_argument(struct parser_state *s,
                                        struct argument     *argument)
 {
+  bool await_saved = await_tracking_begin(s);
   union ast_expression *expression;
   if (peek(s) == '*') {
     expression = parse_unexpr(s, PREC_EXPRESSION, AST_UNEXPR_STAR);
@@ -555,11 +592,14 @@ static struct argument *parse_argument(struct parser_state *s,
     }
     expression = parse_expression(s, PREC_NAMED);
   }
+  bool expression_has_await = await_tracking_end(s, await_saved);
 
   if (peek(s) == T_for || peek(s) == T_async) {
     union ast_expression *item = expression;
     expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
-    expression->generator_expression.expression = item;
+    set_generator_expression_item(expression, item, expression_has_await,
+                                  /*item_value=*/NULL,
+                                  /*item_value_has_await=*/false);
   }
 
   argument->name = name;
@@ -792,6 +832,7 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 
 static union ast_expression *parse_await(struct parser_state *s)
 {
+  s->parsed_await_expression = true;
   return parse_unexpr(s, PREC_AWAIT, AST_UNEXPR_AWAIT);
 }
 
@@ -809,13 +850,17 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   add_anchor(s, ']');
   add_anchor(s, ',');
 
+  bool await_saved = await_tracking_begin(s);
   union ast_expression *first = parse_star_expression(s, PREC_NAMED);
+  bool first_has_await = await_tracking_end(s, await_saved);
 
   union ast_expression *expression;
   if (peek(s) == T_for || peek(s) == T_async) {
     /* TODO: disallow star-expression */
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
-    expression->generator_expression.expression = first;
+    set_generator_expression_item(expression, first, first_has_await,
+                                  /*item_value=*/NULL,
+                                  /*item_value_has_await=*/false);
   } else {
     expression = parse_expression_list_helper(
         s, AST_LIST_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false,
@@ -843,12 +888,15 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *nullable key;
   union ast_expression          *value;
   union ast_expression          *first;
+  bool                           first_has_await = false;
   if (peek(s) == T_ASTERISK_ASTERISK) {
     value = parse_unexpr(s, PREC_OR, AST_UNEXPR_STAR_STAR);
     key = NULL;
     goto parse_dict;
   } else {
+    bool await_saved = await_tracking_begin(s);
     first = parse_star_expression(s, PREC_NAMED);
+    first_has_await = await_tracking_end(s, await_saved);
   }
   union ast_expression *expression;
   /* set display */
@@ -862,17 +910,21 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   } else if (peek(s) == T_for || peek(s) == T_async) {
     /* set comprehension */
     expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
-    expression->generator_expression.expression = first;
+    set_generator_expression_item(expression, first, first_has_await,
+                                  /*item_value=*/NULL,
+                                  /*item_value_has_await=*/false);
   } else {
     key = first;
     expect(s, ':'); /* TODO: say that we expected `,`, `:` or `}` on error? */
+    bool await_saved = await_tracking_begin(s);
     value = parse_expression(s, PREC_NAMED);
+    bool value_has_await = await_tracking_end(s, await_saved);
 
     /* dict comprehension */
     if (peek(s) == T_for || peek(s) == T_async) {
       expression = parse_generator_expression(s, AST_DICT_COMPREHENSION);
-      expression->generator_expression.expression = key;
-      expression->generator_expression.item_value = value;
+      set_generator_expression_item(expression, key, first_has_await, value,
+                                    value_has_await);
     } else {
     parse_dict: {
       /* dict display */
@@ -961,11 +1013,15 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   if (peek(s) == T_yield) {
     expression = parse_yield_expression(s);
   } else {
+    bool await_saved = await_tracking_begin(s);
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
+    bool                  first_has_await = await_tracking_end(s, await_saved);
     if (peek(s) == T_for || peek(s) == T_async) {
       /* TODO: disallow star-expression */
       expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
-      expression->generator_expression.expression = first;
+      set_generator_expression_item(expression, first, first_has_await,
+                                    /*item_value=*/NULL,
+                                    /*item_value_has_await=*/false);
     } else if (peek(s) == ',') {
       expression = parse_expression_list_helper(
           s, AST_EXPRESSION_LIST, first, PREC_NAMED, /*allow_slices=*/false,

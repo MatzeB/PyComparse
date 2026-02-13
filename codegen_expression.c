@@ -429,9 +429,8 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
   analyze_lambda_bindings(s, lambda);
 
   struct make_function_state state;
-  emit_make_function_begin(s, &state, lambda->num_parameters,
+  emit_make_function_begin(s, &state, &lambda->parameter_shape,
                            lambda->parameters,
-                           lambda->positional_only_argcount,
                            /*async_function=*/false,
                            /*return_type=*/NULL,
                            "<lambda>");

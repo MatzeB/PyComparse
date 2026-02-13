@@ -135,8 +135,7 @@ struct ast_identifier {
 struct ast_lambda {
   struct ast_expression_base            base;
   union ast_expression                 *expression;
-  unsigned                              positional_only_argcount;
-  unsigned                              num_parameters;
+  struct parameter_shape                parameter_shape;
   bool                                  scope_bindings_ready;
   unsigned                              num_scope_globals;
   struct symbol * nonnull * nullable    scope_globals;

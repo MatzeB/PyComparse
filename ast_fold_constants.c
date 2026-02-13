@@ -140,7 +140,7 @@ static size_t ast_expression_size(union ast_expression *expression)
     return sizeof(struct ast_identifier);
   case AST_LAMBDA:
     return sizeof(struct ast_lambda)
-           + (size_t)expression->lambda.num_parameters
+           + (size_t)expression->lambda.parameter_shape.num_parameters
                  * sizeof(expression->lambda.parameters[0]);
   case AST_SLICE:
     return sizeof(struct ast_slice);
@@ -467,7 +467,8 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
     }
     break;
   case AST_LAMBDA:
-    for (unsigned i = 0; i < expression->lambda.num_parameters; ++i) {
+    for (unsigned i = 0;
+         i < expression->lambda.parameter_shape.num_parameters; ++i) {
       result->lambda.parameters[i].type
           = fold_expression_nullable(s, expression->lambda.parameters[i].type);
       result->lambda.parameters[i].initializer = fold_expression_nullable(
@@ -613,7 +614,7 @@ static void fold_statement(struct constant_fold_state *s,
     break;
   case AST_STATEMENT_DEF:
     fold_parameters_inplace(s, statement->def.parameters,
-                            statement->def.num_parameters);
+                            statement->def.parameter_shape.num_parameters);
     statement->def.return_type
         = fold_expression_nullable(s, statement->def.return_type);
     fold_expression_array_inplace(s, statement->def.decorators,

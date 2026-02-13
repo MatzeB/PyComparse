@@ -19,6 +19,7 @@ struct cg_state;
 struct dotted_name;
 struct from_import_item;
 struct parameter;
+struct parameter_shape;
 struct symbol;
 union ast_expression;
 union ast_statement;
@@ -82,9 +83,8 @@ void emit_generator_expression_code(
 
 void emit_make_function_begin(struct cg_state            *s,
                               struct make_function_state *state,
-                              unsigned                    num_parameters,
+                              const struct parameter_shape *parameter_shape,
                               struct parameter           *parameters,
-                              unsigned positional_only_argcount,
                               bool     async_function,
                               union ast_expression *nullable return_type,
                               const char                    *name);

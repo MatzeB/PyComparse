@@ -636,13 +636,20 @@ static void unparse_conditional_expression(struct unparse_state   *s,
 static void unparse_lambda_expression(struct unparse_state *s,
                                       struct ast_lambda    *lambda)
 {
+  const struct parameter_shape *shape = &lambda->parameter_shape;
+
   append_cstring(s, "lambda");
-  if (lambda->num_parameters > 0) {
+  if (shape->num_parameters > 0) {
+    struct parameter *parameters = lambda->parameters;
     append_char(s, ' ');
-    for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+    for (unsigned i = 0; i < shape->num_parameters; ++i) {
       if (i > 0) append_cstring(s, ", ");
-      unparse_parameter(s, &lambda->parameters[i]);
-      if (i + 1 == lambda->positional_only_argcount) {
+      if (i == shape->keyword_only_begin
+          && (i == 0 || parameters[i - 1].variant != PARAMETER_STAR)) {
+        append_cstring(s, "*, ");
+      }
+      unparse_parameter(s, &parameters[i]);
+      if (i + 1 == shape->positional_only_argcount) {
         append_cstring(s, ", /");
       }
     }

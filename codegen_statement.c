@@ -402,22 +402,21 @@ static void emit_import(struct cg_state *s, struct dotted_name *module,
 
 static void emit_parameter_defaults(struct cg_state            *s,
                                     struct make_function_state *state,
-                                    unsigned                    num_parameters,
+                                    const struct parameter_shape *parameter_shape,
                                     struct parameter           *parameters)
 {
   /* create tuple with default values */
+  unsigned num_parameters = parameter_shape->num_parameters;
   bool     all_positional_const = true;
   unsigned num_positional_defaults = 0;
   unsigned num_keyword_defaults = 0;
-  unsigned keyword_parameters_begin = num_parameters;
+  unsigned keyword_parameters_begin = parameter_shape->keyword_only_begin;
+  if (keyword_parameters_begin > num_parameters) {
+    keyword_parameters_begin = num_parameters;
+  }
   for (unsigned i = 0; i < num_parameters; i++) {
     struct parameter     *parameter = &parameters[i];
     union ast_expression *initializer = parameter->initializer;
-    if (parameter->variant == PARAMETER_STAR) {
-      keyword_parameters_begin = i + 1;
-      assert(initializer == NULL);
-      continue;
-    }
     if (initializer == NULL) continue;
 
     if (i < keyword_parameters_begin) {
@@ -482,10 +481,11 @@ static void emit_parameter_defaults(struct cg_state            *s,
 
 static void emit_function_annotations(
     struct cg_state *s, struct make_function_state *state,
-    unsigned num_parameters, struct parameter *parameters,
+    const struct parameter_shape *parameter_shape, struct parameter *parameters,
     union ast_expression *nullable return_type)
 {
   /* TODO: parameters */
+  unsigned num_parameters = parameter_shape->num_parameters;
   unsigned num_annotation_items = 0;
   if (return_type != NULL) num_annotation_items++;
   for (unsigned i = 0; i < num_parameters; ++i) {
@@ -533,20 +533,20 @@ static void emit_function_annotations(
 
 void emit_make_function_begin(struct cg_state            *s,
                               struct make_function_state *state,
-                              unsigned                    num_parameters,
+                              const struct parameter_shape *parameter_shape,
                               struct parameter           *parameters,
-                              unsigned positional_only_argcount,
                               bool     async_function,
                               union ast_expression *nullable return_type,
                               const char                    *name)
 {
+  unsigned num_parameters = parameter_shape->num_parameters;
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) {
     unimplemented("unreachable def");
   }
 
-  emit_parameter_defaults(s, state, num_parameters, parameters);
-  emit_function_annotations(s, state, num_parameters, parameters, return_type);
+  emit_parameter_defaults(s, state, parameter_shape, parameters);
+  emit_function_annotations(s, state, parameter_shape, parameters, return_type);
 
   const char *qualname = cg_build_qualname(s, name);
   state->qualname = qualname;
@@ -565,7 +565,10 @@ void emit_make_function_begin(struct cg_state            *s,
     s->code.qualname_prefix = prefix;
   }
 
-  unsigned       keyword_only_idx = num_parameters;
+  unsigned       keyword_only_idx = parameter_shape->keyword_only_begin;
+  if (keyword_only_idx > num_parameters) {
+    keyword_only_idx = num_parameters;
+  }
   struct symbol *variable_arguments_name = NULL;
   struct symbol *variable_keyword_arguments_name = NULL;
   for (unsigned i = 0; i < num_parameters; i++) {
@@ -574,7 +577,6 @@ void emit_make_function_begin(struct cg_state            *s,
     struct symbol *name = parameter->name;
     if (parameter->variant == PARAMETER_STAR) {
       assert(variable_arguments_name == NULL);
-      keyword_only_idx = i + 1;
       variable_arguments_name = name;
       continue;
     }
@@ -600,7 +602,8 @@ void emit_make_function_begin(struct cg_state            *s,
     cg_declare(s, variable_keyword_arguments_name, SYMBOL_LOCAL);
     s->code.flags |= CO_VARKEYWORDS;
   }
-  s->code.positional_only_argcount = positional_only_argcount;
+  s->code.positional_only_argcount
+      = parameter_shape->positional_only_argcount;
 }
 
 void emit_make_function_end(struct cg_state            *s,
@@ -1889,7 +1892,7 @@ static void analyze_expression(struct binding_scope *scope,
     /* Lambda body has its own scope; analyse parameter defaults/annotations
      * in the *outer* scope and register the lambda for later analysis. */
     struct ast_lambda *lambda = &expression->lambda;
-    for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+    for (unsigned i = 0; i < lambda->parameter_shape.num_parameters; ++i) {
       struct parameter *parameter = &lambda->parameters[i];
       if (parameter->type != NULL) {
         analyze_expression(scope, parameter->type);
@@ -2001,7 +2004,7 @@ static void analyze_statement_collect(struct binding_scope *scope,
     for (unsigned i = 0; i < def->num_decorators; ++i) {
       analyze_expression(scope, def->decorators[i]);
     }
-    for (unsigned i = 0; i < def->num_parameters; ++i) {
+    for (unsigned i = 0; i < def->parameter_shape.num_parameters; ++i) {
       struct parameter *parameter = &def->parameters[i];
       if (parameter->type != NULL) {
         analyze_expression(scope, parameter->type);
@@ -2236,7 +2239,7 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
   struct binding_scope scope;
   binding_scope_init(&scope, s, parent, def, /*is_class=*/false);
 
-  for (unsigned i = 0; i < def->num_parameters; ++i) {
+  for (unsigned i = 0; i < def->parameter_shape.num_parameters; ++i) {
     scope_mark_local(&scope, def->parameters[i].name);
   }
 
@@ -2328,7 +2331,7 @@ analyze_lambda_bindings_inner(struct cg_state               *s,
   struct binding_scope scope;
   binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false);
 
-  for (unsigned i = 0; i < lambda->num_parameters; ++i) {
+  for (unsigned i = 0; i < lambda->parameter_shape.num_parameters; ++i) {
     scope_mark_local(&scope, lambda->parameters[i].name);
   }
 
@@ -2644,8 +2647,8 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   }
 
   struct make_function_state state;
-  emit_make_function_begin(s, &state, def->num_parameters, def->parameters,
-                           def->positional_only_argcount, def->async,
+  emit_make_function_begin(s, &state, &def->parameter_shape, def->parameters,
+                           def->async,
                            def->return_type, def->name->string);
   union object *doc = statement_list_leading_docstring(def->body);
   cg_set_function_docstring(s, doc);

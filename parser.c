@@ -331,18 +331,6 @@ ast_expression_array_copy_dyn(struct parser_state *s, struct idynarray *array)
   return ast_expression_array_copy(s, expressions, num_expressions);
 }
 
-static struct parameter *ast_parameter_array_copy_dyn(struct parser_state *s,
-                                                      struct idynarray *array)
-{
-  unsigned num_parameters = idynarray_length(array, struct parameter);
-  if (num_parameters == 0) return NULL;
-  size_t            size = num_parameters * sizeof(struct parameter);
-  struct parameter *result = (struct parameter *)arena_allocate(
-      &s->ast, size, alignof(struct parameter));
-  memcpy(result, idynarray_data(array), size);
-  return result;
-}
-
 static union ast_expression *ast_const_new(struct parser_state *s,
                                            union object        *object)
 {
@@ -626,10 +614,11 @@ static union ast_expression *parse_arguments(struct parser_state  *s,
 
 static void parse_parameters(struct parser_state *s,
                              struct idynarray    *parameters,
-                             unsigned            *positional_only_argcount_res,
+                             struct parameter_shape *parameter_shape,
                              enum token_kind      end)
 {
   unsigned positional_only_argcount = 0;
+  unsigned keyword_only_begin = (unsigned)-1;
   bool     had_default = false;
   bool     had_variable_args = false;
   bool     had_variable_keyword_args = false;
@@ -666,7 +655,9 @@ static void parse_parameters(struct parser_state *s,
       }
       eat(s, '/');
       break;
-    case '*':
+    case '*': {
+      unsigned num_parameters_before_star
+          = idynarray_length(parameters, struct parameter);
       if (had_variable_args) {
         diag_begin_error(s->d, scanner_location(&s->scanner));
         diag_token_kind(s->d, '*');
@@ -675,15 +666,18 @@ static void parse_parameters(struct parser_state *s,
       } else {
         variant = PARAMETER_STAR;
         had_variable_args = true;
+        keyword_only_begin = num_parameters_before_star + 1;
       }
       struct location star_location = scanner_location(&s->scanner);
       eat(s, '*');
       if (peek(s) != T_IDENTIFIER) {
+        keyword_only_begin = num_parameters_before_star;
         need_kwonly_after_bare_star = true;
         bare_star_location = star_location;
         break;
       }
       goto parameter;
+    }
     case T_ASTERISK_ASTERISK:
       if (need_kwonly_after_bare_star) {
         diag_begin_error(s->d, bare_star_location);
@@ -779,7 +773,13 @@ static void parse_parameters(struct parser_state *s,
   }
   remove_anchor(s, end);
 
-  *positional_only_argcount_res = positional_only_argcount;
+  unsigned num_parameters = idynarray_length(parameters, struct parameter);
+  if (keyword_only_begin == (unsigned)-1 || keyword_only_begin > num_parameters) {
+    keyword_only_begin = num_parameters;
+  }
+  parameter_shape->num_parameters = num_parameters;
+  parameter_shape->keyword_only_begin = keyword_only_begin;
+  parameter_shape->positional_only_argcount = positional_only_argcount;
 }
 
 static union ast_expression *parse_singleton(struct parser_state *s,
@@ -1028,17 +1028,16 @@ static union ast_expression *parse_lambda(struct parser_state *s)
   struct idynarray parameters;
   idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
 
-  unsigned positional_only_argcount;
-  parse_parameters(s, &parameters, &positional_only_argcount, /*end=*/':');
+  struct parameter_shape parameter_shape;
+  parse_parameters(s, &parameters, &parameter_shape, /*end=*/':');
   union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
 
-  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
+  unsigned num_parameters = parameter_shape.num_parameters;
   size_t   parameters_size = num_parameters * sizeof(struct parameter);
   union ast_expression *lambda = ast_allocate_expression_(
       s, sizeof(struct ast_lambda) + parameters_size, AST_LAMBDA);
   lambda->lambda.expression = expression;
-  lambda->lambda.positional_only_argcount = positional_only_argcount;
-  lambda->lambda.num_parameters = num_parameters;
+  lambda->lambda.parameter_shape = parameter_shape;
   memcpy(lambda->lambda.parameters, idynarray_data(&parameters),
          parameters_size);
   idynarray_free(&parameters);
@@ -2490,10 +2489,10 @@ static union ast_statement *parse_def(struct parser_state   *s,
   struct parameter inline_storage[16];
   struct idynarray parameters;
   idynarray_init(&parameters, inline_storage, sizeof(inline_storage));
-  unsigned positional_only_argcount;
+  struct parameter_shape parameter_shape;
 
   expect(s, '(');
-  parse_parameters(s, &parameters, &positional_only_argcount, /*end=*/')');
+  parse_parameters(s, &parameters, &parameter_shape, /*end=*/')');
 
   union ast_expression *return_type = NULL;
   if (accept(s, T_MINUS_GREATER_THAN)) {
@@ -2507,19 +2506,19 @@ static union ast_statement *parse_def(struct parser_state   *s,
   struct ast_statement_list *body = parse_suite(s);
   s->current_function_has_yield = saved_function_has_yield;
 
-  unsigned num_parameters = idynarray_length(&parameters, struct parameter);
-  struct parameter *parameter_arr
-      = ast_parameter_array_copy_dyn(s, &parameters);
-  idynarray_free(&parameters);
-
-  union ast_statement *statement
-      = ast_allocate_statement(s, struct ast_def, AST_STATEMENT_DEF, location);
+  unsigned num_parameters = parameter_shape.num_parameters;
+  size_t   parameters_size = num_parameters * sizeof(struct parameter);
+  union ast_statement *statement = ast_allocate_statement_(
+      s, sizeof(struct ast_def) + parameters_size, AST_STATEMENT_DEF, location);
   statement->def.name = name;
   statement->def.async = async;
   statement->def.has_yield = has_yield;
-  statement->def.positional_only_argcount = positional_only_argcount;
-  statement->def.num_parameters = num_parameters;
-  statement->def.parameters = parameter_arr;
+  statement->def.parameter_shape = parameter_shape;
+  if (num_parameters > 0) {
+    memcpy(statement->def.parameters, idynarray_data(&parameters),
+           parameters_size);
+  }
+  idynarray_free(&parameters);
   statement->def.return_type = return_type;
   statement->def.body = body;
   statement->def.num_decorators = num_decorators;

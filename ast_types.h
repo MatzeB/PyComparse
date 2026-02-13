@@ -21,4 +21,10 @@ struct ast_statement_base {
   struct location      location;
 };
 
+struct parameter_shape {
+  unsigned num_parameters;
+  unsigned keyword_only_begin;
+  unsigned positional_only_argcount;
+};
+
 ASSUME_NONNULL_END

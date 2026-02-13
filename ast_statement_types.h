@@ -82,9 +82,7 @@ struct ast_def {
   bool                                      async;
   bool                                      has_yield;
   bool                                      scope_bindings_ready;
-  unsigned                                  positional_only_argcount;
-  unsigned                                  num_parameters;
-  struct parameter *nullable                parameters;
+  struct parameter_shape                    parameter_shape;
   union ast_expression *nullable            return_type;
   struct ast_statement_list                *body;
   unsigned                                  num_decorators;
@@ -97,6 +95,7 @@ struct ast_def {
   struct symbol * nonnull * nullable        scope_cellvars;
   unsigned                                  num_scope_freevars;
   struct symbol * nonnull * nullable        scope_freevars;
+  struct parameter                          parameters[];
 };
 
 struct ast_del {

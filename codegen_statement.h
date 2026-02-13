@@ -94,6 +94,8 @@ void emit_make_function_end(struct cg_state            *s,
 
 void analyze_lambda_bindings(struct cg_state   *s,
                              struct ast_lambda *lambda);
+void analyze_generator_bindings(struct cg_state                 *s,
+                                struct ast_generator_expression *generator);
 
 void emit_statement_list(struct cg_state           *s,
                          struct ast_statement_list *statement_list);

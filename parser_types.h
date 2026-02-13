@@ -17,6 +17,7 @@ struct parser_state {
   struct arena              ast;
   struct cg_state           cg;
   struct diagnostics_state *d;
+  struct symbol *nullable   private_class_name;
   bool *nullable            current_function_has_yield;
   bool                      parsed_await_expression;
   uint32_t                  future_flags;

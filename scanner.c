@@ -1377,13 +1377,13 @@ static void scan_string_literal(struct scanner_state    *s,
         goto quote_finish_string;
       }
       if (s->c != quote_char) {
-        arena_grow_char(strings, quote);
+        arena_grow_char(strings, quote_char);
         continue;
       }
       next_char(s);
       if (s->c != quote_char) {
-        arena_grow_char(strings, quote);
-        arena_grow_char(strings, quote);
+        arena_grow_char(strings, quote_char);
+        arena_grow_char(strings, quote_char);
         continue;
       }
       next_char(s);

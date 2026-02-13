@@ -123,6 +123,15 @@ struct ast_generator_expression {
   struct ast_expression_base       base;
   unsigned                         num_parts;
   bool                             is_async;
+  bool                             scope_bindings_ready;
+  unsigned                         num_scope_globals;
+  struct symbol * nonnull * nullable scope_globals;
+  unsigned                         num_scope_locals;
+  struct symbol * nonnull * nullable scope_locals;
+  unsigned                         num_scope_cellvars;
+  struct symbol * nonnull * nullable scope_cellvars;
+  unsigned                         num_scope_freevars;
+  struct symbol * nonnull * nullable scope_freevars;
   union ast_expression            *expression;
   union ast_expression *nullable   item_value;
   struct generator_expression_part parts[];

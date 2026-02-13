@@ -29,6 +29,23 @@ emit_generator_helper(struct cg_state                 *s,
                       const char                      *name,
                       bool                             is_generator_expression);
 
+static void apply_generator_bindings(
+    struct cg_state *s, struct ast_generator_expression *generator_expression)
+{
+  for (unsigned i = 0; i < generator_expression->num_scope_globals; ++i) {
+    cg_declare(s, generator_expression->scope_globals[i], SYMBOL_GLOBAL);
+  }
+  for (unsigned i = 0; i < generator_expression->num_scope_freevars; ++i) {
+    cg_declare(s, generator_expression->scope_freevars[i], SYMBOL_NONLOCAL);
+  }
+  for (unsigned i = 0; i < generator_expression->num_scope_locals; ++i) {
+    cg_declare(s, generator_expression->scope_locals[i], SYMBOL_LOCAL);
+  }
+  for (unsigned i = 0; i < generator_expression->num_scope_cellvars; ++i) {
+    cg_promote_to_cell(s, generator_expression->scope_cellvars[i]);
+  }
+}
+
 static void
 emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
@@ -50,11 +67,14 @@ emit_generator_helper(struct cg_state                 *s,
     diag_end(s->d);
   }
 
+  analyze_generator_bindings(s, generator_expression);
+
   const char *qualname = cg_build_qualname(s, name);
 
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
   s->code.in_async_function = async_comprehension;
+  apply_generator_bindings(s, generator_expression);
 
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
@@ -77,9 +97,23 @@ emit_generator_helper(struct cg_state                 *s,
   emit_code_end(s);
 
   union object *code = cg_pop_code(s, name);
+  bool          has_closure = generator_expression->num_scope_freevars > 0;
+  if (has_closure) {
+    for (unsigned i = 0; i < generator_expression->num_scope_freevars; ++i) {
+      struct symbol *closure_symbol = generator_expression->scope_freevars[i];
+      cg_op_push1(s, OPCODE_LOAD_CLOSURE, cg_closure_index(s, closure_symbol));
+    }
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE,
+                   generator_expression->num_scope_freevars,
+                   /*pop=*/generator_expression->num_scope_freevars,
+                   /*push=*/1);
+  }
   cg_load_const(s, code);
   cg_load_const(s, object_intern_cstring(&s->objects, qualname));
-  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, 0, /*pop=*/2, /*push=*/1);
+  uint32_t flags = has_closure ? MAKE_FUNCTION_CLOSURE : 0;
+  unsigned operands = has_closure ? 3 : 2;
+  cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
+                 /*push=*/1);
 
   struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
@@ -185,7 +219,7 @@ static enum opcode ast_binexpr_to_opcode(enum ast_expression_type type)
     [AST_BINEXPR_POWER_ASSIGN] = OPCODE_INPLACE_POWER,
     [AST_BINEXPR_SHIFT_LEFT] = OPCODE_BINARY_LSHIFT,
     [AST_BINEXPR_SHIFT_LEFT_ASSIGN] = OPCODE_INPLACE_LSHIFT,
-    [AST_BINEXPR_SHIFT_RIGHT] = OPCODE_INPLACE_RSHIFT,
+    [AST_BINEXPR_SHIFT_RIGHT] = OPCODE_BINARY_RSHIFT,
     [AST_BINEXPR_SHIFT_RIGHT_ASSIGN] = OPCODE_INPLACE_RSHIFT,
     [AST_BINEXPR_SUB] = OPCODE_BINARY_SUBTRACT,
     [AST_BINEXPR_SUB_ASSIGN] = OPCODE_INPLACE_SUBTRACT,

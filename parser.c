@@ -370,12 +370,52 @@ static struct symbol *invalid_symbol(struct parser_state *s)
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
+static struct symbol *
+maybe_mangle_private_name(struct parser_state *s, struct symbol *symbol)
+{
+  struct symbol *class_name = s->private_class_name;
+  if (class_name == NULL) {
+    return symbol;
+  }
+
+  const char *identifier = symbol->string;
+  if (identifier[0] != '_' || identifier[1] != '_') {
+    return symbol;
+  }
+
+  size_t identifier_length = strlen(identifier);
+  if (identifier_length < 3) {
+    return symbol;
+  }
+  if (identifier[identifier_length - 1] == '_'
+      && identifier[identifier_length - 2] == '_') {
+    return symbol;
+  }
+
+  const char *class_identifier = class_name->string;
+  while (*class_identifier == '_') {
+    ++class_identifier;
+  }
+  if (*class_identifier == '\0') {
+    return symbol;
+  }
+
+  size_t class_identifier_length = strlen(class_identifier);
+  size_t mangled_length = 1 + class_identifier_length + identifier_length;
+  char  *mangled = arena_allocate(&s->ast, mangled_length + 1, 1);
+  mangled[0] = '_';
+  memcpy(mangled + 1, class_identifier, class_identifier_length);
+  memcpy(mangled + 1 + class_identifier_length, identifier,
+         identifier_length + 1);
+  return symbol_table_get_or_insert(s->scanner.symbol_table, mangled);
+}
+
 static struct symbol *parse_identifier(struct parser_state *s)
 {
   if (!skip_till(s, T_IDENTIFIER)) {
     return invalid_symbol(s);
   }
-  return eat_identifier(s);
+  return maybe_mangle_private_name(s, eat_identifier(s));
 }
 
 static union ast_expression *parse_expression(struct parser_state *s,
@@ -2516,7 +2556,10 @@ static union ast_statement *parse_class(struct parser_state   *s,
   }
 
   expect(s, ':');
+  struct symbol *saved_private_class_name = s->private_class_name;
+  s->private_class_name = name;
   struct ast_statement_list *body = parse_suite(s);
+  s->private_class_name = saved_private_class_name;
 
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_class, AST_STATEMENT_CLASS, location);

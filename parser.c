@@ -1099,7 +1099,7 @@ static union ast_expression *parse_float(struct parser_state *s)
 
 static union ast_expression *parse_prefix_identifier(struct parser_state *s)
 {
-  struct symbol *symbol = eat_identifier(s);
+  struct symbol *symbol = parse_identifier(s);
 
   union ast_expression *node
       = ast_allocate_expression(s, struct ast_identifier, AST_IDENTIFIER);

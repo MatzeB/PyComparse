@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if (defined(__x86_64__) || defined(__i386__))                             \
+#if (defined(__x86_64__) || defined(__i386__))                                \
     && (defined(__clang__) || defined(__GNUC__))
 #define PYCOMPARSE_HAVE_X86_AVX2 1
 #include <immintrin.h>
@@ -227,7 +227,7 @@ static int decode_utf8(struct scanner_state *s, uint32_t *out,
 {
   unsigned int lead = (unsigned int)s->c;
   uint32_t     cp;
-  int          n;  /* expected continuation bytes */
+  int          n; /* expected continuation bytes */
 
   if (lead < 0xC2) {
     /* 0x80-0xBF are continuation bytes (not valid as lead).
@@ -284,8 +284,7 @@ static void scan_skip_inline_spaces(struct scanner_state *s)
       next_char(s);
       continue;
     }
-    while (p < s->buffer_end
-           && (*p == ' ' || *p == '\t' || *p == '\014')) {
+    while (p < s->buffer_end && (*p == ' ' || *p == '\t' || *p == '\014')) {
       ++p;
     }
     if (p < s->buffer_end) {
@@ -374,8 +373,7 @@ static void scan_line_comment(struct scanner_state *s)
  * `has_non_ascii` indicates whether non-ASCII bytes have already been seen
  * (e.g. from the identifier start character). */
 static void scan_identifier_continue(struct scanner_state *s,
-                                     struct arena         *arena,
-                                     bool                  has_non_ascii)
+                                     struct arena *arena, bool has_non_ascii)
 {
   for (;;) {
     switch (s->c) {
@@ -410,9 +408,8 @@ static void scan_identifier_continue(struct scanner_state *s,
   /* NFKC normalize non-ASCII identifiers (PEP 3131). */
   if (has_non_ascii) {
     unsigned raw_len = arena_grow_current_size(arena);
-    char    *raw     = arena_grow_current_base(arena);
-    int nfkc_len = nfkc_normalize((uint8_t *)raw, (int)raw_len,
-                                  (int)raw_len);
+    char    *raw = arena_grow_current_base(arena);
+    int nfkc_len = nfkc_normalize((uint8_t *)raw, (int)raw_len, (int)raw_len);
     if (nfkc_len >= 0) {
       /* NFKC result fits (it's always <= original length for identifiers).
        * Truncate the arena grow region to the normalized length. */
@@ -479,7 +476,8 @@ static void bigint_accum_reserve(struct bigint_accum *accum, uint32_t minimum)
   accum->capacity = new_capacity;
 }
 
-static void bigint_accum_append_digit(struct bigint_accum *accum, uint16_t digit)
+static void bigint_accum_append_digit(struct bigint_accum *accum,
+                                      uint16_t             digit)
 {
   if (accum->length >= accum->capacity) {
     bigint_accum_reserve(accum, accum->length + 1);
@@ -487,7 +485,8 @@ static void bigint_accum_append_digit(struct bigint_accum *accum, uint16_t digit
   accum->digits[accum->length++] = digit;
 }
 
-static void bigint_accum_init_from_u64(struct bigint_accum *accum, uint64_t value)
+static void bigint_accum_init_from_u64(struct bigint_accum *accum,
+                                       uint64_t             value)
 {
   while (value != 0) {
     bigint_accum_append_digit(accum, (uint16_t)(value & 0x7fff));
@@ -511,8 +510,9 @@ static void bigint_accum_mul_add(struct bigint_accum *accum, uint32_t mul,
   }
 }
 
-static union object *bigint_accum_intern(struct scanner_state           *s,
-                                         const struct bigint_accum *nonnull accum)
+static union object *
+bigint_accum_intern(struct scanner_state              *s,
+                    const struct bigint_accum *nonnull accum)
 {
   uint32_t length = accum->length;
   while (length > 0 && accum->digits[length - 1] == 0) {
@@ -850,8 +850,8 @@ static void scan_float_fraction(struct scanner_state *s)
   if (endptr == chars || *endptr != '\0') {
     abort(); // TODO: error handling
   }
-  if (errno != 0) {
-    abort(); // TODO: error handling
+  if (errno != 0 && errno != ERANGE) {
+    internal_error("scanner: strtod failed with unexpected errno");
   }
   arena_free_to(strings, chars);
 
@@ -923,8 +923,8 @@ static void scan_number(struct scanner_state *s)
     if (endptr == chars || *endptr != '\0') {
       abort(); // TODO: error handling
     }
-    if (errno != 0) {
-      abort(); // TODO: error handling
+    if (errno != 0 && errno != ERANGE) {
+      internal_error("scanner: strtod failed with unexpected errno");
     }
     arena_free_to(strings, chars);
 
@@ -945,8 +945,8 @@ static void scan_number(struct scanner_state *s)
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);
 
-  char               *endptr;
-  unsigned long long  value;
+  char              *endptr;
+  unsigned long long value;
   errno = 0;
   value = strtoull(chars, &endptr, 10);
   if (endptr == chars || *endptr != '\0') {
@@ -1131,7 +1131,7 @@ static void fstring_pop(struct scanner_state *s)
 }
 
 static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
-                                                                   char *end)
+                                                                  char *end)
 {
   while (cursor < end) {
     char c = *cursor;
@@ -1142,7 +1142,7 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
 }
 
 static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
-                                                                   char *end)
+                                                                  char *end)
 {
   while (cursor < end) {
     char c = *cursor;
@@ -1153,7 +1153,7 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
 }
 
 static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
-                                                                 char *end)
+                                                                char *end)
 {
   while (cursor < end) {
     char c = *cursor;
@@ -1167,7 +1167,7 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
 }
 
 static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
-                                                                 char *end)
+                                                                char *end)
 {
   while (cursor < end) {
     char c = *cursor;
@@ -1182,9 +1182,8 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
 
 #if PYCOMPARSE_HAVE_X86_AVX2 && PYCOMPARSE_HAVE_GNU_IFUNC
 
-__attribute__((target("avx2")))
-static char *scan_string_plain_span_find_stop_avx2_nofmt_double(
-    char *cursor, char *end)
+__attribute__((target("avx2"))) static char *
+scan_string_plain_span_find_stop_avx2_nofmt_double(char *cursor, char *end)
 {
   const __m256i quote = _mm256_set1_epi8('"');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1211,9 +1210,8 @@ static char *scan_string_plain_span_find_stop_avx2_nofmt_double(
   return cursor;
 }
 
-__attribute__((target("avx2")))
-static char *scan_string_plain_span_find_stop_avx2_nofmt_single(
-    char *cursor, char *end)
+__attribute__((target("avx2"))) static char *
+scan_string_plain_span_find_stop_avx2_nofmt_single(char *cursor, char *end)
 {
   const __m256i quote = _mm256_set1_epi8('\'');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1240,9 +1238,8 @@ static char *scan_string_plain_span_find_stop_avx2_nofmt_single(
   return cursor;
 }
 
-__attribute__((target("avx2")))
-static char *scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor,
-                                                               char *end)
+__attribute__((target("avx2"))) static char *
+scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor, char *end)
 {
   const __m256i quote = _mm256_set1_epi8('"');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1277,9 +1274,8 @@ static char *scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor,
   return cursor;
 }
 
-__attribute__((target("avx2")))
-static char *scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor,
-                                                               char *end)
+__attribute__((target("avx2"))) static char *
+scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor, char *end)
 {
   const __m256i quote = _mm256_set1_epi8('\'');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1353,43 +1349,50 @@ static void *resolve_scan_string_plain_span_find_stop_fmt_single(void)
 }
 
 static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
-                                                            char *end)
-    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_nofmt_double")));
+                                                           char *end)
+    __attribute__((
+        ifunc("resolve_scan_string_plain_span_find_stop_nofmt_double")));
 static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
-                                                            char *end)
-    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_nofmt_single")));
-static char *scan_string_plain_span_find_stop_fmt_double(char *cursor, char *end)
-    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_fmt_double")));
-static char *scan_string_plain_span_find_stop_fmt_single(char *cursor, char *end)
-    __attribute__((ifunc("resolve_scan_string_plain_span_find_stop_fmt_single")));
+                                                           char *end)
+    __attribute__((
+        ifunc("resolve_scan_string_plain_span_find_stop_nofmt_single")));
+static char *scan_string_plain_span_find_stop_fmt_double(char *cursor,
+                                                         char *end)
+    __attribute__((
+        ifunc("resolve_scan_string_plain_span_find_stop_fmt_double")));
+static char *scan_string_plain_span_find_stop_fmt_single(char *cursor,
+                                                         char *end)
+    __attribute__((
+        ifunc("resolve_scan_string_plain_span_find_stop_fmt_single")));
 #else
 static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
-                                                            char *end)
+                                                           char *end)
 {
   return scan_string_plain_span_find_stop_scalar_nofmt_double(cursor, end);
 }
 
 static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
-                                                            char *end)
+                                                           char *end)
 {
   return scan_string_plain_span_find_stop_scalar_nofmt_single(cursor, end);
 }
 
-static char *scan_string_plain_span_find_stop_fmt_double(char *cursor, char *end)
+static char *scan_string_plain_span_find_stop_fmt_double(char *cursor,
+                                                         char *end)
 {
   return scan_string_plain_span_find_stop_scalar_fmt_double(cursor, end);
 }
 
-static char *scan_string_plain_span_find_stop_fmt_single(char *cursor, char *end)
+static char *scan_string_plain_span_find_stop_fmt_single(char *cursor,
+                                                         char *end)
 {
   return scan_string_plain_span_find_stop_scalar_fmt_single(cursor, end);
 }
 #endif
 
 static bool scan_string_plain_span(struct scanner_state *s,
-                                   struct arena        *strings,
-                                   char                 quote_char,
-                                   bool                 format)
+                                   struct arena *strings, char quote_char,
+                                   bool format)
 {
   char *start = scanner_current_char_ptr(s);
   if (start == NULL) {
@@ -1399,12 +1402,14 @@ static bool scan_string_plain_span(struct scanner_state *s,
   char *end = s->buffer_end;
   char *cursor = NULL;
   if (quote_char == '"') {
-    cursor = format ? scan_string_plain_span_find_stop_fmt_double(start, end)
-                    : scan_string_plain_span_find_stop_nofmt_double(start, end);
+    cursor = format
+                 ? scan_string_plain_span_find_stop_fmt_double(start, end)
+                 : scan_string_plain_span_find_stop_nofmt_double(start, end);
   } else {
     assert(quote_char == '\'');
-    cursor = format ? scan_string_plain_span_find_stop_fmt_single(start, end)
-                    : scan_string_plain_span_find_stop_nofmt_single(start, end);
+    cursor = format
+                 ? scan_string_plain_span_find_stop_fmt_single(start, end)
+                 : scan_string_plain_span_find_stop_nofmt_single(start, end);
   }
 
   size_t span_size = (size_t)(cursor - start);

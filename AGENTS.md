@@ -59,12 +59,23 @@ This script runs the parser against test files in `test/` and compares output wi
 ./scripts/format.sh    # Format all C source files with clang-format
 ```
 
+After each series of code changes, run formatting and then run the full test
+suite before finishing:
+
+```bash
+./scripts/format.sh
+uv run ./test.sh
+```
+
 ### Commit Messages
 - If an AI assistant was used for substantial implementation work, include `Co-authored-by: ` tag with `Codex <codex@openai.com>` or `Claude <noreply@anthropic.com>` at end of commit message.
 - Commit messages may be verbose when that improves clarity.
 - User preference: use detailed commit messages with bullet points in the body.
 - User preference: do not mention routine/normal testing activity in commit messages.
 - User preference: keep commit message line length to 80 characters.
+- For Codex: do not use multiple `-m` options with `git commit`; write the
+  commit message via a single message source (for example, an editor or
+  `-F`).
 
 ## Development
 

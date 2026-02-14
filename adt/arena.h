@@ -29,6 +29,9 @@ struct arena {
 };
 
 static const unsigned arena_max_alignment = 64;
+#ifndef NDEBUG
+static const unsigned char arena_poison_free_pattern = 0xDD;
+#endif
 
 static inline void arena_init(struct arena *arena)
 {
@@ -120,6 +123,9 @@ static inline void arena_free(struct arena *arena)
   for (struct block_header *block = arena->block, *prev; block != NULL;
        block = prev) {
     prev = block->prev;
+#ifndef NDEBUG
+    memset(block, arena_poison_free_pattern, block->block_size);
+#endif
     free(block);
   }
   arena->block = NULL;
@@ -136,10 +142,24 @@ static inline void arena_free_to(struct arena *arena, const void *free_up_to)
         && free_up_to < (const void *)((char *)block + block->block_size))
       break;
     struct block_header *prev = block->prev;
+#ifndef NDEBUG
+    memset(block, arena_poison_free_pattern, block->block_size);
+#endif
     free(block);
     block = prev;
     assert(block != NULL && "address must be part of arena");
   }
+
+#ifndef NDEBUG
+  const unsigned free_offset
+      = (unsigned)((const char *)free_up_to - (const char *)block);
+  assert(free_offset <= arena->allocated);
+  if (free_offset < arena->allocated) {
+    memset((char *)block + free_offset, arena_poison_free_pattern,
+           arena->allocated - free_offset);
+  }
+#endif
+
   arena->block = block;
   arena->allocated = (const char *)free_up_to - (const char *)block;
   arena->limit = block->block_size;

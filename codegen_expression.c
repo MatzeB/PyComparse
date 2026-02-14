@@ -434,7 +434,7 @@ static void emit_dictionary_display(struct cg_state           *s,
         emit_expression(s, item->value);
       }
       union object *keys = object_intern_tuple_end(&s->objects, keys_prep,
-                                                   /*may_free_arena=*/true);
+                                                   /*may_free_arena=*/false);
       cg_load_const(s, keys);
       cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_build_map_items,
                      /*pop=*/num_build_map_items + 1, /*push=*/1);

@@ -1488,11 +1488,25 @@ static bool check_binexpr_assign_target(struct parser_state  *s,
 }
 
 static inline union ast_expression *
+parse_assignment_rhs(struct parser_state *s)
+{
+  if (peek(s) == T_yield) {
+    return parse_yield_expression(s);
+  }
+  return parse_star_expressions(s, PREC_EXPRESSION);
+}
+
+static inline union ast_expression *
 parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
                      union ast_expression *left)
 {
-  struct location       location = scanner_location(&s->scanner);
-  union ast_expression *expression = parse_binexpr(s, PREC_NAMED, type, left);
+  struct location location = scanner_location(&s->scanner);
+  next_token(s);
+  union ast_expression *right = parse_assignment_rhs(s);
+  union ast_expression *expression
+      = ast_allocate_expression(s, struct ast_binexpr, type);
+  expression->binexpr.left = left;
+  expression->binexpr.right = right;
   if (check_binexpr_assign_target(s, left, location)) {
     expression = invalid_expression(s);
   }
@@ -1980,12 +1994,7 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
                                    /*show_equal_hint=*/true);
   eat(s, '=');
 
-  union ast_expression *rhs;
-  if (peek(s) == T_yield) {
-    rhs = parse_yield_expression(s);
-  } else {
-    rhs = parse_star_expressions(s, PREC_EXPRESSION);
-  }
+  union ast_expression *rhs = parse_assignment_rhs(s);
 
   if (peek(s) == '=') {
     union ast_expression *inline_storage[8];
@@ -2000,11 +2009,7 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
                                     /*show_equal_hint=*/true);
       eat(s, '=');
       *idynarray_append(&targets, union ast_expression *) = rhs;
-      if (peek(s) == T_yield) {
-        rhs = parse_yield_expression(s);
-      } else {
-        rhs = parse_star_expressions(s, PREC_EXPRESSION);
-      }
+      rhs = parse_assignment_rhs(s);
     } while (peek(s) == '=');
 
     unsigned num_targets = idynarray_length(&targets, union ast_expression *);

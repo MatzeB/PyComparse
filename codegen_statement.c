@@ -1473,6 +1473,7 @@ struct binding_scope {
   struct ast_def *nullable       def;
   struct cg_state               *cg;
   bool                           is_class;
+  bool                           is_comprehension;
   bool                           class_needs_class_cell;
 
   struct symbol                   *locals_inline[16];
@@ -1602,13 +1603,15 @@ static struct symbol **nullable symbol_array_copy(struct cg_state  *s,
 static void binding_scope_init(struct binding_scope          *scope,
                                struct cg_state               *cg,
                                struct binding_scope *nullable parent,
-                               struct ast_def *nullable def, bool is_class)
+                               struct ast_def *nullable def, bool is_class,
+                               bool is_comprehension)
 {
   memset(scope, 0, sizeof(*scope));
   scope->cg = cg;
   scope->parent = parent;
   scope->def = def;
   scope->is_class = is_class;
+  scope->is_comprehension = is_comprehension;
   idynarray_init(&scope->locals, scope->locals_inline,
                  sizeof(scope->locals_inline));
   idynarray_init(&scope->bound_before_decl, scope->bound_before_decl_inline,
@@ -1702,6 +1705,36 @@ static void scope_mark_local(struct binding_scope *scope,
   symbol_array_append_unique(&scope->bound_before_decl, symbol);
 }
 
+static struct binding_scope *namedexpr_owner_scope(struct binding_scope *scope)
+{
+  if (!scope->is_comprehension) {
+    return scope;
+  }
+  struct binding_scope *owner = scope->parent;
+  while (owner != NULL && owner->is_comprehension) {
+    owner = owner->parent;
+  }
+  return owner != NULL ? owner : scope;
+}
+
+static void scope_mark_namedexpr_target(struct binding_scope *scope,
+                                        struct symbol        *symbol)
+{
+  struct binding_scope *owner = namedexpr_owner_scope(scope);
+  if (owner == scope) {
+    scope_mark_local(scope, symbol);
+    return;
+  }
+
+  if (symbol_array_contains(&owner->globals, symbol)) {
+    symbol_array_append_unique(&scope->globals, symbol);
+    return;
+  }
+
+  scope_mark_local(owner, symbol);
+  symbol_array_append_unique(&scope->uses, symbol);
+}
+
 static void scope_note_use(struct binding_scope *scope, struct symbol *symbol)
 {
   symbol_array_append_unique(&scope->uses, symbol);
@@ -1784,7 +1817,8 @@ static void analyze_expression(struct binding_scope *scope,
     return;
   case AST_BINEXPR_ASSIGN:
     if (ast_expression_type(expression->binexpr.left) == AST_IDENTIFIER) {
-      scope_mark_local(scope, expression->binexpr.left->identifier.symbol);
+      scope_mark_namedexpr_target(scope,
+                                  expression->binexpr.left->identifier.symbol);
     } else {
       analyze_expression(scope, expression->binexpr.left);
     }
@@ -2169,7 +2203,8 @@ static void analyze_class_bindings(struct cg_state               *s,
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/true);
+  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/true,
+                     /*is_comprehension=*/false);
   analyze_statement_list_collect(&scope, class_stmt->body);
 
   struct ast_class **class_children = idynarray_data(&scope.class_children);
@@ -2260,7 +2295,8 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, def, /*is_class=*/false);
+  binding_scope_init(&scope, s, parent, def, /*is_class=*/false,
+                     /*is_comprehension=*/false);
 
   for (unsigned i = 0; i < def->parameter_shape.num_parameters; ++i) {
     scope_mark_local(&scope, def->parameters[i].name);
@@ -2359,7 +2395,8 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false);
+  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false,
+                     /*is_comprehension=*/false);
 
   for (unsigned i = 0; i < lambda->parameter_shape.num_parameters; ++i) {
     scope_mark_local(&scope, lambda->parameters[i].name);
@@ -2456,7 +2493,8 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
   }
 
   struct binding_scope scope;
-  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false);
+  binding_scope_init(&scope, s, parent, /*def=*/NULL, /*is_class=*/false,
+                     /*is_comprehension=*/true);
 
   for (unsigned i = 0; i < generator->num_parts; ++i) {
     struct generator_expression_part *part = &generator->parts[i];

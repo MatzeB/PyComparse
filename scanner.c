@@ -813,11 +813,39 @@ static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
 static void scan_float_fraction(struct scanner_state *s)
 {
   struct arena *strings = s->strings;
+  bool          had_error = false;
+  bool          had_digit = false;
+  bool          last_was_underscore = false;
 
   /* decimal beginning already on growing arena */
-  while ('0' <= s->c && s->c <= '9') {
-    arena_grow_char(strings, s->c);
-    next_char(s);
+  for (;;) {
+    if ('0' <= s->c && s->c <= '9') {
+      arena_grow_char(strings, s->c);
+      had_digit = true;
+      last_was_underscore = false;
+      next_char(s);
+      continue;
+    }
+    if (s->c == '_') {
+      if ((!had_digit || last_was_underscore) && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "decimal literal cannot have consecutive ");
+        diag_quoted_char(s->d, '_');
+        diag_end(s->d);
+        had_error = true;
+      }
+      last_was_underscore = true;
+      next_char(s);
+      continue;
+    }
+    break;
+  }
+  if (last_was_underscore && !had_error) {
+    diag_begin_error(s->d, scanner_location(s));
+    diag_frag(s->d, "decimal literal cannot end with ");
+    diag_quoted_char(s->d, '_');
+    diag_end(s->d);
+    had_error = true;
   }
 
   if (s->c == 'e' || s->c == 'E') {
@@ -827,14 +855,37 @@ static void scan_float_fraction(struct scanner_state *s)
       arena_grow_char(strings, s->c);
       next_char(s);
     }
-    if (s->c < '0' || s->c > '9') {
+    had_digit = false;
+    last_was_underscore = false;
+    while (('0' <= s->c && s->c <= '9') || s->c == '_') {
+      if ('0' <= s->c && s->c <= '9') {
+        arena_grow_char(strings, s->c);
+        had_digit = true;
+        last_was_underscore = false;
+        next_char(s);
+        continue;
+      }
+      if ((!had_digit || last_was_underscore) && !had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "decimal literal cannot have consecutive ");
+        diag_quoted_char(s->d, '_');
+        diag_end(s->d);
+        had_error = true;
+      }
+      last_was_underscore = true;
+      next_char(s);
+    }
+    if (last_was_underscore && !had_error) {
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "decimal literal cannot end with ");
+      diag_quoted_char(s->d, '_');
+      diag_end(s->d);
+      had_error = true;
+    }
+    if (!had_digit) {
       // TODO: show error
       abort();
     }
-    do {
-      arena_grow_char(strings, s->c);
-      next_char(s);
-    } while ('0' <= s->c && s->c <= '9');
   }
   bool is_imag = false;
   if (s->c == 'j' || s->c == 'J') {
@@ -898,9 +949,11 @@ static void scan_number(struct scanner_state *s)
       return;
     }
     case 'b':
+    case 'B':
       scan_binary_integer(s);
       return;
     case 'o':
+    case 'O':
       scan_octal_integer(s);
       return;
     default:

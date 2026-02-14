@@ -28,21 +28,31 @@ emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
                       const char *name, bool is_generator_expression);
 
+static const struct ast_scope_bindings empty_scope_bindings = { 0 };
+
+static const struct ast_scope_bindings *
+scope_bindings_or_empty(const struct ast_scope_bindings *nullable scope)
+{
+  return scope != NULL ? scope : &empty_scope_bindings;
+}
+
 static void
 apply_generator_bindings(struct cg_state                 *s,
                          struct ast_generator_expression *generator_expression)
 {
-  for (unsigned i = 0; i < generator_expression->num_scope_globals; ++i) {
-    cg_declare(s, generator_expression->scope_globals[i], SYMBOL_GLOBAL);
+  const struct ast_scope_bindings *scope
+      = scope_bindings_or_empty(generator_expression->scope);
+  for (unsigned i = 0; i < scope->num_globals; ++i) {
+    cg_declare(s, scope->globals[i], SYMBOL_GLOBAL);
   }
-  for (unsigned i = 0; i < generator_expression->num_scope_freevars; ++i) {
-    cg_declare(s, generator_expression->scope_freevars[i], SYMBOL_NONLOCAL);
+  for (unsigned i = 0; i < scope->num_freevars; ++i) {
+    cg_declare(s, scope->freevars[i], SYMBOL_NONLOCAL);
   }
-  for (unsigned i = 0; i < generator_expression->num_scope_locals; ++i) {
-    cg_declare(s, generator_expression->scope_locals[i], SYMBOL_LOCAL);
+  for (unsigned i = 0; i < scope->num_locals; ++i) {
+    cg_declare(s, scope->locals[i], SYMBOL_LOCAL);
   }
-  for (unsigned i = 0; i < generator_expression->num_scope_cellvars; ++i) {
-    cg_promote_to_cell(s, generator_expression->scope_cellvars[i]);
+  for (unsigned i = 0; i < scope->num_cellvars; ++i) {
+    cg_promote_to_cell(s, scope->cellvars[i]);
   }
 }
 
@@ -95,16 +105,17 @@ emit_generator_helper(struct cg_state                 *s,
   }
   emit_code_end(s);
 
-  union object *code = cg_pop_code(s, name);
-  bool          has_closure = generator_expression->num_scope_freevars > 0;
+  union object                    *code = cg_pop_code(s, name);
+  const struct ast_scope_bindings *scope
+      = scope_bindings_or_empty(generator_expression->scope);
+  bool has_closure = scope->num_freevars > 0;
   if (has_closure) {
-    for (unsigned i = 0; i < generator_expression->num_scope_freevars; ++i) {
-      struct symbol *closure_symbol = generator_expression->scope_freevars[i];
+    for (unsigned i = 0; i < scope->num_freevars; ++i) {
+      struct symbol *closure_symbol = scope->freevars[i];
       cg_op_push1(s, OPCODE_LOAD_CLOSURE, cg_closure_index(s, closure_symbol));
     }
-    cg_op_pop_push(s, OPCODE_BUILD_TUPLE,
-                   generator_expression->num_scope_freevars,
-                   /*pop=*/generator_expression->num_scope_freevars,
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, scope->num_freevars,
+                   /*pop=*/scope->num_freevars,
                    /*push=*/1);
   }
   cg_load_const(s, code);
@@ -470,26 +481,28 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
                            /*global_binding=*/false);
 
   /* Apply scope bindings (mirrors apply_function_bindings for defs). */
-  for (unsigned i = 0; i < lambda->num_scope_globals; ++i) {
-    cg_declare(s, lambda->scope_globals[i], SYMBOL_GLOBAL);
+  const struct ast_scope_bindings *scope
+      = scope_bindings_or_empty(lambda->scope);
+  for (unsigned i = 0; i < scope->num_globals; ++i) {
+    cg_declare(s, scope->globals[i], SYMBOL_GLOBAL);
   }
-  for (unsigned i = 0; i < lambda->num_scope_freevars; ++i) {
-    cg_declare(s, lambda->scope_freevars[i], SYMBOL_NONLOCAL);
+  for (unsigned i = 0; i < scope->num_freevars; ++i) {
+    cg_declare(s, scope->freevars[i], SYMBOL_NONLOCAL);
   }
-  for (unsigned i = 0; i < lambda->num_scope_locals; ++i) {
-    cg_declare(s, lambda->scope_locals[i], SYMBOL_LOCAL);
+  for (unsigned i = 0; i < scope->num_locals; ++i) {
+    cg_declare(s, scope->locals[i], SYMBOL_LOCAL);
   }
-  for (unsigned i = 0; i < lambda->num_scope_cellvars; ++i) {
-    cg_promote_to_cell(s, lambda->scope_cellvars[i]);
+  for (unsigned i = 0; i < scope->num_cellvars; ++i) {
+    cg_promote_to_cell(s, scope->cellvars[i]);
   }
 
   emit_expression(s, lambda->expression);
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
 
   /* Set up closure (mirrors emit_function_closure for defs). */
-  if (lambda->num_scope_freevars > 0) {
-    state.num_closure_symbols = lambda->num_scope_freevars;
-    state.closure_symbols = lambda->scope_freevars;
+  if (scope->num_freevars > 0) {
+    state.num_closure_symbols = scope->num_freevars;
+    state.closure_symbols = scope->freevars;
   }
 
   struct symbol *symbol

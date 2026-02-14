@@ -21,6 +21,19 @@ struct ast_statement_base {
   struct location      location;
 };
 
+struct symbol;
+
+struct ast_scope_bindings {
+  unsigned                           num_globals;
+  struct symbol * nonnull * nullable globals;
+  unsigned                           num_locals;
+  struct symbol * nonnull * nullable locals;
+  unsigned                           num_cellvars;
+  struct symbol * nonnull * nullable cellvars;
+  unsigned                           num_freevars;
+  struct symbol * nonnull * nullable freevars;
+};
+
 struct parameter_shape {
   unsigned num_parameters;
   unsigned keyword_only_begin;

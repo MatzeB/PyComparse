@@ -62,14 +62,8 @@ struct ast_class {
   struct ast_statement_list                *body;
   unsigned                                  num_decorators;
   union ast_expression * nonnull * nullable decorators;
-  bool                                      scope_bindings_ready;
   bool                                      needs_class_cell;
-  unsigned                                  num_scope_globals;
-  struct symbol * nonnull * nullable        scope_globals;
-  unsigned                                  num_scope_locals;
-  struct symbol * nonnull * nullable        scope_locals;
-  unsigned                                  num_scope_freevars;
-  struct symbol * nonnull * nullable        scope_freevars;
+  struct ast_scope_bindings *nullable       scope;
 };
 
 struct ast_continue {
@@ -81,20 +75,12 @@ struct ast_def {
   struct symbol                            *name;
   bool                                      async;
   bool                                      has_yield;
-  bool                                      scope_bindings_ready;
   struct parameter_shape                    parameter_shape;
   union ast_expression *nullable            return_type;
   struct ast_statement_list                *body;
   unsigned                                  num_decorators;
   union ast_expression * nonnull * nullable decorators;
-  unsigned                                  num_scope_globals;
-  struct symbol * nonnull * nullable        scope_globals;
-  unsigned                                  num_scope_locals;
-  struct symbol * nonnull * nullable        scope_locals;
-  unsigned                                  num_scope_cellvars;
-  struct symbol * nonnull * nullable        scope_cellvars;
-  unsigned                                  num_scope_freevars;
-  struct symbol * nonnull * nullable        scope_freevars;
+  struct ast_scope_bindings *nullable       scope;
   struct parameter                          parameters[];
 };
 

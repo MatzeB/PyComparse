@@ -120,21 +120,13 @@ struct ast_expression_list {
 };
 
 struct ast_generator_expression {
-  struct ast_expression_base         base;
-  unsigned                           num_parts;
-  bool                               is_async;
-  bool                               scope_bindings_ready;
-  unsigned                           num_scope_globals;
-  struct symbol * nonnull * nullable scope_globals;
-  unsigned                           num_scope_locals;
-  struct symbol * nonnull * nullable scope_locals;
-  unsigned                           num_scope_cellvars;
-  struct symbol * nonnull * nullable scope_cellvars;
-  unsigned                           num_scope_freevars;
-  struct symbol * nonnull * nullable scope_freevars;
-  union ast_expression              *expression;
-  union ast_expression *nullable     item_value;
-  struct generator_expression_part   parts[];
+  struct ast_expression_base          base;
+  unsigned                            num_parts;
+  bool                                is_async;
+  struct ast_scope_bindings *nullable scope;
+  union ast_expression               *expression;
+  union ast_expression *nullable      item_value;
+  struct generator_expression_part    parts[];
 };
 
 struct ast_identifier {
@@ -143,19 +135,11 @@ struct ast_identifier {
 };
 
 struct ast_lambda {
-  struct ast_expression_base         base;
-  union ast_expression              *expression;
-  struct parameter_shape             parameter_shape;
-  bool                               scope_bindings_ready;
-  unsigned                           num_scope_globals;
-  struct symbol * nonnull * nullable scope_globals;
-  unsigned                           num_scope_locals;
-  struct symbol * nonnull * nullable scope_locals;
-  unsigned                           num_scope_cellvars;
-  struct symbol * nonnull * nullable scope_cellvars;
-  unsigned                           num_scope_freevars;
-  struct symbol * nonnull * nullable scope_freevars;
-  struct parameter                   parameters[];
+  struct ast_expression_base          base;
+  union ast_expression               *expression;
+  struct parameter_shape              parameter_shape;
+  struct ast_scope_bindings *nullable scope;
+  struct parameter                    parameters[];
 };
 
 struct ast_slice {

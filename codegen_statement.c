@@ -1607,6 +1607,38 @@ static struct symbol **nullable symbol_array_copy(struct cg_state  *s,
   return result;
 }
 
+static struct ast_scope_bindings *scope_bindings_alloc(struct cg_state *s)
+{
+  struct ast_scope_bindings *bindings
+      = arena_allocate(object_intern_arena(&s->objects), sizeof(*bindings),
+                       alignof(struct ast_scope_bindings));
+  memset(bindings, 0, sizeof(*bindings));
+  return bindings;
+}
+
+static struct ast_scope_bindings *
+scope_bindings_from_scope(struct cg_state *s, struct binding_scope *scope)
+{
+  struct ast_scope_bindings *bindings = scope_bindings_alloc(s);
+  bindings->num_globals = idynarray_length(&scope->globals, struct symbol *);
+  bindings->globals = symbol_array_copy(s, &scope->globals);
+  bindings->num_locals = idynarray_length(&scope->locals, struct symbol *);
+  bindings->locals = symbol_array_copy(s, &scope->locals);
+  bindings->num_cellvars = idynarray_length(&scope->cellvars, struct symbol *);
+  bindings->cellvars = symbol_array_copy(s, &scope->cellvars);
+  bindings->num_freevars = idynarray_length(&scope->freevars, struct symbol *);
+  bindings->freevars = symbol_array_copy(s, &scope->freevars);
+  return bindings;
+}
+
+static const struct ast_scope_bindings empty_scope_bindings = { 0 };
+
+static const struct ast_scope_bindings *
+scope_bindings_or_empty(const struct ast_scope_bindings *nullable scope)
+{
+  return scope != NULL ? scope : &empty_scope_bindings;
+}
+
 static void binding_scope_init(struct binding_scope          *scope,
                                struct cg_state               *cg,
                                struct binding_scope *nullable parent,
@@ -2220,7 +2252,7 @@ static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent)
 {
-  if (class_stmt->scope_bindings_ready) {
+  if (class_stmt->scope != NULL) {
     return;
   }
 
@@ -2294,17 +2326,8 @@ static void analyze_class_bindings(struct cg_state               *s,
     }
   }
 
-  class_stmt->num_scope_globals
-      = idynarray_length(&scope.globals, struct symbol *);
-  class_stmt->scope_globals = symbol_array_copy(s, &scope.globals);
-  class_stmt->num_scope_locals
-      = idynarray_length(&scope.locals, struct symbol *);
-  class_stmt->scope_locals = symbol_array_copy(s, &scope.locals);
+  class_stmt->scope = scope_bindings_from_scope(s, &scope);
   class_stmt->needs_class_cell = scope.class_needs_class_cell;
-  class_stmt->num_scope_freevars
-      = idynarray_length(&scope.freevars, struct symbol *);
-  class_stmt->scope_freevars = symbol_array_copy(s, &scope.freevars);
-  class_stmt->scope_bindings_ready = true;
 
   binding_scope_free(&scope);
 }
@@ -2312,7 +2335,7 @@ static void analyze_class_bindings(struct cg_state               *s,
 static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
                                       struct binding_scope *nullable parent)
 {
-  if (def->scope_bindings_ready) {
+  if (def->scope != NULL) {
     return;
   }
 
@@ -2396,15 +2419,7 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
     }
   }
 
-  def->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
-  def->scope_globals = symbol_array_copy(s, &scope.globals);
-  def->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
-  def->scope_locals = symbol_array_copy(s, &scope.locals);
-  def->num_scope_cellvars = idynarray_length(&scope.cellvars, struct symbol *);
-  def->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
-  def->num_scope_freevars = idynarray_length(&scope.freevars, struct symbol *);
-  def->scope_freevars = symbol_array_copy(s, &scope.freevars);
-  def->scope_bindings_ready = true;
+  def->scope = scope_bindings_from_scope(s, &scope);
 
   binding_scope_free(&scope);
 }
@@ -2413,7 +2428,7 @@ static void
 analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
                               struct binding_scope *nullable parent)
 {
-  if (lambda->scope_bindings_ready) {
+  if (lambda->scope != NULL) {
     return;
   }
 
@@ -2491,18 +2506,7 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
     }
   }
 
-  lambda->num_scope_globals
-      = idynarray_length(&scope.globals, struct symbol *);
-  lambda->scope_globals = symbol_array_copy(s, &scope.globals);
-  lambda->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
-  lambda->scope_locals = symbol_array_copy(s, &scope.locals);
-  lambda->num_scope_cellvars
-      = idynarray_length(&scope.cellvars, struct symbol *);
-  lambda->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
-  lambda->num_scope_freevars
-      = idynarray_length(&scope.freevars, struct symbol *);
-  lambda->scope_freevars = symbol_array_copy(s, &scope.freevars);
-  lambda->scope_bindings_ready = true;
+  lambda->scope = scope_bindings_from_scope(s, &scope);
 
   binding_scope_free(&scope);
 }
@@ -2512,7 +2516,7 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
                                  struct ast_generator_expression *generator,
                                  struct binding_scope *nullable   parent)
 {
-  if (generator->scope_bindings_ready) {
+  if (generator->scope != NULL) {
     return;
   }
 
@@ -2603,19 +2607,7 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
     }
   }
 
-  generator->num_scope_globals
-      = idynarray_length(&scope.globals, struct symbol *);
-  generator->scope_globals = symbol_array_copy(s, &scope.globals);
-  generator->num_scope_locals
-      = idynarray_length(&scope.locals, struct symbol *);
-  generator->scope_locals = symbol_array_copy(s, &scope.locals);
-  generator->num_scope_cellvars
-      = idynarray_length(&scope.cellvars, struct symbol *);
-  generator->scope_cellvars = symbol_array_copy(s, &scope.cellvars);
-  generator->num_scope_freevars
-      = idynarray_length(&scope.freevars, struct symbol *);
-  generator->scope_freevars = symbol_array_copy(s, &scope.freevars);
-  generator->scope_bindings_ready = true;
+  generator->scope = scope_bindings_from_scope(s, &scope);
 
   binding_scope_free(&scope);
 }
@@ -2634,22 +2626,24 @@ void analyze_generator_bindings(struct cg_state                 *s,
 static void apply_class_bindings(struct cg_state  *s,
                                  struct ast_class *class_stmt)
 {
+  const struct ast_scope_bindings *scope
+      = scope_bindings_or_empty(class_stmt->scope);
   if (class_stmt->needs_class_cell) {
     struct symbol *class_symbol
         = symbol_table_get_or_insert(s->symbol_table, "__class__");
     cg_declare(s, class_symbol, SYMBOL_CELL);
   }
-  for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
-    cg_register_freevar(s, class_stmt->scope_freevars[i]);
+  for (unsigned i = 0; i < scope->num_freevars; ++i) {
+    cg_register_freevar(s, scope->freevars[i]);
   }
-  for (unsigned i = 0; i < class_stmt->num_scope_globals; ++i) {
-    cg_declare(s, class_stmt->scope_globals[i], SYMBOL_GLOBAL);
+  for (unsigned i = 0; i < scope->num_globals; ++i) {
+    cg_declare(s, scope->globals[i], SYMBOL_GLOBAL);
   }
-  for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
-    struct symbol *name = class_stmt->scope_freevars[i];
+  for (unsigned i = 0; i < scope->num_freevars; ++i) {
+    struct symbol *name = scope->freevars[i];
     bool           is_global = false;
-    for (unsigned j = 0; j < class_stmt->num_scope_globals; ++j) {
-      if (class_stmt->scope_globals[j] == name) {
+    for (unsigned j = 0; j < scope->num_globals; ++j) {
+      if (scope->globals[j] == name) {
         is_global = true;
         break;
       }
@@ -2657,31 +2651,32 @@ static void apply_class_bindings(struct cg_state  *s,
     if (is_global) continue;
 
     bool is_local = false;
-    for (unsigned j = 0; j < class_stmt->num_scope_locals; ++j) {
-      if (class_stmt->scope_locals[j] == name) {
+    for (unsigned j = 0; j < scope->num_locals; ++j) {
+      if (scope->locals[j] == name) {
         is_local = true;
         break;
       }
     }
     if (is_local) continue;
 
-    cg_declare(s, class_stmt->scope_freevars[i], SYMBOL_NONLOCAL);
+    cg_declare(s, scope->freevars[i], SYMBOL_NONLOCAL);
   }
 }
 
 static void apply_function_bindings(struct cg_state *s, struct ast_def *def)
 {
-  for (unsigned i = 0; i < def->num_scope_globals; ++i) {
-    cg_declare(s, def->scope_globals[i], SYMBOL_GLOBAL);
+  const struct ast_scope_bindings *scope = scope_bindings_or_empty(def->scope);
+  for (unsigned i = 0; i < scope->num_globals; ++i) {
+    cg_declare(s, scope->globals[i], SYMBOL_GLOBAL);
   }
-  for (unsigned i = 0; i < def->num_scope_freevars; ++i) {
-    cg_declare(s, def->scope_freevars[i], SYMBOL_NONLOCAL);
+  for (unsigned i = 0; i < scope->num_freevars; ++i) {
+    cg_declare(s, scope->freevars[i], SYMBOL_NONLOCAL);
   }
-  for (unsigned i = 0; i < def->num_scope_locals; ++i) {
-    cg_declare(s, def->scope_locals[i], SYMBOL_LOCAL);
+  for (unsigned i = 0; i < scope->num_locals; ++i) {
+    cg_declare(s, scope->locals[i], SYMBOL_LOCAL);
   }
-  for (unsigned i = 0; i < def->num_scope_cellvars; ++i) {
-    cg_promote_to_cell(s, def->scope_cellvars[i]);
+  for (unsigned i = 0; i < scope->num_cellvars; ++i) {
+    cg_promote_to_cell(s, scope->cellvars[i]);
   }
 }
 
@@ -2690,12 +2685,13 @@ static void emit_function_closure(struct cg_state            *s,
                                   struct ast_def             *def)
 {
   (void)s;
-  unsigned num_freevars = def->num_scope_freevars;
+  const struct ast_scope_bindings *scope = scope_bindings_or_empty(def->scope);
+  unsigned                         num_freevars = scope->num_freevars;
   if (num_freevars == 0) {
     return;
   }
   state->num_closure_symbols = num_freevars;
-  state->closure_symbols = def->scope_freevars;
+  state->closure_symbols = scope->freevars;
 }
 
 static union object *nullable
@@ -2949,15 +2945,17 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   }
   union object *code = cg_pop_code(s, class_stmt->name->string);
 
-  uint32_t flags = 0;
-  unsigned operands = 2;
-  if (class_stmt->num_scope_freevars > 0) {
-    for (unsigned i = 0; i < class_stmt->num_scope_freevars; ++i) {
+  uint32_t                         flags = 0;
+  unsigned                         operands = 2;
+  const struct ast_scope_bindings *scope
+      = scope_bindings_or_empty(class_stmt->scope);
+  if (scope->num_freevars > 0) {
+    for (unsigned i = 0; i < scope->num_freevars; ++i) {
       cg_op_push1(s, OPCODE_LOAD_CLOSURE,
-                  cg_closure_index(s, class_stmt->scope_freevars[i]));
+                  cg_closure_index(s, scope->freevars[i]));
     }
-    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, class_stmt->num_scope_freevars,
-                   /*pop=*/class_stmt->num_scope_freevars, /*push=*/1);
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, scope->num_freevars,
+                   /*pop=*/scope->num_freevars, /*push=*/1);
     flags |= MAKE_FUNCTION_CLOSURE;
     ++operands;
   }

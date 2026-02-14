@@ -204,7 +204,7 @@ static void write_int(struct writer_state *s, const struct object_int *int_obj)
   }
 }
 
-static void write_big_int(struct writer_state            *s,
+static void write_big_int(struct writer_state         *s,
                           const struct object_big_int *big_int)
 {
   assert(big_int->pydigits != NULL);

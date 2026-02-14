@@ -181,14 +181,13 @@ union object *object_new_int(struct arena *arena, int64_t value)
   return object;
 }
 
-union object *object_new_big_int(struct arena      *arena,
-                                 uint32_t           num_pydigits,
+union object *object_new_big_int(struct arena *arena, uint32_t num_pydigits,
                                  const uint16_t *nonnull pydigits)
 {
   assert(num_pydigits > 0);
   union object *object
       = object_allocate_zero(arena, struct object_big_int, OBJECT_BIG_INT);
-  size_t size = (size_t)num_pydigits * sizeof(pydigits[0]);
+  size_t    size = (size_t)num_pydigits * sizeof(pydigits[0]);
   uint16_t *copy = (uint16_t *)arena_allocate(arena, size, alignof(uint16_t));
   memcpy(copy, pydigits, size);
   object->big_int.num_pydigits = num_pydigits;

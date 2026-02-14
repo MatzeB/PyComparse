@@ -29,8 +29,8 @@ static unsigned fnv_hash_mem(enum object_type type, uint32_t length,
 }
 
 static void object_intern_insert_string_bucket(struct object_intern *s,
-                                               union object *string,
-                                               unsigned      hash)
+                                               union object         *string,
+                                               unsigned              hash)
 {
   hash_set_increment_num_elements(&s->string_set);
   struct hash_set_chain_iteration_state c;
@@ -209,7 +209,8 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   // TODO: hashmap
   for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
     union object *object = object_list_at(s->objects, i);
-    if (object_type(object) == OBJECT_INT && object_int_value(object) == value) {
+    if (object_type(object) == OBJECT_INT
+        && object_int_value(object) == value) {
       return object;
     }
   }
@@ -219,8 +220,8 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   return result;
 }
 
-union object *object_intern_big_int(struct object_intern *s,
-                                    uint32_t              num_pydigits,
+union object *object_intern_big_int(struct object_intern   *s,
+                                    uint32_t                num_pydigits,
                                     const uint16_t *nonnull pydigits)
 {
   assert(num_pydigits > 0);

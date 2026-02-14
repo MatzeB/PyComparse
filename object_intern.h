@@ -17,8 +17,8 @@ void object_intern_free(struct object_intern *s);
 union object      *object_intern_cstring(struct object_intern *s,
                                          const char           *cstring);
 union object      *object_intern_int(struct object_intern *s, int64_t value);
-union object      *object_intern_big_int(struct object_intern *s,
-                                         uint32_t num_pydigits,
+union object      *object_intern_big_int(struct object_intern   *s,
+                                         uint32_t                num_pydigits,
                                          const uint16_t *nonnull pydigits);
 union object      *object_intern_float(struct object_intern *s, double value);
 union object      *object_intern_complex(struct object_intern *s, double real,

@@ -37,10 +37,10 @@ struct basic_block {
 };
 
 struct loop_state {
-  struct basic_block              *nullable continue_block;
-  struct basic_block              *nullable break_block;
-  struct pending_finally_state    *nullable pending_at_loop;
-  bool                                      pop_on_break;
+  struct basic_block *nullable           continue_block;
+  struct basic_block *nullable           break_block;
+  struct pending_finally_state *nullable pending_at_loop;
+  bool                                   pop_on_break;
 };
 
 struct code_state {
@@ -68,7 +68,7 @@ struct code_state {
   bool                                   in_async_function;
   bool                                   in_class_body;
   bool                                   setup_annotations;
-  const char                  *nullable  qualname_prefix;
+  const char *nullable                   qualname_prefix;
   struct pending_finally_state *nullable pending_finally;
   unsigned                               current_lineno;
   unsigned                               first_lineno;

@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-#define XID_SHIFT 7
+#define XID_SHIFT      7
 #define XID_BLOCK_MASK 0x7f
 
 extern const uint8_t xid_index1[8704];
@@ -16,7 +16,7 @@ static inline int is_xid_continue(uint32_t cp)
   if (cp >= 0x110000) return 0;
   uint32_t block = xid_index1[cp >> XID_SHIFT];
   uint32_t offset = cp & XID_BLOCK_MASK;
-  uint8_t packed = xid_index2[block * 32 + (offset >> 2)];
+  uint8_t  packed = xid_index2[block * 32 + (offset >> 2)];
   return (packed >> ((offset & 3) * 2)) & 2;
 }
 
@@ -25,6 +25,6 @@ static inline int is_xid_start(uint32_t cp)
   if (cp >= 0x110000) return 0;
   uint32_t block = xid_index1[cp >> XID_SHIFT];
   uint32_t offset = cp & XID_BLOCK_MASK;
-  uint8_t packed = xid_index2[block * 32 + (offset >> 2)];
+  uint8_t  packed = xid_index2[block * 32 + (offset >> 2)];
   return (packed >> ((offset & 3) * 2)) & 1;
 }

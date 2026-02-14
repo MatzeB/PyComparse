@@ -9,11 +9,11 @@
 #define NFKC_MAP_COUNT 3498
 extern const uint32_t nfkc_map_keys[3498];
 extern const uint16_t nfkc_map_offsets[3498];
-extern const uint8_t nfkc_map_data[12469];
+extern const uint8_t  nfkc_map_data[12469];
 
 #define CCC_COUNT 862
 extern const uint32_t ccc_keys[862];
-extern const uint8_t ccc_values[862];
+extern const uint8_t  ccc_values[862];
 
 #define COMP_COUNT 940
 extern const uint64_t comp_keys[940];
@@ -27,31 +27,35 @@ extern const uint32_t comp_values[940];
 #define HANGUL_LCOUNT 19
 #define HANGUL_VCOUNT 21
 #define HANGUL_TCOUNT 28
-#define HANGUL_NCOUNT (HANGUL_VCOUNT * HANGUL_TCOUNT)  /* 588 */
-#define HANGUL_SCOUNT (HANGUL_LCOUNT * HANGUL_NCOUNT)  /* 11172 */
+#define HANGUL_NCOUNT (HANGUL_VCOUNT * HANGUL_TCOUNT) /* 588 */
+#define HANGUL_SCOUNT (HANGUL_LCOUNT * HANGUL_NCOUNT) /* 11172 */
 
 /* Binary search for uint32_t key in sorted array. */
 static inline int32_t nfkc_bsearch32(const uint32_t *keys, int32_t count,
-                                      uint32_t key)
+                                     uint32_t key)
 {
   int32_t lo = 0, hi = count;
   while (lo < hi) {
     int32_t mid = lo + (hi - lo) / 2;
-    if (keys[mid] < key) lo = mid + 1;
-    else hi = mid;
+    if (keys[mid] < key)
+      lo = mid + 1;
+    else
+      hi = mid;
   }
   return (lo < count && keys[lo] == key) ? lo : -1;
 }
 
 /* Binary search for uint64_t key in sorted array. */
 static inline int32_t nfkc_bsearch64(const uint64_t *keys, int32_t count,
-                                      uint64_t key)
+                                     uint64_t key)
 {
   int32_t lo = 0, hi = count;
   while (lo < hi) {
     int32_t mid = lo + (hi - lo) / 2;
-    if (keys[mid] < key) lo = mid + 1;
-    else hi = mid;
+    if (keys[mid] < key)
+      lo = mid + 1;
+    else
+      hi = mid;
   }
   return (lo < count && keys[lo] == key) ? lo : -1;
 }
@@ -77,9 +81,9 @@ static inline uint32_t nfc_compose(uint32_t starter, uint32_t combining)
 {
   /* Hangul LV composition */
   if (starter >= HANGUL_LBASE && starter < HANGUL_LBASE + HANGUL_LCOUNT) {
-    if (combining >= HANGUL_VBASE && combining < HANGUL_VBASE + HANGUL_VCOUNT) {
-      return HANGUL_SBASE
-             + (starter - HANGUL_LBASE) * HANGUL_NCOUNT
+    if (combining >= HANGUL_VBASE
+        && combining < HANGUL_VBASE + HANGUL_VCOUNT) {
+      return HANGUL_SBASE + (starter - HANGUL_LBASE) * HANGUL_NCOUNT
              + (combining - HANGUL_VBASE) * HANGUL_TCOUNT;
     }
     return 0;
@@ -93,7 +97,7 @@ static inline uint32_t nfc_compose(uint32_t starter, uint32_t combining)
     return 0;
   }
   uint64_t key = ((uint64_t)starter << 32) | combining;
-  int32_t idx = nfkc_bsearch64(comp_keys, COMP_COUNT, key);
+  int32_t  idx = nfkc_bsearch64(comp_keys, COMP_COUNT, key);
   return idx >= 0 ? comp_values[idx] : 0;
 }
 
@@ -128,7 +132,10 @@ static inline int nfkc_decode_utf8(const uint8_t *s, const uint8_t *end,
 {
   if (s >= end) return 0;
   uint8_t lead = s[0];
-  if (lead < 0x80) { *out = lead; return 1; }
+  if (lead < 0x80) {
+    *out = lead;
+    return 1;
+  }
   if (lead < 0xC2) return 0;
   if (lead < 0xE0) {
     if (s + 2 > end) return 0;
@@ -139,8 +146,8 @@ static inline int nfkc_decode_utf8(const uint8_t *s, const uint8_t *end,
   if (lead < 0xF0) {
     if (s + 3 > end) return 0;
     if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80) return 0;
-    *out = ((uint32_t)(lead & 0x0F) << 12)
-         | ((uint32_t)(s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+    *out = ((uint32_t)(lead & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6)
+           | (s[2] & 0x3F);
     if (*out < 0x800) return 0;
     return 3;
   }
@@ -149,9 +156,8 @@ static inline int nfkc_decode_utf8(const uint8_t *s, const uint8_t *end,
     if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80
         || (s[3] & 0xC0) != 0x80)
       return 0;
-    *out = ((uint32_t)(lead & 0x07) << 18)
-         | ((uint32_t)(s[1] & 0x3F) << 12)
-         | ((uint32_t)(s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+    *out = ((uint32_t)(lead & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12)
+           | ((uint32_t)(s[2] & 0x3F) << 6) | (s[3] & 0x3F);
     if (*out < 0x10000 || *out > 0x10FFFF) return 0;
     return 4;
   }
@@ -168,26 +174,26 @@ static inline int nfkc_normalize(uint8_t *buf, int len, int buf_capacity)
   /* Temporary buffer for expanded codepoints. Identifiers are short;
    * 1024 codepoints handles identifiers up to ~1KB. */
   uint32_t expanded[1024];
-  int exp_len = 0;
+  int      exp_len = 0;
 
   /* Step 1: Per-codepoint NFKC expansion. */
   const uint8_t *s = buf;
   const uint8_t *end = buf + len;
   while (s < end) {
     uint32_t cp;
-    int n = nfkc_decode_utf8(s, end, &cp);
+    int      n = nfkc_decode_utf8(s, end, &cp);
     if (n == 0) return -1;
     s += n;
 
     const uint8_t *mapping = nfkc_map_lookup(cp);
     if (mapping) {
       /* Per-codepoint NFKC result (already in NFC form). */
-      uint8_t mlen = mapping[0];
+      uint8_t        mlen = mapping[0];
       const uint8_t *mp = mapping + 1;
       const uint8_t *mp_end = mp + mlen;
       while (mp < mp_end) {
         uint32_t mcp;
-        int mn = nfkc_decode_utf8(mp, mp_end, &mcp);
+        int      mn = nfkc_decode_utf8(mp, mp_end, &mcp);
         if (mn == 0) return -1;
         mp += mn;
         if (exp_len >= 1024) return -1;
@@ -216,17 +222,17 @@ static inline int nfkc_normalize(uint8_t *buf, int len, int buf_capacity)
 
   /* Step 3: NFC compose — in-place, standard algorithm. */
   if (exp_len > 0) {
-    int w = 1;  /* write index (first codepoint always kept) */
-    int starter_idx = 0;
+    int     w = 1; /* write index (first codepoint always kept) */
+    int     starter_idx = 0;
     uint8_t last_ccc = ccc_lookup(expanded[0]) != 0 ? 255 : 0;
     for (int r = 1; r < exp_len; r++) {
-      uint8_t ccc = ccc_lookup(expanded[r]);
+      uint8_t  ccc = ccc_lookup(expanded[r]);
       uint32_t composed = 0;
       if ((last_ccc < ccc || last_ccc == 0)
-          && (composed = nfc_compose(expanded[starter_idx],
-                                     expanded[r])) != 0) {
+          && (composed = nfc_compose(expanded[starter_idx], expanded[r]))
+                 != 0) {
         expanded[starter_idx] = composed;
-        continue;  /* consumed — don't write, don't update last_ccc */
+        continue; /* consumed — don't write, don't update last_ccc */
       }
       if (ccc == 0) {
         starter_idx = w;
@@ -243,7 +249,7 @@ static inline int nfkc_normalize(uint8_t *buf, int len, int buf_capacity)
   int out_len = 0;
   for (int i = 0; i < exp_len; i++) {
     uint8_t tmp[4];
-    int n = nfkc_encode_utf8(expanded[i], tmp);
+    int     n = nfkc_encode_utf8(expanded[i], tmp);
     if (out_len + n > buf_capacity) return -1;
     memcpy(buf + out_len, tmp, n);
     out_len += n;

@@ -23,9 +23,8 @@ static void fold_statement_list(struct constant_fold_state *s,
 static union ast_expression *fold_expression(struct constant_fold_state *s,
                                              union ast_expression *expression);
 
-static inline union ast_expression *nullable
-fold_expression_nullable(struct constant_fold_state *s,
-                         union ast_expression *nullable expression)
+static inline union ast_expression *nullable fold_expression_nullable(
+    struct constant_fold_state *s, union ast_expression *nullable expression)
 {
   if (expression == NULL) {
     return NULL;
@@ -33,7 +32,8 @@ fold_expression_nullable(struct constant_fold_state *s,
   return fold_expression(s, expression);
 }
 
-static inline bool object_as_fast_int(const union object *object, int64_t *value)
+static inline bool object_as_fast_int(const union object *object,
+                                      int64_t            *value)
 {
   if (object_type(object) != OBJECT_INT) {
     return false;
@@ -51,9 +51,7 @@ fast_int_constant_object(struct constant_fold_state *s, int64_t value)
   return object_intern_int(s->intern, value);
 }
 
-static void int64_floor_divmod(int64_t  left,
-                               int64_t  right,
-                               int64_t *quotient,
+static void int64_floor_divmod(int64_t left, int64_t right, int64_t *quotient,
                                int64_t *remainder)
 {
   int64_t q = left / right;
@@ -161,15 +159,15 @@ static size_t ast_expression_size(union ast_expression *expression)
 static union ast_expression *clone_expression(struct constant_fold_state *s,
                                               union ast_expression *expression)
 {
-  size_t size = ast_expression_size(expression);
+  size_t                size = ast_expression_size(expression);
   union ast_expression *result = (union ast_expression *)arena_allocate(
       s->ast_arena, size, alignof(union ast_expression));
   memcpy(result, expression, size);
   return result;
 }
 
-static union ast_expression *new_const_expression(struct constant_fold_state *s,
-                                                  union object *object)
+static union ast_expression *
+new_const_expression(struct constant_fold_state *s, union object *object)
 {
   union ast_expression *result = (union ast_expression *)arena_allocate(
       s->ast_arena, sizeof(struct ast_const), alignof(union ast_expression));
@@ -180,7 +178,7 @@ static union ast_expression *new_const_expression(struct constant_fold_state *s,
 }
 
 static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
-                                              union ast_expression      *expression)
+                                              union ast_expression *expression)
 {
   enum ast_expression_type type = ast_expression_type(expression);
   if (type != AST_UNEXPR_PLUS && type != AST_UNEXPR_NEGATIVE
@@ -219,8 +217,8 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
   return object;
 }
 
-static union object *nullable try_fold_binexpr(struct constant_fold_state *s,
-                                               union ast_expression      *expression)
+static union object *nullable try_fold_binexpr(
+    struct constant_fold_state *s, union ast_expression *expression)
 {
   enum ast_expression_type type = ast_expression_type(expression);
   switch (type) {
@@ -240,7 +238,8 @@ static union object *nullable try_fold_binexpr(struct constant_fold_state *s,
     return NULL;
   }
 
-  union object *left_object = ast_expression_as_constant(expression->binexpr.left);
+  union object *left_object
+      = ast_expression_as_constant(expression->binexpr.left);
   union object *right_object
       = ast_expression_as_constant(expression->binexpr.right);
   int64_t left_value;
@@ -422,19 +421,19 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
   case AST_SET_COMPREHENSION:
     result->generator_expression.expression
         = fold_expression(s, expression->generator_expression.expression);
-    result->generator_expression.item_value
-        = fold_expression_nullable(s, expression->generator_expression.item_value);
+    result->generator_expression.item_value = fold_expression_nullable(
+        s, expression->generator_expression.item_value);
     for (unsigned i = 0; i < expression->generator_expression.num_parts; ++i) {
       result->generator_expression.parts[i].targets = fold_expression_nullable(
           s, expression->generator_expression.parts[i].targets);
-      result->generator_expression.parts[i].expression
-          = fold_expression(s, expression->generator_expression.parts[i].expression);
+      result->generator_expression.parts[i].expression = fold_expression(
+          s, expression->generator_expression.parts[i].expression);
     }
     break;
   case AST_DICT_DISPLAY:
     for (unsigned i = 0; i < expression->dict_item_list.num_items; ++i) {
-      result->dict_item_list.items[i].key
-          = fold_expression_nullable(s, expression->dict_item_list.items[i].key);
+      result->dict_item_list.items[i].key = fold_expression_nullable(
+          s, expression->dict_item_list.items[i].key);
       result->dict_item_list.items[i].value
           = fold_expression(s, expression->dict_item_list.items[i].value);
     }
@@ -442,7 +441,8 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
   case AST_EXPRESSION_LIST:
   case AST_LIST_DISPLAY:
   case AST_SET_DISPLAY:
-    for (unsigned i = 0; i < expression->expression_list.num_expressions; ++i) {
+    for (unsigned i = 0; i < expression->expression_list.num_expressions;
+         ++i) {
       result->expression_list.expressions[i]
           = fold_expression(s, expression->expression_list.expressions[i]);
     }
@@ -461,14 +461,13 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
         result->fstring.elements[i].u.expression
             = fold_expression(s, expression->fstring.elements[i].u.expression);
       }
-      result->fstring.elements[i].format_spec
-          = fold_expression_nullable(s,
-                                     expression->fstring.elements[i].format_spec);
+      result->fstring.elements[i].format_spec = fold_expression_nullable(
+          s, expression->fstring.elements[i].format_spec);
     }
     break;
   case AST_LAMBDA:
-    for (unsigned i = 0;
-         i < expression->lambda.parameter_shape.num_parameters; ++i) {
+    for (unsigned i = 0; i < expression->lambda.parameter_shape.num_parameters;
+         ++i) {
       result->lambda.parameters[i].type
           = fold_expression_nullable(s, expression->lambda.parameters[i].type);
       result->lambda.parameters[i].initializer = fold_expression_nullable(
@@ -506,9 +505,10 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
   return result;
 }
 
-static void fold_expression_array_inplace(struct constant_fold_state *s,
-                                          union ast_expression **nullable expressions,
-                                          unsigned num_expressions)
+static void
+fold_expression_array_inplace(struct constant_fold_state     *s,
+                              union ast_expression **nullable expressions,
+                              unsigned                        num_expressions)
 {
   if (expressions == NULL || num_expressions == 0) {
     return;
@@ -519,8 +519,8 @@ static void fold_expression_array_inplace(struct constant_fold_state *s,
 }
 
 static void fold_parameters_inplace(struct constant_fold_state *s,
-                                    struct parameter *nullable parameters,
-                                    unsigned num_parameters)
+                                    struct parameter *nullable  parameters,
+                                    unsigned                    num_parameters)
 {
   if (parameters == NULL || num_parameters == 0) {
     return;
@@ -532,9 +532,9 @@ static void fold_parameters_inplace(struct constant_fold_state *s,
   }
 }
 
-static void fold_if_elifs_inplace(struct constant_fold_state *s,
+static void fold_if_elifs_inplace(struct constant_fold_state  *s,
                                   struct ast_if_elif *nullable elifs,
-                                  unsigned num_elifs)
+                                  unsigned                     num_elifs)
 {
   if (elifs == NULL || num_elifs == 0) {
     return;
@@ -545,7 +545,7 @@ static void fold_if_elifs_inplace(struct constant_fold_state *s,
   }
 }
 
-static void fold_try_excepts_inplace(struct constant_fold_state *s,
+static void fold_try_excepts_inplace(struct constant_fold_state     *s,
                                      struct ast_try_except *nullable excepts,
                                      unsigned num_excepts)
 {
@@ -558,9 +558,9 @@ static void fold_try_excepts_inplace(struct constant_fold_state *s,
   }
 }
 
-static void fold_with_items_inplace(struct constant_fold_state *s,
+static void fold_with_items_inplace(struct constant_fold_state    *s,
                                     struct ast_with_item *nullable items,
-                                    unsigned num_items)
+                                    unsigned                       num_items)
 {
   if (items == NULL || num_items == 0) {
     return;
@@ -572,18 +572,20 @@ static void fold_with_items_inplace(struct constant_fold_state *s,
 }
 
 static void fold_statement(struct constant_fold_state *s,
-                           union ast_statement       *statement)
+                           union ast_statement        *statement)
 {
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION:
-    statement->annotation.target = fold_expression(s, statement->annotation.target);
+    statement->annotation.target
+        = fold_expression(s, statement->annotation.target);
     statement->annotation.annotation
         = fold_expression(s, statement->annotation.annotation);
     statement->annotation.value
         = fold_expression_nullable(s, statement->annotation.value);
     break;
   case AST_STATEMENT_ASSERT:
-    statement->assert.expression = fold_expression(s, statement->assert.expression);
+    statement->assert.expression
+        = fold_expression(s, statement->assert.expression);
     statement->assert.message
         = fold_expression_nullable(s, statement->assert.message);
     break;
@@ -599,7 +601,8 @@ static void fold_statement(struct constant_fold_state *s,
   case AST_STATEMENT_BREAK:
     break;
   case AST_STATEMENT_CLASS: {
-    union ast_expression *call_expr = (union ast_expression *)statement->class_.call;
+    union ast_expression *call_expr
+        = (union ast_expression *)statement->class_.call;
     union ast_expression *folded_call = fold_expression(s, call_expr);
     if (ast_expression_type(folded_call) != AST_CALL) {
       internal_error("class call fold changed node type unexpectedly");
@@ -630,7 +633,8 @@ static void fold_statement(struct constant_fold_state *s,
     break;
   case AST_STATEMENT_FOR:
     statement->for_.targets = fold_expression(s, statement->for_.targets);
-    statement->for_.expression = fold_expression(s, statement->for_.expression);
+    statement->for_.expression
+        = fold_expression(s, statement->for_.expression);
     fold_statement_list(s, statement->for_.body);
     if (statement->for_.else_body != NULL) {
       fold_statement_list(s, statement->for_.else_body);
@@ -675,14 +679,16 @@ static void fold_statement(struct constant_fold_state *s,
     }
     break;
   case AST_STATEMENT_WHILE:
-    statement->while_.condition = fold_expression(s, statement->while_.condition);
+    statement->while_.condition
+        = fold_expression(s, statement->while_.condition);
     fold_statement_list(s, statement->while_.body);
     if (statement->while_.else_body != NULL) {
       fold_statement_list(s, statement->while_.else_body);
     }
     break;
   case AST_STATEMENT_WITH:
-    fold_with_items_inplace(s, statement->with.items, statement->with.num_items);
+    fold_with_items_inplace(s, statement->with.items,
+                            statement->with.num_items);
     fold_statement_list(s, statement->with.body);
     break;
   case AST_STATEMENT_YIELD:
@@ -701,9 +707,9 @@ static void fold_statement_list(struct constant_fold_state *s,
   }
 }
 
-struct ast_statement_list *ast_fold_constants(struct object_intern      *intern,
-                                              struct arena              *ast_arena,
-                                              struct ast_statement_list *module)
+struct ast_statement_list *
+ast_fold_constants(struct object_intern *intern, struct arena *ast_arena,
+                   struct ast_statement_list *module)
 {
   struct constant_fold_state s = {
     .intern = intern,

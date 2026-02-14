@@ -73,7 +73,7 @@ static void append_int64(struct unparse_state *s, int64_t value)
   append_mem(s, buffer, (size_t)length);
 }
 
-static void append_float(struct unparse_state *s,
+static void append_float(struct unparse_state      *s,
                          const struct object_float *float_obj)
 {
   char buffer[128];
@@ -122,7 +122,7 @@ static void append_escaped_char(struct unparse_state *s, char c)
   append_char(s, (char)c);
 }
 
-static void append_escaped_string_literal(struct unparse_state *s,
+static void append_escaped_string_literal(struct unparse_state       *s,
                                           const struct object_string *string)
 {
   append_char(s, '\'');
@@ -146,7 +146,7 @@ static void append_escaped_fstring_fragment(struct unparse_state *s,
   }
 }
 
-static void append_big_int_pydigits(struct unparse_state    *s,
+static void append_big_int_pydigits(struct unparse_state        *s,
                                     const struct object_big_int *big_int)
 {
   uint32_t num_pydigits = big_int->num_pydigits;
@@ -166,9 +166,9 @@ static void append_big_int_pydigits(struct unparse_state    *s,
     internal_error("integer too large to unparse");
   }
 
-  unsigned output_offset = arena_grow_current_size(s->arena);
-  char    *scratch = (char *)arena_grow(s->arena, (unsigned)scratch_size);
-  char    *decimal_rev = scratch;
+  unsigned  output_offset = arena_grow_current_size(s->arena);
+  char     *scratch = (char *)arena_grow(s->arena, (unsigned)scratch_size);
+  char     *decimal_rev = scratch;
   uintptr_t digits_unaligned = (uintptr_t)(scratch + max_decimal_digits);
   uintptr_t digits_aligned
       = (digits_unaligned + alignment_padding) & ~(uintptr_t)alignment_padding;
@@ -522,7 +522,8 @@ static void unparse_generator_parts(struct unparse_state            *s,
   }
 }
 
-static void unparse_constant_object(struct unparse_state *s, union object *object)
+static void unparse_constant_object(struct unparse_state *s,
+                                    union object         *object)
 {
   switch ((enum object_type)object->type) {
   case OBJECT_NONE:
@@ -559,7 +560,7 @@ static void unparse_constant_object(struct unparse_state *s, union object *objec
 }
 
 static void unparse_subscript_expression(struct unparse_state *s,
-                                         struct ast_binexpr  *subscript)
+                                         struct ast_binexpr   *subscript)
 {
   unparse_expression_prec(s, subscript->left, UNPARSE_PREC_ATOM);
   append_char(s, '[');
@@ -578,7 +579,8 @@ static void unparse_subscript_expression(struct unparse_state *s,
   append_char(s, ']');
 }
 
-static void unparse_call_expression(struct unparse_state *s, struct ast_call *call)
+static void unparse_call_expression(struct unparse_state *s,
+                                    struct ast_call      *call)
 {
   assert(call->callee != NULL);
   unparse_expression_prec(s, call->callee, UNPARSE_PREC_ATOM);
@@ -608,7 +610,7 @@ static void unparse_call_expression(struct unparse_state *s, struct ast_call *ca
   append_char(s, ')');
 }
 
-static void unparse_comparison_expression(struct unparse_state     *s,
+static void unparse_comparison_expression(struct unparse_state  *s,
                                           struct ast_comparison *comparison)
 {
   unparse_expression_prec(s, comparison->left, UNPARSE_PREC_COMPARISON + 1);
@@ -658,7 +660,7 @@ static void unparse_lambda_expression(struct unparse_state *s,
   unparse_expression_prec(s, lambda->expression, UNPARSE_PREC_ROOT);
 }
 
-static void unparse_dict_display_expression(struct unparse_state *s,
+static void unparse_dict_display_expression(struct unparse_state      *s,
                                             struct ast_dict_item_list *dict)
 {
   append_char(s, '{');

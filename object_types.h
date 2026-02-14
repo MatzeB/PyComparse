@@ -44,11 +44,11 @@ struct object_complex {
 
 struct object_int {
   struct object_base base;
-  int64_t value;
+  int64_t            value;
 };
 
 struct object_big_int {
-  struct object_base          base;
+  struct object_base base;
   /* Marshal-format base-2^15 digits for arbitrary-size non-small integers. */
   uint32_t                 num_pydigits;
   const uint16_t *nullable pydigits;

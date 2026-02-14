@@ -13,9 +13,9 @@
 #include "codegen.h"
 #include "codegen_statement.h"
 #include "codegen_types.h"
-#include "object_intern.h"
 #include "diagnostics.h"
 #include "object.h"
+#include "object_intern.h"
 #include "object_types.h"
 #include "opcodes.h"
 #include "symbol_info_types.h"
@@ -26,11 +26,11 @@
 static void
 emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
-                      const char                      *name,
-                      bool                             is_generator_expression);
+                      const char *name, bool is_generator_expression);
 
-static void apply_generator_bindings(
-    struct cg_state *s, struct ast_generator_expression *generator_expression)
+static void
+apply_generator_bindings(struct cg_state                 *s,
+                         struct ast_generator_expression *generator_expression)
 {
   for (unsigned i = 0; i < generator_expression->num_scope_globals; ++i) {
     cg_declare(s, generator_expression->scope_globals[i], SYMBOL_GLOBAL);
@@ -49,8 +49,7 @@ static void apply_generator_bindings(
 static void
 emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
-                      const char                      *name,
-                      bool                             is_generator_expression)
+                      const char *name, bool is_generator_expression)
 {
   bool async_comprehension = generator_expression->is_async;
   bool first_part_async = false;
@@ -78,9 +77,9 @@ emit_generator_helper(struct cg_state                 *s,
 
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
-    size_t qlen = strlen(qualname);
+    size_t        qlen = strlen(qualname);
     struct arena *arena = object_intern_arena(&s->objects);
-    char *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
+    char         *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
     memcpy(prefix, qualname, qlen);
     memcpy(prefix + qlen, ".<locals>.", 11);
     s->code.qualname_prefix = prefix;
@@ -420,7 +419,7 @@ static void emit_dictionary_display(struct cg_state           *s,
       ++non_star_star_end;
     }
     unsigned num_build_map_items = non_star_star_end - idx;
-    bool all_const_keys = num_build_map_items > 1;
+    bool     all_const_keys = num_build_map_items > 1;
     for (unsigned i = idx; i < non_star_star_end && all_const_keys; i++) {
       all_const_keys = ast_expression_as_constant(items[i].key) != NULL;
     }
@@ -467,8 +466,7 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
   emit_make_function_begin(s, &state, &lambda->parameter_shape,
                            lambda->parameters,
                            /*async_function=*/false,
-                           /*return_type=*/NULL,
-                           "<lambda>");
+                           /*return_type=*/NULL, "<lambda>");
 
   /* Apply scope bindings (mirrors apply_function_bindings for defs). */
   for (unsigned i = 0; i < lambda->num_scope_globals; ++i) {

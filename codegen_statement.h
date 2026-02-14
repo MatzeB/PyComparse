@@ -81,19 +81,18 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
 void emit_generator_expression_code(
     struct cg_state *s, struct ast_generator_expression *generator_expression);
 
-void emit_make_function_begin(struct cg_state            *s,
-                              struct make_function_state *state,
-                              const struct parameter_shape *parameter_shape,
-                              struct parameter           *parameters,
-                              bool     async_function,
+void emit_make_function_begin(struct cg_state               *s,
+                              struct make_function_state    *state,
+                              const struct parameter_shape  *parameter_shape,
+                              struct parameter              *parameters,
+                              bool                           async_function,
                               union ast_expression *nullable return_type,
                               const char                    *name);
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,
                             struct symbol              *symbol);
 
-void analyze_lambda_bindings(struct cg_state   *s,
-                             struct ast_lambda *lambda);
+void analyze_lambda_bindings(struct cg_state *s, struct ast_lambda *lambda);
 void analyze_generator_bindings(struct cg_state                 *s,
                                 struct ast_generator_expression *generator);
 

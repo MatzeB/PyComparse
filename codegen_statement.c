@@ -92,10 +92,9 @@ static void emit_comparison_multi(struct cg_state             *s,
   }
 }
 
-static void emit_pending_finally(
-    struct cg_state                    *s,
-    struct ast_def              *nullable current_function,
-    struct pending_finally_state *nullable stop);
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function,
+                                 struct pending_finally_state *nullable stop);
 
 enum pending_cleanup_kind {
   CLEANUP_POP_BLOCK,
@@ -106,11 +105,11 @@ enum pending_cleanup_kind {
 };
 
 struct pending_finally_state {
-  enum pending_cleanup_kind               kind;
-  struct ast_statement_list   *nullable    finally_body;
-  struct symbol               *nullable    as_symbol;
-  bool                                     async_with;
-  struct pending_finally_state *nullable   prev;
+  enum pending_cleanup_kind              kind;
+  struct ast_statement_list *nullable    finally_body;
+  struct symbol *nullable                as_symbol;
+  bool                                   async_with;
+  struct pending_finally_state *nullable prev;
 };
 
 void emit_comparison_multi_value(struct cg_state       *s,
@@ -400,10 +399,10 @@ static void emit_import(struct cg_state *s, struct dotted_name *module,
   }
 }
 
-static void emit_parameter_defaults(struct cg_state            *s,
-                                    struct make_function_state *state,
-                                    const struct parameter_shape *parameter_shape,
-                                    struct parameter           *parameters)
+static void
+emit_parameter_defaults(struct cg_state *s, struct make_function_state *state,
+                        const struct parameter_shape *parameter_shape,
+                        struct parameter             *parameters)
 {
   /* create tuple with default values */
   unsigned num_parameters = parameter_shape->num_parameters;
@@ -481,8 +480,8 @@ static void emit_parameter_defaults(struct cg_state            *s,
 
 static void emit_function_annotations(
     struct cg_state *s, struct make_function_state *state,
-    const struct parameter_shape *parameter_shape, struct parameter *parameters,
-    union ast_expression *nullable return_type)
+    const struct parameter_shape *parameter_shape,
+    struct parameter *parameters, union ast_expression *nullable return_type)
 {
   /* TODO: parameters */
   unsigned num_parameters = parameter_shape->num_parameters;
@@ -531,11 +530,11 @@ static void emit_function_annotations(
                  /*pop=*/num_annotation_items + 1, /*push=*/1);
 }
 
-void emit_make_function_begin(struct cg_state            *s,
-                              struct make_function_state *state,
-                              const struct parameter_shape *parameter_shape,
-                              struct parameter           *parameters,
-                              bool     async_function,
+void emit_make_function_begin(struct cg_state               *s,
+                              struct make_function_state    *state,
+                              const struct parameter_shape  *parameter_shape,
+                              struct parameter              *parameters,
+                              bool                           async_function,
                               union ast_expression *nullable return_type,
                               const char                    *name)
 {
@@ -546,7 +545,8 @@ void emit_make_function_begin(struct cg_state            *s,
   }
 
   emit_parameter_defaults(s, state, parameter_shape, parameters);
-  emit_function_annotations(s, state, parameter_shape, parameters, return_type);
+  emit_function_annotations(s, state, parameter_shape, parameters,
+                            return_type);
 
   const char *qualname = cg_build_qualname(s, name);
   state->qualname = qualname;
@@ -557,15 +557,15 @@ void emit_make_function_begin(struct cg_state            *s,
 
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
-    size_t qlen = strlen(qualname);
+    size_t        qlen = strlen(qualname);
     struct arena *arena = object_intern_arena(&s->objects);
-    char *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
+    char         *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
     memcpy(prefix, qualname, qlen);
     memcpy(prefix + qlen, ".<locals>.", 11);
     s->code.qualname_prefix = prefix;
   }
 
-  unsigned       keyword_only_idx = parameter_shape->keyword_only_begin;
+  unsigned keyword_only_idx = parameter_shape->keyword_only_begin;
   if (keyword_only_idx > num_parameters) {
     keyword_only_idx = num_parameters;
   }
@@ -602,8 +602,7 @@ void emit_make_function_begin(struct cg_state            *s,
     cg_declare(s, variable_keyword_arguments_name, SYMBOL_LOCAL);
     s->code.flags |= CO_VARKEYWORDS;
   }
-  s->code.positional_only_argcount
-      = parameter_shape->positional_only_argcount;
+  s->code.positional_only_argcount = parameter_shape->positional_only_argcount;
 }
 
 void emit_make_function_end(struct cg_state            *s,
@@ -1476,16 +1475,16 @@ struct binding_scope {
   bool                           is_class;
   bool                           class_needs_class_cell;
 
-  struct symbol    *locals_inline[16];
-  struct symbol    *bound_before_decl_inline[16];
-  struct symbol    *globals_inline[8];
-  struct symbol    *nonlocals_inline[8];
-  struct symbol    *freevars_inline[8];
-  struct symbol    *cellvars_inline[8];
-  struct symbol    *uses_inline[16];
-  struct ast_def    *children_inline[8];
-  struct ast_class  *class_children_inline[8];
-  struct ast_lambda *lambda_children_inline[8];
+  struct symbol                   *locals_inline[16];
+  struct symbol                   *bound_before_decl_inline[16];
+  struct symbol                   *globals_inline[8];
+  struct symbol                   *nonlocals_inline[8];
+  struct symbol                   *freevars_inline[8];
+  struct symbol                   *cellvars_inline[8];
+  struct symbol                   *uses_inline[16];
+  struct ast_def                  *children_inline[8];
+  struct ast_class                *class_children_inline[8];
+  struct ast_lambda               *lambda_children_inline[8];
   struct ast_generator_expression *generator_children_inline[8];
 
   struct idynarray locals;
@@ -1510,10 +1509,9 @@ static void emit_statement_list_with_function_from(
     struct ast_def *nullable current_function, unsigned first_statement);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function);
-static void emit_pending_finally(
-    struct cg_state                    *s,
-    struct ast_def              *nullable current_function,
-    struct pending_finally_state *nullable stop);
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function,
+                                 struct pending_finally_state *nullable stop);
 
 static bool symbol_array_contains(struct idynarray *array,
                                   struct symbol    *symbol)
@@ -1533,10 +1531,9 @@ static bool is_class_symbol(struct symbol *symbol)
   return strcmp(symbol->string, "__class__") == 0;
 }
 
-static void emit_pending_finally(
-    struct cg_state                    *s,
-    struct ast_def              *nullable current_function,
-    struct pending_finally_state *nullable stop)
+static void emit_pending_finally(struct cg_state         *s,
+                                 struct ast_def *nullable current_function,
+                                 struct pending_finally_state *nullable stop)
 {
   struct pending_finally_state *head = s->code.pending_finally;
   for (struct pending_finally_state *state = head;
@@ -1556,8 +1553,7 @@ static void emit_pending_finally(
       break;
     case CLEANUP_EXCEPT_AS:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      cg_load_const(s,
-                    object_intern_singleton(&s->objects, OBJECT_NONE));
+      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
       cg_store(s, state->as_symbol);
       cg_delete(s, state->as_symbol);
       break;
@@ -1567,8 +1563,7 @@ static void emit_pending_finally(
       cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
       if (state->async_with) {
         cg_op(s, OPCODE_GET_AWAITABLE, 0);
-        cg_load_const(s,
-                      object_intern_singleton(&s->objects, OBJECT_NONE));
+        cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
         cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
       }
       cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
@@ -1900,7 +1895,8 @@ static void analyze_expression(struct binding_scope *scope,
       analyze_expression(scope, generator->parts[0].expression);
     }
     *idynarray_append(&scope->generator_children,
-                      struct ast_generator_expression *) = generator;
+                      struct ast_generator_expression *)
+        = generator;
     return;
   }
   case AST_LAMBDA: {
@@ -2156,12 +2152,13 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
 static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent);
-static void analyze_lambda_bindings_inner(struct cg_state               *s,
-                                          struct ast_lambda             *lambda,
-                                          struct binding_scope *nullable parent);
-static void analyze_generator_bindings_inner(
-    struct cg_state *s, struct ast_generator_expression *generator,
-    struct binding_scope *nullable parent);
+static void
+analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
+                              struct binding_scope *nullable parent);
+static void
+analyze_generator_bindings_inner(struct cg_state                 *s,
+                                 struct ast_generator_expression *generator,
+                                 struct binding_scope *nullable   parent);
 
 static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
@@ -2354,8 +2351,7 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
 }
 
 static void
-analyze_lambda_bindings_inner(struct cg_state               *s,
-                              struct ast_lambda             *lambda,
+analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
                               struct binding_scope *nullable parent)
 {
   if (lambda->scope_bindings_ready) {
@@ -2384,9 +2380,8 @@ analyze_lambda_bindings_inner(struct cg_state               *s,
     analyze_function_bindings(s, children[i], &scope);
   }
 
-  struct ast_lambda **lambda_children
-      = idynarray_data(&scope.lambda_children);
-  unsigned num_lambda_children
+  struct ast_lambda **lambda_children = idynarray_data(&scope.lambda_children);
+  unsigned            num_lambda_children
       = idynarray_length(&scope.lambda_children, struct ast_lambda *);
   for (unsigned i = 0; i < num_lambda_children; ++i) {
     analyze_lambda_bindings_inner(s, lambda_children[i], &scope);
@@ -2435,7 +2430,8 @@ analyze_lambda_bindings_inner(struct cg_state               *s,
     }
   }
 
-  lambda->num_scope_globals = idynarray_length(&scope.globals, struct symbol *);
+  lambda->num_scope_globals
+      = idynarray_length(&scope.globals, struct symbol *);
   lambda->scope_globals = symbol_array_copy(s, &scope.globals);
   lambda->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
   lambda->scope_locals = symbol_array_copy(s, &scope.locals);
@@ -2450,9 +2446,10 @@ analyze_lambda_bindings_inner(struct cg_state               *s,
   binding_scope_free(&scope);
 }
 
-static void analyze_generator_bindings_inner(
-    struct cg_state *s, struct ast_generator_expression *generator,
-    struct binding_scope *nullable parent)
+static void
+analyze_generator_bindings_inner(struct cg_state                 *s,
+                                 struct ast_generator_expression *generator,
+                                 struct binding_scope *nullable   parent)
 {
   if (generator->scope_bindings_ready) {
     return;
@@ -2546,7 +2543,8 @@ static void analyze_generator_bindings_inner(
   generator->num_scope_globals
       = idynarray_length(&scope.globals, struct symbol *);
   generator->scope_globals = symbol_array_copy(s, &scope.globals);
-  generator->num_scope_locals = idynarray_length(&scope.locals, struct symbol *);
+  generator->num_scope_locals
+      = idynarray_length(&scope.locals, struct symbol *);
   generator->scope_locals = symbol_array_copy(s, &scope.locals);
   generator->num_scope_cellvars
       = idynarray_length(&scope.cellvars, struct symbol *);
@@ -2559,8 +2557,7 @@ static void analyze_generator_bindings_inner(
   binding_scope_free(&scope);
 }
 
-void analyze_lambda_bindings(struct cg_state  *s,
-                             struct ast_lambda *lambda)
+void analyze_lambda_bindings(struct cg_state *s, struct ast_lambda *lambda)
 {
   analyze_lambda_bindings_inner(s, lambda, /*parent=*/NULL);
 }
@@ -2672,16 +2669,11 @@ static bool is_future_module(struct ast_from_import *from_import)
 static const struct future_feature *lookup_future_feature(const char *name)
 {
   static const struct future_feature features[] = {
-    { "nested_scopes", 0 },
-    { "generators", 0 },
-    { "division", 0 },
-    { "absolute_import", 0 },
-    { "with_statement", 0 },
-    { "print_function", 0 },
-    { "unicode_literals", 0 },
-    { "barry_as_FLUFL", CO_FUTURE_BARRY_AS_BDFL },
-    { "generator_stop", 0 },
-    { "annotations", CO_FUTURE_ANNOTATIONS },
+    { "nested_scopes", 0 },    { "generators", 0 },
+    { "division", 0 },         { "absolute_import", 0 },
+    { "with_statement", 0 },   { "print_function", 0 },
+    { "unicode_literals", 0 }, { "barry_as_FLUFL", CO_FUTURE_BARRY_AS_BDFL },
+    { "generator_stop", 0 },   { "annotations", CO_FUTURE_ANNOTATIONS },
     { "braces", 0 },
   };
   for (unsigned i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
@@ -2805,8 +2797,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
 
   struct make_function_state state;
   emit_make_function_begin(s, &state, &def->parameter_shape, def->parameters,
-                           def->async,
-                           def->return_type, def->name->string);
+                           def->async, def->return_type, def->name->string);
   union object *doc = statement_list_leading_docstring(def->body);
   cg_set_function_docstring(s, doc);
   apply_function_bindings(s, def);
@@ -2845,9 +2836,9 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
 
   /* Set class body's qualname prefix: class_qualname + "." */
   {
-    size_t qlen = strlen(class_qualname);
+    size_t        qlen = strlen(class_qualname);
     struct arena *arena = object_intern_arena(&s->objects);
-    char *prefix = arena_allocate(arena, qlen + 2, 1);
+    char         *prefix = arena_allocate(arena, qlen + 2, 1);
     memcpy(prefix, class_qualname, qlen);
     prefix[qlen] = '.';
     prefix[qlen + 1] = '\0';
@@ -2961,7 +2952,8 @@ static void emit_global_statement_node(struct cg_state   *s,
 static bool statement_list_has_scope_annotation(
     const struct ast_statement_list *nullable statements);
 
-static bool statement_has_scope_annotation(const union ast_statement *statement)
+static bool
+statement_has_scope_annotation(const union ast_statement *statement)
 {
   switch (ast_statement_type((union ast_statement *)statement)) {
   case AST_STATEMENT_ANNOTATION:
@@ -2987,12 +2979,14 @@ static bool statement_has_scope_annotation(const union ast_statement *statement)
   case AST_STATEMENT_TRY:
     if (statement_list_has_scope_annotation(statement->try_.body)) return true;
     for (unsigned i = 0; i < statement->try_.num_excepts; ++i) {
-      if (statement_list_has_scope_annotation(statement->try_.excepts[i].body)) {
+      if (statement_list_has_scope_annotation(
+              statement->try_.excepts[i].body)) {
         return true;
       }
     }
     return statement_list_has_scope_annotation(statement->try_.else_body)
-           || statement_list_has_scope_annotation(statement->try_.finally_body);
+           || statement_list_has_scope_annotation(
+               statement->try_.finally_body);
   default:
     return false;
   }
@@ -3090,19 +3084,19 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   struct pending_finally_state finally_cleanup;
   if (has_finally) {
     finally_cleanup = (struct pending_finally_state){
-        .kind = CLEANUP_FINALLY,
-        .finally_body = try_stmt->finally_body,
-        .prev = saved_pending,
+      .kind = CLEANUP_FINALLY,
+      .finally_body = try_stmt->finally_body,
+      .prev = saved_pending,
     };
     s->code.pending_finally = &finally_cleanup;
   }
 
-  struct pending_finally_state except_cleanup;
+  struct pending_finally_state  except_cleanup;
   struct pending_finally_state *pre_body_pending = s->code.pending_finally;
   if (has_except) {
     except_cleanup = (struct pending_finally_state){
-        .kind = CLEANUP_POP_BLOCK,
-        .prev = pre_body_pending,
+      .kind = CLEANUP_POP_BLOCK,
+      .prev = pre_body_pending,
     };
     s->code.pending_finally = &except_cleanup;
   }
@@ -3123,17 +3117,18 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
 
     /* Push cleanup entries for break/continue/return inside the except
      * handler body.  Innermost first: as-cleanup, then POP_EXCEPT. */
-    struct pending_finally_state *pre_handler_pending = s->code.pending_finally;
-    struct pending_finally_state  pop_except_cleanup = {
-        .kind = CLEANUP_POP_EXCEPT,
-        .prev = s->code.pending_finally,
+    struct pending_finally_state *pre_handler_pending
+        = s->code.pending_finally;
+    struct pending_finally_state pop_except_cleanup = {
+      .kind = CLEANUP_POP_EXCEPT,
+      .prev = s->code.pending_finally,
     };
     struct pending_finally_state as_cleanup;
     if (except_stmt->as != NULL) {
       as_cleanup = (struct pending_finally_state){
-          .kind = CLEANUP_EXCEPT_AS,
-          .as_symbol = except_stmt->as,
-          .prev = &pop_except_cleanup,
+        .kind = CLEANUP_EXCEPT_AS,
+        .as_symbol = except_stmt->as,
+        .prev = &pop_except_cleanup,
       };
       s->code.pending_finally = &as_cleanup;
     } else {
@@ -3207,9 +3202,9 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
     emit_with_begin(s, &states[i], item->expression, item->targets,
                     with->async, with->base.location);
     with_cleanups[i] = (struct pending_finally_state){
-        .kind = CLEANUP_WITH,
-        .async_with = with->async,
-        .prev = s->code.pending_finally,
+      .kind = CLEANUP_WITH,
+      .async_with = with->async,
+      .prev = s->code.pending_finally,
     };
     s->code.pending_finally = &with_cleanups[i];
   }

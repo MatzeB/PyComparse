@@ -9,8 +9,8 @@
 #include "adt/arena.h"
 #include "adt/idynarray.h"
 #include "ast.h"
-#include "ast_fold_constants.h"
 #include "ast_expression_types.h"
+#include "ast_fold_constants.h"
 #include "ast_statement_types.h"
 #include "ast_types.h"
 #include "codegen.h"
@@ -370,8 +370,8 @@ static struct symbol *invalid_symbol(struct parser_state *s)
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
-static struct symbol *
-maybe_mangle_private_name(struct parser_state *s, struct symbol *symbol)
+static struct symbol *maybe_mangle_private_name(struct parser_state *s,
+                                                struct symbol       *symbol)
 {
   struct symbol *class_name = s->private_class_name;
   if (class_name == NULL) {
@@ -548,7 +548,7 @@ parse_generator_expression(struct parser_state     *s,
       eat(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
       expect(s, T_in);
-      bool await_saved = await_tracking_begin(s);
+      bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_FOR;
@@ -561,7 +561,7 @@ parse_generator_expression(struct parser_state     *s,
       expect(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
       expect(s, T_in);
-      bool await_saved = await_tracking_begin(s);
+      bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_FOR;
@@ -572,7 +572,7 @@ parse_generator_expression(struct parser_state     *s,
       is_async |= await_tracking_end(s, await_saved);
     } else {
       eat(s, T_if);
-      bool await_saved = await_tracking_begin(s);
+      bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_LOGICAL_OR);
 
       part->type = GENERATOR_EXPRESSION_PART_IF;
@@ -596,12 +596,14 @@ parse_generator_expression(struct parser_state     *s,
   return expression;
 }
 
-static void set_generator_expression_item(
-    union ast_expression *expression, union ast_expression *item,
-    bool item_has_await, union ast_expression *nullable item_value,
-    bool item_value_has_await)
+static void
+set_generator_expression_item(union ast_expression *expression,
+                              union ast_expression *item, bool item_has_await,
+                              union ast_expression *nullable item_value,
+                              bool item_value_has_await)
 {
-  struct ast_generator_expression *generator = &expression->generator_expression;
+  struct ast_generator_expression *generator
+      = &expression->generator_expression;
   generator->expression = item;
   generator->item_value = item_value;
   if (item_has_await || item_value_has_await) {
@@ -612,7 +614,7 @@ static void set_generator_expression_item(
 static struct argument *parse_argument(struct parser_state *s,
                                        struct argument     *argument)
 {
-  bool await_saved = await_tracking_begin(s);
+  bool                  await_saved = await_tracking_begin(s);
   union ast_expression *expression;
   if (peek(s) == '*') {
     expression = parse_unexpr(s, PREC_EXPRESSION, AST_UNEXPR_STAR);
@@ -692,17 +694,17 @@ static union ast_expression *parse_arguments(struct parser_state  *s,
   return expression;
 }
 
-static void parse_parameters(struct parser_state *s,
-                             struct idynarray    *parameters,
+static void parse_parameters(struct parser_state    *s,
+                             struct idynarray       *parameters,
                              struct parameter_shape *parameter_shape,
-                             enum token_kind      end)
+                             enum token_kind         end)
 {
-  unsigned positional_only_argcount = 0;
-  unsigned keyword_only_begin = (unsigned)-1;
-  bool     had_default = false;
-  bool     had_variable_args = false;
-  bool     had_variable_keyword_args = false;
-  bool     need_kwonly_after_bare_star = false;
+  unsigned        positional_only_argcount = 0;
+  unsigned        keyword_only_begin = (unsigned)-1;
+  bool            had_default = false;
+  bool            had_variable_args = false;
+  bool            had_variable_keyword_args = false;
+  bool            need_kwonly_after_bare_star = false;
   struct location bare_star_location = { 0 };
 
   add_anchor(s, end);
@@ -854,7 +856,8 @@ static void parse_parameters(struct parser_state *s,
   remove_anchor(s, end);
 
   unsigned num_parameters = idynarray_length(parameters, struct parameter);
-  if (keyword_only_begin == (unsigned)-1 || keyword_only_begin > num_parameters) {
+  if (keyword_only_begin == (unsigned)-1
+      || keyword_only_begin > num_parameters) {
     keyword_only_begin = num_parameters;
   }
   parameter_shape->num_parameters = num_parameters;
@@ -890,9 +893,9 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   add_anchor(s, ']');
   add_anchor(s, ',');
 
-  bool await_saved = await_tracking_begin(s);
+  bool                  await_saved = await_tracking_begin(s);
   union ast_expression *first = parse_star_expression(s, PREC_NAMED);
-  bool first_has_await = await_tracking_end(s, await_saved);
+  bool                  first_has_await = await_tracking_end(s, await_saved);
 
   union ast_expression *expression;
   if (peek(s) == T_for || peek(s) == T_async) {
@@ -1053,7 +1056,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
   if (peek(s) == T_yield) {
     expression = parse_yield_expression(s);
   } else {
-    bool await_saved = await_tracking_begin(s);
+    bool                  await_saved = await_tracking_begin(s);
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
     bool                  first_has_await = await_tracking_end(s, await_saved);
     if (peek(s) == T_for || peek(s) == T_async) {
@@ -2607,8 +2610,9 @@ static union ast_statement *parse_def(struct parser_state   *s,
 
   unsigned num_parameters = parameter_shape.num_parameters;
   size_t   parameters_size = num_parameters * sizeof(struct parameter);
-  union ast_statement *statement = ast_allocate_statement_(
-      s, sizeof(struct ast_def) + parameters_size, AST_STATEMENT_DEF, location);
+  union ast_statement *statement
+      = ast_allocate_statement_(s, sizeof(struct ast_def) + parameters_size,
+                                AST_STATEMENT_DEF, location);
   statement->def.name = name;
   statement->def.async = async;
   statement->def.has_yield = has_yield;

@@ -34,6 +34,7 @@
 #endif
 
 #include "adt/arena.h"
+#include "adt/dynmemory.h"
 #include "diagnostics.h"
 #include "object_intern.h"
 #include "object_types.h"
@@ -155,13 +156,26 @@ static const unsigned string_alignment = alignof(void *);
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
-  if (s->fstring_debug.active) {
+  if (s->fstring_debug.depth > 0) {
     assert(s->fstring_debug.tail_start != NULL);
     assert(s->fstring_debug.tail_start <= s->buffer_end);
     size_t flush_size = (size_t)(s->buffer_end - s->fstring_debug.tail_start);
     if (flush_size > 0) {
-      char *dst = arena_grow(&s->fstring_debug.arena, (unsigned)flush_size);
+      unsigned flush_u = (unsigned)flush_size;
+      assert((size_t)flush_u == flush_size);
+      unsigned new_size = s->fstring_debug.spilled_size + flush_u;
+      if (new_size < s->fstring_debug.spilled_size) {
+        abort();
+      }
+      if (new_size > s->fstring_debug.spilled_capacity) {
+        s->fstring_debug.spilled_prefix = dynmemory_grow(
+            s->fstring_debug.spilled_prefix,
+            &s->fstring_debug.spilled_capacity, new_size, sizeof(char));
+      }
+      char *dst
+          = s->fstring_debug.spilled_prefix + s->fstring_debug.spilled_size;
       memcpy(dst, s->fstring_debug.tail_start, flush_size);
+      s->fstring_debug.spilled_size = new_size;
     }
     s->fstring_debug.tail_start = s->buffer_end;
   }
@@ -178,7 +192,7 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
   }
   s->p = s->read_buffer + 1;
   s->buffer_end = s->read_buffer + read_size;
-  if (s->fstring_debug.active) {
+  if (s->fstring_debug.depth > 0) {
     s->fstring_debug.tail_start = s->read_buffer;
   }
   return (unsigned char)*s->read_buffer;
@@ -2266,8 +2280,9 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
   s->symbol_table = symbol_table;
   s->objects = objects;
   s->strings = strings;
-  arena_init(&s->fstring_debug.arena);
-  s->fstring_debug.active = false;
+  s->fstring_debug.spilled_prefix = NULL;
+  s->fstring_debug.spilled_size = 0;
+  s->fstring_debug.spilled_capacity = 0;
   s->fstring_debug.depth = 0;
   s->fstring_debug.tail_start = NULL;
   s->at_begin_of_line = true;
@@ -2277,15 +2292,15 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
 
 void scanner_free(struct scanner_state *s)
 {
-  arena_free(&s->fstring_debug.arena);
+  free(s->fstring_debug.spilled_prefix);
   free(s->read_buffer);
 }
 
 static unsigned
 scanner_fstring_debug_capture_current_size_(struct scanner_state *s)
 {
-  assert(s->fstring_debug.active);
-  unsigned size = arena_grow_current_size(&s->fstring_debug.arena);
+  assert(s->fstring_debug.tail_start != NULL);
+  unsigned size = s->fstring_debug.spilled_size;
   char    *current = scanner_current_char_ptr(s);
   if (current != NULL) {
     assert(s->fstring_debug.tail_start != NULL);
@@ -2301,8 +2316,8 @@ static void scanner_fstring_debug_capture_copy_range_(struct scanner_state *s,
 {
   assert(start <= end);
 
-  unsigned prefix_size = arena_grow_current_size(&s->fstring_debug.arena);
-  char    *prefix = arena_grow_current_base(&s->fstring_debug.arena);
+  unsigned prefix_size = s->fstring_debug.spilled_size;
+  char    *prefix = s->fstring_debug.spilled_prefix;
 
   if (start < prefix_size) {
     unsigned n = prefix_size < end ? prefix_size - start : end - start;
@@ -2320,9 +2335,8 @@ static void scanner_fstring_debug_capture_copy_range_(struct scanner_state *s,
 
 void scanner_fstring_debug_capture_begin(struct scanner_state *s)
 {
-  if (!s->fstring_debug.active) {
-    arena_grow_begin(&s->fstring_debug.arena, 1);
-    s->fstring_debug.active = true;
+  if (s->fstring_debug.depth == 0) {
+    s->fstring_debug.spilled_size = 0;
     s->fstring_debug.tail_start = scanner_current_char_ptr(s);
     assert(s->fstring_debug.tail_start != NULL);
   }
@@ -2334,19 +2348,17 @@ void scanner_fstring_debug_capture_begin(struct scanner_state *s)
 
 void scanner_fstring_debug_capture_discard(struct scanner_state *s)
 {
-  assert(s->fstring_debug.active && s->fstring_debug.depth > 0);
+  assert(s->fstring_debug.depth > 0);
   --s->fstring_debug.depth;
   if (s->fstring_debug.depth == 0) {
-    char *begin = arena_grow_finish(&s->fstring_debug.arena);
-    arena_free_to(&s->fstring_debug.arena, begin);
-    s->fstring_debug.active = false;
+    s->fstring_debug.spilled_size = 0;
     s->fstring_debug.tail_start = NULL;
   }
 }
 
 union object *scanner_fstring_debug_capture_finish(struct scanner_state *s)
 {
-  assert(s->fstring_debug.active && s->fstring_debug.depth > 0);
+  assert(s->fstring_debug.depth > 0);
   unsigned start = s->fstring_debug.starts[s->fstring_debug.depth - 1];
   --s->fstring_debug.depth;
   unsigned end = scanner_fstring_debug_capture_current_size_(s);
@@ -2377,9 +2389,7 @@ union object *scanner_fstring_debug_capture_finish(struct scanner_state *s)
   }
 
   if (s->fstring_debug.depth == 0) {
-    char *begin = arena_grow_finish(&s->fstring_debug.arena);
-    arena_free_to(&s->fstring_debug.arena, begin);
-    s->fstring_debug.active = false;
+    s->fstring_debug.spilled_size = 0;
     s->fstring_debug.tail_start = NULL;
   }
   return object_intern_string(s->objects, OBJECT_STRING, captured_size, chars);

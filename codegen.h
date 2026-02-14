@@ -60,6 +60,7 @@ void cg_set_function_docstring(struct cg_state *s, union object *nullable doc);
 bool     cg_declare(struct cg_state *s, struct symbol *name,
                     enum symbol_info_type type);
 bool     cg_promote_to_cell(struct cg_state *s, struct symbol *name);
+bool     cg_symbol_is_global(struct cg_state *s, struct symbol *name);
 unsigned cg_closure_index(struct cg_state *s, struct symbol *name);
 void     cg_load(struct cg_state *s, struct symbol *name);
 void     cg_store(struct cg_state *s, struct symbol *name);

@@ -536,7 +536,7 @@ void emit_make_function_begin(struct cg_state               *s,
                               struct parameter              *parameters,
                               bool                           async_function,
                               union ast_expression *nullable return_type,
-                              const char                    *name)
+                              const char *name, bool global_binding)
 {
   unsigned num_parameters = parameter_shape->num_parameters;
   memset(state, 0, sizeof(*state));
@@ -548,7 +548,7 @@ void emit_make_function_begin(struct cg_state               *s,
   emit_function_annotations(s, state, parameter_shape, parameters,
                             return_type);
 
-  const char *qualname = cg_build_qualname(s, name);
+  const char *qualname = global_binding ? name : cg_build_qualname(s, name);
   state->qualname = qualname;
 
   cg_push_code(s);
@@ -2796,8 +2796,10 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   }
 
   struct make_function_state state;
+  bool global_binding = cg_symbol_is_global(s, def->name);
   emit_make_function_begin(s, &state, &def->parameter_shape, def->parameters,
-                           def->async, def->return_type, def->name->string);
+                           def->async, def->return_type, def->name->string,
+                           global_binding);
   union object *doc = statement_list_leading_docstring(def->body);
   cg_set_function_docstring(s, doc);
   apply_function_bindings(s, def);
@@ -2829,7 +2831,10 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   }
 
   cg_op_push1(s, OPCODE_LOAD_BUILD_CLASS, 0);
-  const char *class_qualname = cg_build_qualname(s, class_stmt->name->string);
+  bool        global_binding = cg_symbol_is_global(s, class_stmt->name);
+  const char *class_qualname
+      = global_binding ? class_stmt->name->string
+                       : cg_build_qualname(s, class_stmt->name->string);
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/false);
   s->code.in_class_body = true;

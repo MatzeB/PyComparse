@@ -839,6 +839,12 @@ bool cg_promote_to_cell(struct cg_state *s, struct symbol *name)
   return cg_declare(s, name, SYMBOL_CELL);
 }
 
+bool cg_symbol_is_global(struct cg_state *s, struct symbol *name)
+{
+  struct symbol_info *info = cg_symbol_info(s, name);
+  return info != NULL && info->type == SYMBOL_GLOBAL;
+}
+
 unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
 {
   struct symbol_info *info = cg_symbol_info(s, name);

@@ -466,7 +466,8 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
   emit_make_function_begin(s, &state, &lambda->parameter_shape,
                            lambda->parameters,
                            /*async_function=*/false,
-                           /*return_type=*/NULL, "<lambda>");
+                           /*return_type=*/NULL, "<lambda>",
+                           /*global_binding=*/false);
 
   /* Apply scope bindings (mirrors apply_function_bindings for defs). */
   for (unsigned i = 0; i < lambda->num_scope_globals; ++i) {

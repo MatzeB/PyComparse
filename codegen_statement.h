@@ -87,7 +87,7 @@ void emit_make_function_begin(struct cg_state               *s,
                               struct parameter              *parameters,
                               bool                           async_function,
                               union ast_expression *nullable return_type,
-                              const char                    *name);
+                              const char *name, bool global_binding);
 void emit_make_function_end(struct cg_state            *s,
                             struct make_function_state *state,
                             struct symbol              *symbol);

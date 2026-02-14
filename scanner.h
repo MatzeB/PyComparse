@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -11,6 +12,7 @@ ASSUME_NONNULL_BEGIN
 
 struct arena;
 struct diagnostics_state;
+union object;
 struct object_intern;
 struct scanner_state;
 struct symbol_table;
@@ -30,5 +32,9 @@ const char *token_kind_name(enum token_kind token_kind);
 void print_token(FILE *out, const struct token *token);
 
 struct location scanner_location(struct scanner_state *s);
+
+void          scanner_fstring_debug_capture_begin(struct scanner_state *s);
+void          scanner_fstring_debug_capture_discard(struct scanner_state *s);
+union object *scanner_fstring_debug_capture_finish(struct scanner_state *s);
 
 ASSUME_NONNULL_END

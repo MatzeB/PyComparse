@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "adt/arena.h"
 #include "nullable.h"
 
 ASSUME_NONNULL_BEGIN
@@ -42,6 +43,14 @@ struct fstring_state {
   bool     format_spec;
 };
 
+struct scanner_fstring_debug_capture_state {
+  struct arena   arena;
+  bool           active;
+  uint8_t        depth;
+  unsigned       starts[MAX_FSTRING_NESTING];
+  char *nullable tail_start;
+};
+
 struct scanner_state {
   int            c;
   char *nullable p;
@@ -61,12 +70,13 @@ struct scanner_state {
   struct object_intern *objects;
   struct arena         *strings;
 
-  struct fstring_state fstring;
-  bool                 at_begin_of_line;
-  uint8_t              fstring_stack_top;
-  unsigned             pending_dedents;
-  unsigned             last_line_indent;
-  unsigned             indentation_stack_top;
+  struct fstring_state                       fstring;
+  struct scanner_fstring_debug_capture_state fstring_debug;
+  bool                                       at_begin_of_line;
+  uint8_t                                    fstring_stack_top;
+  unsigned                                   pending_dedents;
+  unsigned                                   last_line_indent;
+  unsigned                                   indentation_stack_top;
 
   struct diagnostics_state *d;
 

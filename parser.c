@@ -1253,6 +1253,7 @@ static union ast_expression *parse_string(struct parser_state *s)
           next_token(s);
           break;
         }
+        scanner_fstring_debug_capture_begin(&s->scanner);
         next_token(s);
 
         if (combined_length > 0) {
@@ -1270,7 +1271,13 @@ static union ast_expression *parse_string(struct parser_state *s)
 
         union ast_expression *expression
             = parse_star_expressions(s, PREC_EXPRESSION);
-        bool    debug_expression = accept(s, '=');
+        bool          debug_expression = accept(s, '=');
+        union object *debug_prefix = NULL;
+        if (debug_expression) {
+          debug_prefix = scanner_fstring_debug_capture_finish(&s->scanner);
+        } else {
+          scanner_fstring_debug_capture_discard(&s->scanner);
+        }
         uint8_t conversion = FORMAT_VALUE_NONE;
         if (accept(s, '!')) {
           struct location location = scanner_location(&s->scanner);
@@ -1288,29 +1295,20 @@ static union ast_expression *parse_string(struct parser_state *s)
             diag_end(s->d);
           }
         }
-        if (debug_expression && conversion == FORMAT_VALUE_NONE) {
-          conversion = FORMAT_VALUE_REPR;
-        }
         union ast_expression *format_spec = NULL;
         if (accept(s, ':')) {
           format_spec = parse_string(s);
         }
+        if (debug_expression && conversion == FORMAT_VALUE_NONE
+            && format_spec == NULL) {
+          conversion = FORMAT_VALUE_REPR;
+        }
 
-        if (debug_expression
-            && ast_expression_type(expression) == AST_IDENTIFIER) {
-          const char   *name = expression->identifier.symbol->string;
-          size_t        len = strlen(name);
-          struct arena *arena = object_intern_arena(&s->cg.objects);
-          char         *label = arena_allocate(arena, len + 2, 1);
-          memcpy(label, name, len);
-          label[len] = '=';
-          label[len + 1] = '\0';
-          union object *label_object = object_intern_string(
-              &s->cg.objects, OBJECT_STRING, len + 1, label);
+        if (debug_expression) {
           struct fstring_element *label_element
               = idynarray_append(&elements, struct fstring_element);
           memset(label_element, 0, sizeof(*label_element));
-          label_element->u.string = label_object;
+          label_element->u.string = debug_prefix;
           label_element->is_expression = false;
         }
 

@@ -141,6 +141,12 @@ struct scan_string_flags {
 
 static const unsigned TABSIZE = 8;
 static const int      C_EOF = -1;
+#if defined(NDEBUG)
+static const size_t scanner_read_buffer_size = 32 * 1024 - 16;
+#else
+/* Small odd-sized buffer in debug builds to exercise refill edge cases. */
+static const size_t scanner_read_buffer_size = 123;
+#endif
 
 // TODO: Measure if the faster string operations on aligned addresses make up
 // for less dense packing...
@@ -149,6 +155,16 @@ static const unsigned string_alignment = alignof(void *);
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
+  if (s->fstring_debug.active) {
+    assert(s->fstring_debug.tail_start != NULL);
+    assert(s->fstring_debug.tail_start <= s->buffer_end);
+    size_t flush_size = (size_t)(s->buffer_end - s->fstring_debug.tail_start);
+    if (flush_size > 0) {
+      char *dst = arena_grow(&s->fstring_debug.arena, (unsigned)flush_size);
+      memcpy(dst, s->fstring_debug.tail_start, flush_size);
+    }
+    s->fstring_debug.tail_start = s->buffer_end;
+  }
   size_t read_size = fread(s->read_buffer, 1, s->read_buffer_size, s->input);
   if (read_size < s->read_buffer_size) {
     if (ferror(s->input)) {
@@ -162,6 +178,9 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
   }
   s->p = s->read_buffer + 1;
   s->buffer_end = s->read_buffer + read_size;
+  if (s->fstring_debug.active) {
+    s->fstring_debug.tail_start = s->read_buffer;
+  }
   return (unsigned char)*s->read_buffer;
 }
 
@@ -2235,19 +2254,22 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct object_intern *objects, struct arena *strings,
                   struct diagnostics_state *diagnostics)
 {
-  size_t read_buffer_size = 16 * 1024 - 16;
   memset(s, 0, sizeof(*s));
-  s->read_buffer = malloc(read_buffer_size);
+  s->read_buffer = malloc(scanner_read_buffer_size);
   if (s->read_buffer == NULL) {
     internal_error("out of memory");
   }
-  s->read_buffer_size = read_buffer_size;
+  s->read_buffer_size = scanner_read_buffer_size;
   s->input = input;
   s->filename = filename;
   s->line = 1;
   s->symbol_table = symbol_table;
   s->objects = objects;
   s->strings = strings;
+  arena_init(&s->fstring_debug.arena);
+  s->fstring_debug.active = false;
+  s->fstring_debug.depth = 0;
+  s->fstring_debug.tail_start = NULL;
   s->at_begin_of_line = true;
   s->d = diagnostics;
   next_char(s);
@@ -2255,7 +2277,112 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
 
 void scanner_free(struct scanner_state *s)
 {
+  arena_free(&s->fstring_debug.arena);
   free(s->read_buffer);
+}
+
+static unsigned
+scanner_fstring_debug_capture_current_size_(struct scanner_state *s)
+{
+  assert(s->fstring_debug.active);
+  unsigned size = arena_grow_current_size(&s->fstring_debug.arena);
+  char    *current = scanner_current_char_ptr(s);
+  if (current != NULL) {
+    assert(s->fstring_debug.tail_start != NULL);
+    assert(s->fstring_debug.tail_start <= current);
+    size += (unsigned)(current - s->fstring_debug.tail_start);
+  }
+  return size;
+}
+
+static void scanner_fstring_debug_capture_copy_range_(struct scanner_state *s,
+                                                      unsigned start,
+                                                      unsigned end, char *dst)
+{
+  assert(start <= end);
+
+  unsigned prefix_size = arena_grow_current_size(&s->fstring_debug.arena);
+  char    *prefix = arena_grow_current_base(&s->fstring_debug.arena);
+
+  if (start < prefix_size) {
+    unsigned n = prefix_size < end ? prefix_size - start : end - start;
+    memcpy(dst, prefix + start, n);
+    dst += n;
+  }
+  if (end > prefix_size) {
+    assert(s->fstring_debug.tail_start != NULL);
+    unsigned tail_start = start > prefix_size ? start - prefix_size : 0;
+    unsigned tail_end = end - prefix_size;
+    memcpy(dst, s->fstring_debug.tail_start + tail_start,
+           tail_end - tail_start);
+  }
+}
+
+void scanner_fstring_debug_capture_begin(struct scanner_state *s)
+{
+  if (!s->fstring_debug.active) {
+    arena_grow_begin(&s->fstring_debug.arena, 1);
+    s->fstring_debug.active = true;
+    s->fstring_debug.tail_start = scanner_current_char_ptr(s);
+    assert(s->fstring_debug.tail_start != NULL);
+  }
+  assert(s->fstring_debug.depth < MAX_FSTRING_NESTING);
+  s->fstring_debug.starts[s->fstring_debug.depth]
+      = scanner_fstring_debug_capture_current_size_(s);
+  ++s->fstring_debug.depth;
+}
+
+void scanner_fstring_debug_capture_discard(struct scanner_state *s)
+{
+  assert(s->fstring_debug.active && s->fstring_debug.depth > 0);
+  --s->fstring_debug.depth;
+  if (s->fstring_debug.depth == 0) {
+    char *begin = arena_grow_finish(&s->fstring_debug.arena);
+    arena_free_to(&s->fstring_debug.arena, begin);
+    s->fstring_debug.active = false;
+    s->fstring_debug.tail_start = NULL;
+  }
+}
+
+union object *scanner_fstring_debug_capture_finish(struct scanner_state *s)
+{
+  assert(s->fstring_debug.active && s->fstring_debug.depth > 0);
+  unsigned start = s->fstring_debug.starts[s->fstring_debug.depth - 1];
+  --s->fstring_debug.depth;
+  unsigned end = scanner_fstring_debug_capture_current_size_(s);
+  assert(start <= end);
+  unsigned captured_size = end - start;
+
+  struct arena *intern_arena = object_intern_arena(s->objects);
+  char         *chars = arena_allocate(intern_arena, (size_t)captured_size, 1);
+  if (captured_size > 0) {
+    scanner_fstring_debug_capture_copy_range_(s, start, end, chars);
+  }
+  unsigned debug_end = captured_size;
+  for (unsigned i = captured_size; i > 0; --i) {
+    if (chars[i - 1] == '=') {
+      debug_end = i;
+      while (debug_end < captured_size
+             && (chars[debug_end] == ' ' || chars[debug_end] == '\t'
+                 || chars[debug_end] == '\n' || chars[debug_end] == '\r'
+                 || chars[debug_end] == '\f')) {
+        ++debug_end;
+      }
+      break;
+    }
+  }
+
+  if (debug_end < captured_size) {
+    captured_size = debug_end;
+  }
+
+  if (s->fstring_debug.depth == 0) {
+    char *begin = arena_grow_finish(&s->fstring_debug.arena);
+    arena_free_to(&s->fstring_debug.arena, begin);
+    s->fstring_debug.active = false;
+    s->fstring_debug.tail_start = NULL;
+  }
+  return object_intern_string(s->objects, OBJECT_STRING, captured_size, chars);
 }
 
 static const char *const token_names[] = {

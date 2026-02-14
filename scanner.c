@@ -41,6 +41,7 @@
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "unicode_nfkc_table.h"
 #include "unicode_xid_table.h"
 #include "util.h"
 
@@ -369,9 +370,12 @@ static void scan_line_comment(struct scanner_state *s)
 }
 
 /* Scan the continuation of an identifier. The arena grow must already be
- * started and the first character(s) already written. */
+ * started and the first character(s) already written.
+ * `has_non_ascii` indicates whether non-ASCII bytes have already been seen
+ * (e.g. from the identifier start character). */
 static void scan_identifier_continue(struct scanner_state *s,
-                                     struct arena         *arena)
+                                     struct arena         *arena,
+                                     bool                  has_non_ascii)
 {
   for (;;) {
     switch (s->c) {
@@ -385,6 +389,7 @@ static void scan_identifier_continue(struct scanner_state *s,
         char     utf8[4];
         int      len = decode_utf8(s, &cp, utf8);
         if (len && is_xid_continue(cp)) {
+          has_non_ascii = true;
           for (int i = 0; i < len; i++)
             arena_grow_char(arena, utf8[i]);
           next_char(s);
@@ -400,6 +405,21 @@ static void scan_identifier_continue(struct scanner_state *s,
       break;
     }
     break;
+  }
+
+  /* NFKC normalize non-ASCII identifiers (PEP 3131). */
+  if (has_non_ascii) {
+    unsigned raw_len = arena_grow_current_size(arena);
+    char    *raw     = arena_grow_current_base(arena);
+    int nfkc_len = nfkc_normalize((uint8_t *)raw, (int)raw_len,
+                                  (int)raw_len);
+    if (nfkc_len >= 0) {
+      /* NFKC result fits (it's always <= original length for identifiers).
+       * Truncate the arena grow region to the normalized length. */
+      arena_grow_truncate(arena, (unsigned)nfkc_len);
+    }
+    /* If nfkc_normalize returns -1 (shouldn't happen for valid identifiers),
+     * fall through and use the raw string. */
   }
 
   arena_grow_char(arena, '\0');
@@ -420,7 +440,7 @@ static void scan_identifier(struct scanner_state *s, char first_char,
   arena_grow_begin(arena, string_alignment);
   arena_grow_char(arena, first_char);
   if (second_char != 0) arena_grow_char(arena, second_char);
-  scan_identifier_continue(s, arena);
+  scan_identifier_continue(s, arena, /*has_non_ascii=*/false);
 }
 
 struct bigint_accum {
@@ -2110,7 +2130,7 @@ begin_new_line:
           for (int i = 0; i < len; i++)
             arena_grow_char(arena, utf8[i]);
           next_char(s);
-          scan_identifier_continue(s, arena);
+          scan_identifier_continue(s, arena, /*has_non_ascii=*/true);
           return;
         }
         /* Invalid: not a valid UTF-8 sequence or not XID_Start. */

@@ -35,3 +35,16 @@ print(文字)
 # 蟒 = Python (the snake)
 蟒 = "python"
 print(蟒)
+
+# NFKC normalization (PEP 3131)
+# Micro sign (U+00B5) normalizes to Greek small mu (U+03BC)
+µ = "micro"
+print(μ)
+
+# Math fraktur letters normalize to ASCII
+𝔘𝔫𝔦𝔠𝔬𝔡𝔢 = "fraktur"
+print(Unicode)
+
+# NFD: e + combining acute composes to precomposed form
+café = "nfd_coffee"
+print(café)

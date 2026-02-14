@@ -94,6 +94,7 @@ add_executable(scanner_test
   symbol_table.h
   symbol_table_types.h
   symbol_types.h
+  unicode_xid_table.c
   util.c
   util.h
 )
@@ -140,6 +141,7 @@ add_executable(parser_test
   symbol_table.h
   symbol_table_types.h
   symbol_types.h
+  unicode_xid_table.c
   util.c
   util.h
   writer.c

@@ -31,3 +31,7 @@ print(結果)
 for 文字 in "ab":
     pass
 print(文字)
+
+# 蟒 = Python (the snake)
+蟒 = "python"
+print(蟒)

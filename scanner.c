@@ -41,6 +41,7 @@
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "unicode_xid_table.h"
 #include "util.h"
 
 #define UNLIKELY(x) __builtin_expect((x), 0)
@@ -212,6 +213,64 @@ static inline void scanner_set_current_char_ptr(struct scanner_state *s,
   s->p = p + 1;
 }
 
+/* Decode a UTF-8 codepoint starting from the lead byte already in s->c.
+ * Consumes the continuation bytes via next_char(). After a successful
+ * decode, s->c holds the last continuation byte; the caller must call
+ * next_char() to advance past it.
+ *
+ * On success: writes decoded codepoint to *out, writes raw UTF-8 bytes
+ *             to bytes_out[0..return-1], returns byte count (2-4).
+ * On failure: returns 0. s->c may point at an unconsumed byte. */
+static int decode_utf8(struct scanner_state *s, uint32_t *out,
+                       char bytes_out[4])
+{
+  unsigned int lead = (unsigned int)s->c;
+  uint32_t     cp;
+  int          n;  /* expected continuation bytes */
+
+  if (lead < 0xC2) {
+    /* 0x80-0xBF are continuation bytes (not valid as lead).
+     * 0xC0-0xC1 are overlong 2-byte encodings. */
+    return 0;
+  } else if (lead < 0xE0) {
+    cp = lead & 0x1F;
+    n = 1;
+  } else if (lead < 0xF0) {
+    cp = lead & 0x0F;
+    n = 2;
+  } else if (lead <= 0xF4) {
+    cp = lead & 0x07;
+    n = 3;
+  } else {
+    /* 0xF5-0xFF cannot appear in valid UTF-8 */
+    return 0;
+  }
+
+  bytes_out[0] = (char)lead;
+
+  for (int i = 0; i < n; i++) {
+    next_char(s);
+    if ((s->c & 0xC0) != 0x80) {
+      /* Not a continuation byte. Don't consume it. */
+      return 0;
+    }
+    bytes_out[i + 1] = (char)s->c;
+    cp = (cp << 6) | (s->c & 0x3F);
+  }
+
+  /* Reject surrogates (U+D800..U+DFFF) and out-of-range */
+  if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+  if (cp > 0x10FFFF) return 0;
+
+  /* Reject overlong 3-byte encodings (< U+0800) */
+  if (n == 2 && cp < 0x0800) return 0;
+  /* Reject overlong 4-byte encodings (< U+10000) */
+  if (n == 3 && cp < 0x10000) return 0;
+
+  *out = cp;
+  return n + 1;
+}
+
 static void scan_skip_inline_spaces(struct scanner_state *s)
 {
   for (;;) {
@@ -309,13 +368,11 @@ static void scan_line_comment(struct scanner_state *s)
   }
 }
 
-static void scan_identifier(struct scanner_state *s, char first_char,
-                            char second_char)
+/* Scan the continuation of an identifier. The arena grow must already be
+ * started and the first character(s) already written. */
+static void scan_identifier_continue(struct scanner_state *s,
+                                     struct arena         *arena)
 {
-  struct arena *arena = &s->symbol_table->arena;
-  arena_grow_begin(arena, string_alignment);
-  arena_grow_char(arena, first_char);
-  if (second_char != 0) arena_grow_char(arena, second_char);
   for (;;) {
     switch (s->c) {
     case IDENTIFIER_CASES:
@@ -324,11 +381,21 @@ static void scan_identifier(struct scanner_state *s, char first_char,
       continue;
     default:
       if (s->c >= 128) {
-        /* TODO: validate UTF-8 encoding and check Unicode ID_Continue
-         * category (PEP 3131). Currently accepts any non-ASCII byte. */
-        arena_grow_char(arena, (char)s->c);
-        next_char(s);
-        continue;
+        uint32_t cp;
+        char     utf8[4];
+        int      len = decode_utf8(s, &cp, utf8);
+        if (len && is_xid_continue(cp)) {
+          for (int i = 0; i < len; i++)
+            arena_grow_char(arena, utf8[i]);
+          next_char(s);
+          continue;
+        }
+        /* Not XID_Continue or invalid UTF-8. End the identifier.
+         * If decode consumed continuation bytes, s->c holds the byte
+         * after the sequence; if it failed immediately, s->c is the
+         * same lead byte. Either way, don't consume — the main
+         * dispatcher will handle it as a new token. */
+        break;
       }
       break;
     }
@@ -344,6 +411,16 @@ static void scan_identifier(struct scanner_state *s, char first_char,
 
   s->token.kind = symbol->token_kind;
   s->token.u.symbol = symbol;
+}
+
+static void scan_identifier(struct scanner_state *s, char first_char,
+                            char second_char)
+{
+  struct arena *arena = &s->symbol_table->arena;
+  arena_grow_begin(arena, string_alignment);
+  arena_grow_char(arena, first_char);
+  if (second_char != 0) arena_grow_char(arena, second_char);
+  scan_identifier_continue(s, arena);
 }
 
 struct bigint_accum {
@@ -2024,13 +2101,25 @@ begin_new_line:
 
     default:
       if (s->c >= 128) {
-        /* TODO: validate UTF-8 encoding, check Unicode ID_Start category
-         * (PEP 3131), and apply NFKC normalization. Currently accepts any
-         * non-ASCII byte as identifier start without normalization. */
-        char first_char = (char)s->c;
-        next_char(s);
-        scan_identifier(s, first_char, /*second_char=*/0);
-        return;
+        uint32_t cp;
+        char     utf8[4];
+        int      len = decode_utf8(s, &cp, utf8);
+        if (len && is_xid_start(cp)) {
+          struct arena *arena = &s->symbol_table->arena;
+          arena_grow_begin(arena, string_alignment);
+          for (int i = 0; i < len; i++)
+            arena_grow_char(arena, utf8[i]);
+          next_char(s);
+          scan_identifier_continue(s, arena);
+          return;
+        }
+        /* Invalid: not a valid UTF-8 sequence or not XID_Start. */
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "invalid character in identifier");
+        diag_end(s->d);
+        s->token.kind = T_INVALID;
+        if (s->c >= 128) next_char(s);
+        continue;
       }
       invalid_c = s->c;
       next_char(s);

@@ -1,0 +1,2 @@
+test/errors/unicode_identifier.py:1 error: invalid character in identifier
+test/errors/unicode_identifier.py:1 error: expected statement, got `=`

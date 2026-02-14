@@ -160,12 +160,13 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
   }
   s->p = s->read_buffer + 1;
   s->buffer_end = s->read_buffer + read_size;
-  return *s->read_buffer;
+  return (unsigned char)*s->read_buffer;
 }
 
 static void next_char(struct scanner_state *s)
 {
-  s->c = UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s) : *(s->p++);
+  s->c = UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s)
+                                         : (unsigned char)*(s->p++);
 }
 
 static void eat_char(struct scanner_state *s, int c)
@@ -322,6 +323,13 @@ static void scan_identifier(struct scanner_state *s, char first_char,
       next_char(s);
       continue;
     default:
+      if (s->c >= 128) {
+        /* TODO: validate UTF-8 encoding and check Unicode ID_Continue
+         * category (PEP 3131). Currently accepts any non-ASCII byte. */
+        arena_grow_char(arena, (char)s->c);
+        next_char(s);
+        continue;
+      }
       break;
     }
     break;
@@ -2016,7 +2024,13 @@ begin_new_line:
 
     default:
       if (s->c >= 128) {
-        unimplemented("non-ASCII characters in input");
+        /* TODO: validate UTF-8 encoding, check Unicode ID_Start category
+         * (PEP 3131), and apply NFKC normalization. Currently accepts any
+         * non-ASCII byte as identifier start without normalization. */
+        char first_char = (char)s->c;
+        next_char(s);
+        scan_identifier(s, first_char, /*second_char=*/0);
+        return;
       }
       invalid_c = s->c;
       next_char(s);

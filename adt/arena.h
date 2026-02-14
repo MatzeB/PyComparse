@@ -9,6 +9,22 @@
 
 #include "bitfiddle.h"
 
+#define ADT_HAVE_ASAN 0
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#undef ADT_HAVE_ASAN
+#define ADT_HAVE_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#undef ADT_HAVE_ASAN
+#define ADT_HAVE_ASAN 1
+#endif
+
+#if ADT_HAVE_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
+
 #ifndef UNLIKELY
 #define UNLIKELY(x) __builtin_expect((x), 0)
 #endif
@@ -29,9 +45,32 @@ struct arena {
 };
 
 static const unsigned arena_max_alignment = 64;
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !ADT_HAVE_ASAN
 static const unsigned char arena_poison_free_pattern = 0xDD;
 #endif
+
+static inline void arena_poison_freed_(void *addr, size_t size)
+{
+  if (size == 0) return;
+#if !defined(NDEBUG) && !ADT_HAVE_ASAN
+  memset(addr, arena_poison_free_pattern, size);
+#endif
+#if ADT_HAVE_ASAN
+  __asan_poison_memory_region(addr, size);
+#else
+  (void)addr;
+#endif
+}
+
+static inline void arena_unpoison_alloc_(void *addr, size_t size)
+{
+  if (size == 0) return;
+#if ADT_HAVE_ASAN
+  __asan_unpoison_memory_region(addr, size);
+#else
+  (void)addr;
+#endif
+}
 
 static inline void arena_init(struct arena *arena)
 {
@@ -54,6 +93,8 @@ arena_allocate_block_(struct arena *arena, unsigned size)
   arena->block = header;
   arena->allocated = sizeof(struct block_header);
   arena->limit = block_size;
+  arena_poison_freed_((char *)header + arena->allocated,
+                      arena->limit - arena->allocated);
 }
 
 static inline void arena_align_(struct arena *arena, unsigned alignment)
@@ -82,6 +123,7 @@ arena_allocate_slow_(struct arena *arena, size_t size, unsigned alignment)
   }
   void *result = (char *)arena->block + arena->allocated;
   arena->allocated += (unsigned)size;
+  arena_unpoison_alloc_(result, size);
   return result;
 }
 
@@ -114,6 +156,7 @@ static inline void *arena_allocate(struct arena *arena, size_t size,
   arena_align_(arena, alignment);
   void *result = (char *)arena->block + arena->allocated;
   arena->allocated += size;
+  arena_unpoison_alloc_(result, size);
   return result;
 }
 
@@ -123,9 +166,7 @@ static inline void arena_free(struct arena *arena)
   for (struct block_header *block = arena->block, *prev; block != NULL;
        block = prev) {
     prev = block->prev;
-#ifndef NDEBUG
-    memset(block, arena_poison_free_pattern, block->block_size);
-#endif
+    arena_poison_freed_(block, block->block_size);
     free(block);
   }
   arena->block = NULL;
@@ -142,23 +183,17 @@ static inline void arena_free_to(struct arena *arena, const void *free_up_to)
         && free_up_to < (const void *)((char *)block + block->block_size))
       break;
     struct block_header *prev = block->prev;
-#ifndef NDEBUG
-    memset(block, arena_poison_free_pattern, block->block_size);
-#endif
+    arena_poison_freed_(block, block->block_size);
     free(block);
     block = prev;
     assert(block != NULL && "address must be part of arena");
   }
 
-#ifndef NDEBUG
   const unsigned free_offset
       = (unsigned)((const char *)free_up_to - (const char *)block);
   assert(free_offset <= arena->allocated);
-  if (free_offset < arena->allocated) {
-    memset((char *)block + free_offset, arena_poison_free_pattern,
-           arena->allocated - free_offset);
-  }
-#endif
+  arena_poison_freed_((char *)block + free_offset,
+                      arena->allocated - free_offset);
 
   arena->block = block;
   arena->allocated = (const char *)free_up_to - (const char *)block;
@@ -209,6 +244,7 @@ new_block_while_growing_(struct arena *arena, unsigned size)
   arena_allocate_block_(arena, current_size + size);
   arena_align_(arena, arena->grow_alignment);
   void *new_begin = arena_grow_current_base(arena);
+  arena_unpoison_alloc_(new_begin, current_size);
   memcpy(new_begin, old_begin, current_size);
   arena->grow = arena->allocated + current_size;
 }
@@ -221,6 +257,7 @@ static inline void *arena_grow(struct arena *arena, unsigned size)
   }
   void *result = (char *)arena->block + arena->grow;
   arena->grow += size;
+  arena_unpoison_alloc_(result, size);
   return result;
 }
 

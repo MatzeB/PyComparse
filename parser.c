@@ -2136,18 +2136,30 @@ static union ast_statement *parse_del(struct parser_state *s)
 
 static struct dotted_name *parse_dotted_name(struct parser_state *s)
 {
-  arena_grow_begin(&s->ast, alignof(struct dotted_name));
-  arena_grow(&s->ast, sizeof(struct dotted_name));
-  unsigned num_symbols = 0;
+  struct symbol   *inline_storage[8];
+  struct idynarray symbols;
+  idynarray_init(&symbols, inline_storage, sizeof(inline_storage));
   do {
-    struct symbol  *symbol = parse_identifier(s);
-    struct symbol **ptr = (struct symbol **)arena_grow(&s->ast, sizeof(*ptr));
-    *ptr = symbol;
-    ++num_symbols;
+    struct symbol **slot = idynarray_append(&symbols, struct symbol *);
+    *slot = parse_identifier(s);
   } while (accept(s, T_DOT));
 
-  struct dotted_name *result = arena_grow_finish(&s->ast);
+  unsigned num_symbols = idynarray_length(&symbols, struct symbol *);
+  if ((size_t)num_symbols
+      > (SIZE_MAX - sizeof(struct dotted_name)) / sizeof(struct symbol *)) {
+    internal_error("dotted_name size overflow");
+  }
+  size_t size = sizeof(struct dotted_name)
+                + (size_t)num_symbols * sizeof(struct symbol *);
+
+  struct dotted_name *result
+      = arena_allocate(&s->ast, size, alignof(struct dotted_name));
   result->num_symbols = num_symbols;
+  if (num_symbols > 0) {
+    memcpy(result->symbols, idynarray_data(&symbols),
+           (size_t)num_symbols * sizeof(struct symbol *));
+  }
+  idynarray_free(&symbols);
   return result;
 }
 

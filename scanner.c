@@ -1836,15 +1836,22 @@ begin_new_line:
     case 'F': {
       char first_char = (char)s->c;
       next_char(s);
+      struct scan_string_flags flags = {
+        .unicode = true,
+        .format = true,
+      };
+      char second_char = (char)s->c;
+      if (second_char == 'r' || second_char == 'R') {
+        next_char(s);
+        flags.raw = true;
+      } else {
+        second_char = 0;
+      }
       if (s->c == '"' || s->c == '\'') {
-        struct scan_string_flags flags = {
-          .unicode = true,
-          .format = true,
-        };
         scan_string_literal(s, flags);
         return;
       } else {
-        scan_identifier(s, first_char, /*second_char=*/0);
+        scan_identifier(s, first_char, second_char);
       }
       return;
     }
@@ -1861,6 +1868,9 @@ begin_new_line:
       if (second_char == 'b' || second_char == 'B') {
         next_char(s);
         flags.unicode = false;
+      } else if (second_char == 'f' || second_char == 'F') {
+        next_char(s);
+        flags.format = true;
       } else {
         second_char = 0;
       }

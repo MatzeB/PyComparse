@@ -807,6 +807,12 @@ static struct symbol_info *get_or_init_info(struct cg_state *s,
   return info;
 }
 
+static inline bool is_class_body_class_symbol(struct cg_state *s,
+                                              struct symbol   *name)
+{
+  return s->code.in_class_body && strcmp(name->string, "__class__") == 0;
+}
+
 bool cg_declare(struct cg_state *s, struct symbol *name,
                 enum symbol_info_type type)
 {
@@ -889,6 +895,24 @@ void cg_load(struct cg_state *s, struct symbol *name)
     cg_op_push1(s, OPCODE_LOAD_FAST, info->index);
     return;
   case SYMBOL_CELL:
+    if (is_class_body_class_symbol(s, name)) {
+      union object *freevars = s->code.freevars;
+      size_t        length = strlen(name->string);
+      for (unsigned i = 0, n = object_list_length(freevars); i < n; ++i) {
+        const union object *object = object_list_at(freevars, i);
+        if (object->type != OBJECT_STRING) continue;
+        const struct object_string *string = &object->string;
+        if (string->length == length
+            && memcmp(string->chars, name->string, length) == 0) {
+          cg_op_push1(s, OPCODE_LOAD_CLASSDEREF,
+                      object_list_length(s->code.cellvars) + i);
+          return;
+        }
+      }
+      unsigned index = cg_register_name(s, name);
+      cg_op_push1(s, OPCODE_LOAD_NAME, index);
+      return;
+    }
     cg_op_push1(s, OPCODE_LOAD_DEREF, info->index);
     return;
   case SYMBOL_NONLOCAL:
@@ -914,6 +938,11 @@ void cg_store(struct cg_state *s, struct symbol *name)
     cg_op_pop1(s, OPCODE_STORE_FAST, info->index);
     return;
   case SYMBOL_CELL:
+    if (is_class_body_class_symbol(s, name)) {
+      unsigned index = cg_register_name(s, name);
+      cg_op_pop1(s, OPCODE_STORE_NAME, index);
+      return;
+    }
     cg_op_pop1(s, OPCODE_STORE_DEREF, info->index);
     return;
   case SYMBOL_NONLOCAL:
@@ -938,6 +967,11 @@ void cg_delete(struct cg_state *s, struct symbol *name)
     cg_op(s, OPCODE_DELETE_FAST, info->index);
     return;
   case SYMBOL_CELL:
+    if (is_class_body_class_symbol(s, name)) {
+      unsigned index = cg_register_name(s, name);
+      cg_op(s, OPCODE_DELETE_NAME, index);
+      return;
+    }
     cg_op(s, OPCODE_DELETE_DEREF, info->index);
     return;
   case SYMBOL_NONLOCAL:

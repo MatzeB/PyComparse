@@ -1472,6 +1472,7 @@ struct binding_scope {
   struct binding_scope *nullable parent;
   struct ast_def *nullable       def;
   struct cg_state               *cg;
+  struct symbol                 *class_symbol;
   bool                           is_class;
   bool                           is_comprehension;
   bool                           class_needs_class_cell;
@@ -1530,6 +1531,12 @@ static bool symbol_array_contains(struct idynarray *array,
 static bool is_class_symbol(struct symbol *symbol)
 {
   return strcmp(symbol->string, "__class__") == 0;
+}
+
+static bool class_explicitly_binds_class_symbol(struct binding_scope *scope)
+{
+  return symbol_array_contains(&scope->globals, scope->class_symbol)
+         || symbol_array_contains(&scope->nonlocals, scope->class_symbol);
 }
 
 static void emit_pending_finally(struct cg_state         *s,
@@ -1610,6 +1617,8 @@ static void binding_scope_init(struct binding_scope          *scope,
   scope->cg = cg;
   scope->parent = parent;
   scope->def = def;
+  scope->class_symbol
+      = symbol_table_get_or_insert(cg->symbol_table, "__class__");
   scope->is_class = is_class;
   scope->is_comprehension = is_comprehension;
   idynarray_init(&scope->locals, scope->locals_inline,
@@ -1662,7 +1671,20 @@ static bool resolve_from_parent_scope(struct binding_scope *nullable scope,
   }
 
   if (scope->is_class) {
-    if (scope->class_needs_class_cell && is_class_symbol(name)) {
+    if (is_class_symbol(name)) {
+      if (symbol_array_contains(&scope->globals, name)) {
+        return false;
+      }
+      if (symbol_array_contains(&scope->nonlocals, name)) {
+        if (resolve_from_parent_scope(scope->parent, name)) {
+          symbol_array_append_unique(&scope->freevars, name);
+          return true;
+        }
+        return false;
+      }
+      /* Methods nested in this class should capture this class via the
+       * implicit __class__ cell, even if an outer scope also has __class__. */
+      scope->class_needs_class_cell = true;
       return true;
     }
     if (symbol_array_contains(&scope->freevars, name)) {
@@ -2367,7 +2389,8 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
     } else if (is_class_symbol(name) && scope.parent != NULL
-               && scope.parent->is_class) {
+               && scope.parent->is_class
+               && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);
       scope.parent->class_needs_class_cell = true;
     }
@@ -2461,7 +2484,8 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
     } else if (is_class_symbol(name) && scope.parent != NULL
-               && scope.parent->is_class) {
+               && scope.parent->is_class
+               && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);
       scope.parent->class_needs_class_cell = true;
     }
@@ -2572,7 +2596,8 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
     } else if (is_class_symbol(name) && scope.parent != NULL
-               && scope.parent->is_class) {
+               && scope.parent->is_class
+               && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);
       scope.parent->class_needs_class_cell = true;
     }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>pycomparse</title>
+    <title>PyComparse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,57 +18,35 @@
 
     <header class="site-header">
       <div class="brand">
-        <span class="brand-kicker">Project</span>
-        <h1>pycomparse</h1>
+        <h1>PyComparse</h1>
+        <p class="brand-subtext">Python Compiler Parser</p>
       </div>
-      <a class="repo-link" href="https://github.com/MatzeB/pycomparse" target="_blank" rel="noreferrer">GitHub</a>
+      <div class="header-actions">
+        <figure class="header-image">
+          <img
+            src="assets/homepage_image.png"
+            alt="PyComparse cast lineup artwork"
+          />
+        </figure>
+        <a class="repo-link" href="https://github.com/MatzeB/pycomparse" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
     </header>
 
     <nav class="tabs" aria-label="Primary">
       <button class="tab is-active" data-tab="home">Home</button>
-      <button class="tab" data-tab="readme">README</button>
       <button class="tab" data-tab="benchmarks">Benchmarks</button>
     </nav>
 
     <main>
       <section class="panel is-active" id="tab-home">
-        <h2>Fast Python bytecode compilation in C</h2>
-        <p>
-          pycomparse is a Python 3.8.20-compatible bytecode compiler focused on
-          compilation speed and practical parity.
-        </p>
-        <div class="home-cards">
-          <article>
-            <h3>Target</h3>
-            <p>Python 3.8.20 bytecode format</p>
-          </article>
-          <article>
-            <h3>Language</h3>
-            <p>C (scanner, parser, code generator)</p>
-          </article>
-          <article>
-            <h3>Focus</h3>
-            <p>Fast compile throughput and robust testing</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel" id="tab-readme">
-        <div class="section-head">
-          <h2>Latest README (main branch)</h2>
-          <a href="https://github.com/MatzeB/pycomparse/blob/main/README.md" target="_blank" rel="noreferrer">Open on GitHub</a>
-        </div>
-        <p class="readme-note">
-          This view fetches the current README from GitHub at runtime.
-        </p>
-        <div id="readme-status" class="status">Loading README...</div>
         <article id="readme-content" class="markdown-body"></article>
+        <div id="readme-status" class="status">Loading README...</div>
       </section>
 
       <section class="panel" id="tab-benchmarks">
         <h2>Benchmark Results</h2>
         <p>
-          Benchmarks compare CPython <code>3.8.20</code> against pycomparse
+          Benchmarks compare CPython <code>3.8.20</code> against PyComparse
           revision <code id="bench-revision"></code>.
         </p>
         <div id="bench-status" class="status">Loading benchmark files...</div>
@@ -83,7 +61,7 @@
                 <th>Suite</th>
                 <th>Files</th>
                 <th>CPython total (ms)</th>
-                <th>pycomparse total (ms)</th>
+                <th>PyComparse total (ms)</th>
                 <th>Speedup</th>
                 <th>Notes</th>
               </tr>
@@ -95,7 +73,44 @@
         <p class="footnote">
           Source: local <code>bench_results/bench-all.json</code> and
           <code>bench_results/bench-synthetic-large.json</code>.
+          Runner script:
+          <a
+            href="https://github.com/MatzeB/pycomparse/blob/homepage-site/benchy.sh"
+            target="_blank"
+            rel="noreferrer"
+            ><code>benchy.sh</code></a
+          >.
         </p>
+
+        <h3>Detailed File Results</h3>
+        <div class="detail-controls">
+          <label for="detail-suite">Suite</label>
+          <select id="detail-suite"></select>
+          <label for="detail-filter">Filter</label>
+          <input
+            id="detail-filter"
+            type="text"
+            placeholder="Filter by filename..."
+          />
+        </div>
+        <div id="detail-status" class="status">Loading detailed results...</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Size (bytes)</th>
+                <th>CPython median (ms)</th>
+                <th>CPython stddev (ms)</th>
+                <th>PyComparse median (ms)</th>
+                <th>PyComparse stddev (ms)</th>
+                <th>Speedup</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="detail-table"></tbody>
+          </table>
+        </div>
       </section>
     </main>
 

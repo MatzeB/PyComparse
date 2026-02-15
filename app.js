@@ -47,6 +47,30 @@ function fmtMs(x) {
   });
 }
 
+function fmtMaybeMs(x) {
+  return Number.isFinite(x) ? fmtMs(x) : "n/a";
+}
+
+function fmtSpeedup(x) {
+  return Number.isFinite(x) ? `${x.toFixed(2)}x` : "n/a";
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function getNestedNumber(obj, key) {
+  if (!obj || typeof obj !== "object") {
+    return NaN;
+  }
+  return Number(obj[key]);
+}
+
 async function loadSuiteSummary(suite) {
   const res = await fetch(suite.source, { cache: "no-cache" });
   if (!res.ok) {
@@ -59,12 +83,35 @@ async function loadSuiteSummary(suite) {
   let fail = 0;
   let cpythonMs = 0;
   let pycomparseMs = 0;
+  const details = [];
 
   for (const row of results) {
+    const cpythonMedian = getNestedNumber(row.cpython, "median_ms");
+    const pycomparseMedian = getNestedNumber(row.pycomparse, "median_ms");
+    const cpythonStddev = getNestedNumber(row.cpython, "stddev_ms");
+    const pycomparseStddev = getNestedNumber(row.pycomparse, "stddev_ms");
+    let speedup = Number(row.ratio_cpython_over_pycomparse);
+    if (!Number.isFinite(speedup) && pycomparseMedian > 0) {
+      speedup = cpythonMedian / pycomparseMedian;
+    }
+
+    const file = String(row.file || "");
+    details.push({
+      file,
+      fileLower: file.toLowerCase(),
+      sizeBytes: Number(row.size_bytes || 0),
+      cpythonMedian,
+      cpythonStddev,
+      pycomparseMedian,
+      pycomparseStddev,
+      speedup,
+      status: String(row.status || "unknown"),
+    });
+
     if (row.status === "ok") {
       ok += 1;
-      cpythonMs += Number(row.cpython?.median_ms || 0);
-      pycomparseMs += Number(row.pycomparse?.median_ms || 0);
+      cpythonMs += Number((row.cpython && row.cpython.median_ms) || 0);
+      pycomparseMs += Number((row.pycomparse && row.pycomparse.median_ms) || 0);
     } else {
       fail += 1;
     }
@@ -79,12 +126,88 @@ async function loadSuiteSummary(suite) {
     notes: fail > 0 ? `${fail} failed` : "No failures",
     ok,
     fail,
+    details,
   };
 }
 
+function renderDetailRows(loaded) {
+  const suiteSelect = document.getElementById("detail-suite");
+  const filterInput = document.getElementById("detail-filter");
+  const detailStatus = document.getElementById("detail-status");
+  const tbody = document.getElementById("detail-table");
+  if (!suiteSelect || !filterInput || !detailStatus || !tbody) {
+    return;
+  }
+
+  const suiteIndex = Number(suiteSelect.value || 0);
+  const suite = loaded[suiteIndex];
+  if (!suite) {
+    tbody.innerHTML = "";
+    detailStatus.textContent = "No detailed benchmark data available.";
+    return;
+  }
+
+  const filter = filterInput.value.trim().toLowerCase();
+  const rows = suite.details.filter((row) => row.fileLower.includes(filter));
+  if (rows.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="8">No files match the current filter.</td></tr>';
+    detailStatus.textContent = `No matches in ${suite.name}.`;
+    return;
+  }
+
+  const html = rows
+    .map((row) => {
+      const file = escapeHtml(row.file);
+      const rowClass = row.status === "ok" ? "" : ' class="row-failed"';
+      return `
+      <tr${rowClass}>
+        <td title="${file}">${file}</td>
+        <td>${row.sizeBytes.toLocaleString()}</td>
+        <td>${fmtMaybeMs(row.cpythonMedian)}</td>
+        <td>${fmtMaybeMs(row.cpythonStddev)}</td>
+        <td>${fmtMaybeMs(row.pycomparseMedian)}</td>
+        <td>${fmtMaybeMs(row.pycomparseStddev)}</td>
+        <td>${fmtSpeedup(row.speedup)}</td>
+        <td>${escapeHtml(row.status)}</td>
+      </tr>`;
+    })
+    .join("");
+  tbody.innerHTML = html;
+  detailStatus.textContent =
+    `Showing ${rows.length.toLocaleString()} of ` +
+    `${suite.details.length.toLocaleString()} files from ${suite.name}.`;
+}
+
+function setupDetailControls(loaded) {
+  const suiteSelect = document.getElementById("detail-suite");
+  const filterInput = document.getElementById("detail-filter");
+  if (!suiteSelect || !filterInput) {
+    return;
+  }
+
+  suiteSelect.innerHTML = loaded
+    .map(
+      (suite, index) =>
+        `<option value="${index}">${escapeHtml(suite.name)}</option>`
+    )
+    .join("");
+
+  suiteSelect.onchange = () => renderDetailRows(loaded);
+  filterInput.oninput = () => renderDetailRows(loaded);
+  renderDetailRows(loaded);
+}
+
 async function renderBenchmarks() {
-  document.getElementById("bench-revision").textContent = BENCHMARK.revision;
   const status = document.getElementById("bench-status");
+  const revisionEl = document.getElementById("bench-revision");
+  const tableEl = document.getElementById("bench-table");
+  const metricsEl = document.getElementById("bench-metrics");
+  if (!status || !revisionEl || !tableEl || !metricsEl) {
+    return;
+  }
+
+  revisionEl.textContent = BENCHMARK.revision;
   status.textContent = "Loading benchmark files...";
 
   const loaded = [];
@@ -101,6 +224,7 @@ async function renderBenchmarks() {
         notes: `Could not load: ${suite.source}`,
         ok: 0,
         fail: 0,
+        details: [],
       });
     }
   }
@@ -117,7 +241,7 @@ async function renderBenchmarks() {
       value: `CPython ${BENCHMARK.python}`,
     },
     {
-      label: "pycomparse revision",
+      label: "PyComparse revision",
       value: BENCHMARK.revision,
     },
   ];
@@ -131,7 +255,7 @@ async function renderBenchmarks() {
         </article>`
     )
     .join("");
-  document.getElementById("bench-metrics").innerHTML = metricHtml;
+  metricsEl.innerHTML = metricHtml;
 
   const rows = loaded
     .map(
@@ -141,13 +265,14 @@ async function renderBenchmarks() {
         <td>${s.files.toLocaleString()}</td>
         <td>${fmtMs(s.cpythonMs)}</td>
         <td>${fmtMs(s.pycomparseMs)}</td>
-        <td>${s.speedup === null ? "n/a" : `${s.speedup.toFixed(2)}x`}</td>
+        <td>${fmtSpeedup(s.speedup)}</td>
         <td>${s.notes}</td>
       </tr>`
     )
     .join("");
 
-  document.getElementById("bench-table").innerHTML = rows;
+  tableEl.innerHTML = rows;
+  setupDetailControls(loaded);
   status.textContent = "Loaded from local bench_results JSON files.";
 }
 
@@ -167,12 +292,25 @@ async function loadReadme() {
     content.innerHTML = window.marked.parse(markdown);
     status.textContent = "Loaded from GitHub main branch.";
   } catch (err) {
-    status.textContent =
-      "Could not load README from GitHub. Use the link above to view it.";
+    status.innerHTML =
+      'Could not load README from GitHub. ' +
+      '<a href="https://github.com/MatzeB/pycomparse/blob/main/README.md" ' +
+      'target="_blank" rel="noreferrer">Open it on GitHub</a>.';
     content.innerHTML = "";
   }
 }
 
 setupTabs();
-renderBenchmarks();
+
+renderBenchmarks().catch((err) => {
+  const status = document.getElementById("bench-status");
+  const detailStatus = document.getElementById("detail-status");
+  if (status) {
+    status.textContent = `Benchmark render failed: ${String(err)}`;
+  }
+  if (detailStatus) {
+    detailStatus.textContent = "Detailed results are unavailable.";
+  }
+});
+
 loadReadme();

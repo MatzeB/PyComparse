@@ -1,0 +1,1 @@
+test/errors/scan_bad_utf8_default.py:1 error: failed to decode source with encoding: utf-8

@@ -1326,6 +1326,13 @@ static void error_unterminated_string(struct scanner_state *s)
   diag_end(s->d);
 }
 
+static void error_invalid_utf8_source(struct scanner_state *s)
+{
+  diag_begin_error(s->d, scanner_location(s));
+  diag_frag(s->d, "failed to decode source with encoding: utf-8");
+  diag_end(s->d);
+}
+
 static void fstring_push(struct scanner_state *s, enum string_quote quote,
                          bool format_spec)
 {
@@ -1347,8 +1354,10 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
                                                                   char *end)
 {
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '"' || c == '\\' || c == '\n' || c == '\r') break;
+    unsigned char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c >= 0x80) {
+      break;
+    }
     ++cursor;
   }
   return cursor;
@@ -1358,8 +1367,10 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
                                                                   char *end)
 {
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '\'' || c == '\\' || c == '\n' || c == '\r') break;
+    unsigned char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c >= 0x80) {
+      break;
+    }
     ++cursor;
   }
   return cursor;
@@ -1369,9 +1380,9 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
                                                                 char *end)
 {
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{'
-        || c == '}') {
+    unsigned char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{' || c == '}'
+        || c >= 0x80) {
       break;
     }
     ++cursor;
@@ -1383,9 +1394,9 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
                                                                 char *end)
 {
   while (cursor < end) {
-    char c = *cursor;
+    unsigned char c = *cursor;
     if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c == '{'
-        || c == '}') {
+        || c == '}' || c >= 0x80) {
       break;
     }
     ++cursor;
@@ -1402,6 +1413,7 @@ scan_string_plain_span_find_stop_avx2_nofmt_double(char *cursor, char *end)
   const __m256i backslash = _mm256_set1_epi8('\\');
   const __m256i newline = _mm256_set1_epi8('\n');
   const __m256i carriage_return = _mm256_set1_epi8('\r');
+  const __m256i zeros = _mm256_setzero_si256();
 
   while ((size_t)(end - cursor) >= 32) {
     __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
@@ -1410,14 +1422,17 @@ scan_string_plain_span_find_stop_avx2_nofmt_double(char *cursor, char *end)
                         _mm256_cmpeq_epi8(chunk, backslash)),
         _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
                         _mm256_cmpeq_epi8(chunk, carriage_return)));
+    mask = _mm256_or_si256(mask, _mm256_cmpgt_epi8(zeros, chunk));
     unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
     if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
     cursor += 32;
   }
 
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '"' || c == '\\' || c == '\n' || c == '\r') break;
+    unsigned char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c >= 0x80) {
+      break;
+    }
     ++cursor;
   }
   return cursor;
@@ -1430,6 +1445,7 @@ scan_string_plain_span_find_stop_avx2_nofmt_single(char *cursor, char *end)
   const __m256i backslash = _mm256_set1_epi8('\\');
   const __m256i newline = _mm256_set1_epi8('\n');
   const __m256i carriage_return = _mm256_set1_epi8('\r');
+  const __m256i zeros = _mm256_setzero_si256();
 
   while ((size_t)(end - cursor) >= 32) {
     __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
@@ -1438,14 +1454,17 @@ scan_string_plain_span_find_stop_avx2_nofmt_single(char *cursor, char *end)
                         _mm256_cmpeq_epi8(chunk, backslash)),
         _mm256_or_si256(_mm256_cmpeq_epi8(chunk, newline),
                         _mm256_cmpeq_epi8(chunk, carriage_return)));
+    mask = _mm256_or_si256(mask, _mm256_cmpgt_epi8(zeros, chunk));
     unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
     if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
     cursor += 32;
   }
 
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '\'' || c == '\\' || c == '\n' || c == '\r') break;
+    unsigned char c = *cursor;
+    if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c >= 0x80) {
+      break;
+    }
     ++cursor;
   }
   return cursor;
@@ -1460,6 +1479,7 @@ scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor, char *end)
   const __m256i carriage_return = _mm256_set1_epi8('\r');
   const __m256i lcurly = _mm256_set1_epi8('{');
   const __m256i rcurly = _mm256_set1_epi8('}');
+  const __m256i zeros = _mm256_setzero_si256();
 
   while ((size_t)(end - cursor) >= 32) {
     __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
@@ -1471,15 +1491,16 @@ scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor, char *end)
                             _mm256_cmpeq_epi8(chunk, carriage_return))),
         _mm256_or_si256(_mm256_cmpeq_epi8(chunk, lcurly),
                         _mm256_cmpeq_epi8(chunk, rcurly)));
+    mask = _mm256_or_si256(mask, _mm256_cmpgt_epi8(zeros, chunk));
     unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
     if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
     cursor += 32;
   }
 
   while (cursor < end) {
-    char c = *cursor;
-    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{'
-        || c == '}') {
+    unsigned char c = *cursor;
+    if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '{' || c == '}'
+        || c >= 0x80) {
       break;
     }
     ++cursor;
@@ -1496,6 +1517,7 @@ scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor, char *end)
   const __m256i carriage_return = _mm256_set1_epi8('\r');
   const __m256i lcurly = _mm256_set1_epi8('{');
   const __m256i rcurly = _mm256_set1_epi8('}');
+  const __m256i zeros = _mm256_setzero_si256();
 
   while ((size_t)(end - cursor) >= 32) {
     __m256i chunk = _mm256_loadu_si256((const __m256i *)(const void *)cursor);
@@ -1507,15 +1529,16 @@ scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor, char *end)
                             _mm256_cmpeq_epi8(chunk, carriage_return))),
         _mm256_or_si256(_mm256_cmpeq_epi8(chunk, lcurly),
                         _mm256_cmpeq_epi8(chunk, rcurly)));
+    mask = _mm256_or_si256(mask, _mm256_cmpgt_epi8(zeros, chunk));
     unsigned bits = (unsigned)_mm256_movemask_epi8(mask);
     if (bits != 0u) return cursor + (unsigned)__builtin_ctz(bits);
     cursor += 32;
   }
 
   while (cursor < end) {
-    char c = *cursor;
+    unsigned char c = *cursor;
     if (c == '\'' || c == '\\' || c == '\n' || c == '\r' || c == '{'
-        || c == '}') {
+        || c == '}' || c >= 0x80) {
       break;
     }
     ++cursor;
@@ -1766,6 +1789,23 @@ static void scan_string_literal(struct scanner_state    *s,
       error_unterminated_string(s);
       goto finish_string;
     default:
+      if ((unsigned char)s->c >= 0x80) {
+        uint32_t cp;
+        char     utf8[4];
+        int      len = decode_utf8(s, &cp, utf8);
+        if (len == 0) {
+          error_invalid_utf8_source(s);
+          if ((unsigned char)s->c >= 0x80) {
+            next_char(s);
+          }
+          continue;
+        }
+        for (int i = 0; i < len; i++) {
+          arena_grow_char(strings, utf8[i]);
+        }
+        next_char(s);
+        continue;
+      }
       break;
     }
     arena_grow_char(strings, (char)s->c);

@@ -83,6 +83,11 @@ struct scanner_state {
 
   unsigned             indentation_stack[MAXINDENT];
   struct fstring_state fstring_stack[MAX_FSTRING_NESTING];
+
+#ifndef PYCOMPARSE_NO_ICONV
+  FILE *nullable transcoded_input;
+  char *nullable transcoded_source;
+#endif
 };
 
 ASSUME_NONNULL_END

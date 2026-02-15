@@ -82,6 +82,8 @@ add_executable(scanner_test
   diagnostics.c
   diagnostics.h
   diagnostics_types.h
+  encoding.c
+  encoding.h
   object.c
   object.h
   object_intern.c
@@ -128,6 +130,8 @@ add_executable(parser_test
   diagnostics.h
   diagnostics.c
   diagnostics_types.h
+  encoding.c
+  encoding.h
   object.c
   object.h
   object_intern.c

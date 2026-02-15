@@ -37,6 +37,7 @@
 #include "adt/arena.h"
 #include "adt/dynmemory.h"
 #include "diagnostics.h"
+#include "encoding.h"
 #include "object_intern.h"
 #include "object_types.h"
 #include "symbol_table.h"
@@ -2417,6 +2418,10 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
   s->fstring_debug.tail_start = NULL;
   s->at_begin_of_line = true;
   s->d = diagnostics;
+#ifndef PYCOMPARSE_NO_ICONV
+  encoding_maybe_transcode_to_utf8(&s->input, &s->transcoded_input,
+                                   &s->transcoded_source);
+#endif
   s->c = refill_buffer(s);
   if (s->c == 0xEF && s->p + 1 < s->buffer_end
       && (unsigned char)s->p[0] == 0xBB && (unsigned char)s->p[1] == 0xBF) {
@@ -2428,6 +2433,10 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
 
 void scanner_free(struct scanner_state *s)
 {
+  if (s->transcoded_input != NULL) {
+    fclose(s->transcoded_input);
+  }
+  free(s->transcoded_source);
   free(s->fstring_debug.spilled_prefix);
   free(s->read_buffer);
 }

@@ -58,6 +58,7 @@ struct try_state {
   bool                had_except;
   bool                had_else;
   bool                had_finally;
+  bool                finally_needs_placeholder;
 };
 
 struct with_state {

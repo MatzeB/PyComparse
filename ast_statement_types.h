@@ -29,6 +29,7 @@ struct ast_statement_list {
 struct ast_statement_annotation {
   struct ast_statement_base      base;
   union ast_expression          *target;
+  bool                           simple;
   union ast_expression          *annotation;
   union ast_expression *nullable value;
 };

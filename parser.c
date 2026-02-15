@@ -2064,6 +2064,7 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
 static union ast_statement *parse_expression_statement(struct parser_state *s)
 {
   struct location       location = scanner_location(&s->scanner);
+  bool                  starts_with_lparen = (peek(s) == '(');
   union ast_expression *expression = parse_star_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
     /* TODO Check: check that expression is either:
@@ -2084,6 +2085,9 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
         = ast_allocate_statement(s, struct ast_statement_annotation,
                                  AST_STATEMENT_ANNOTATION, location);
     statement->annotation.target = expression;
+    statement->annotation.simple
+        = ast_expression_type(expression) == AST_IDENTIFIER
+          && !starts_with_lparen;
     statement->annotation.annotation = annotation;
     statement->annotation.value = value;
     return statement;

@@ -107,6 +107,7 @@ enum pending_cleanup_kind {
 struct pending_finally_state {
   enum pending_cleanup_kind              kind;
   struct ast_statement_list *nullable    finally_body;
+  bool                                   finally_needs_placeholder;
   struct symbol *nullable                as_symbol;
   bool                                   async_with;
   struct pending_finally_state *nullable prev;
@@ -222,7 +223,7 @@ union object *emit_module_end(struct cg_state *s)
 }
 
 static void emit_annotation(struct cg_state *s, union ast_expression *target,
-                            union ast_expression *annotation)
+                            union ast_expression *annotation, bool simple)
 {
   if (!cg_in_function(s)) {
     s->code.setup_annotations = true;
@@ -232,6 +233,11 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
   switch (ast_expression_type(target)) {
   case AST_IDENTIFIER:
     if (cg_in_function(s)) return;
+    if (!simple) {
+      emit_expression(s, annotation);
+      cg_op_pop1(s, OPCODE_POP_TOP, 0);
+      return;
+    }
     bool future_annotations = (s->code.flags & CO_FUTURE_ANNOTATIONS) != 0;
     if (future_annotations) {
       union object *annotation_string
@@ -819,6 +825,9 @@ static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
 
   struct basic_block *setup_finally = state->setup_finally;
   cg_block_begin_delayed(s, setup_finally);
+  if (state->finally_needs_placeholder) {
+    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  }
   cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_body,
               /*fallthrough=*/setup_finally->next);
   cg_push(s, 1);
@@ -855,11 +864,14 @@ static void emit_try_finally_end(struct cg_state *s, struct try_state *state)
 {
   if (!state->try_reachable) return;
   if (unreachable(s)) {
-    /* The finally token we model at setup is consumed even on abrupt exits. */
-    cg_pop(s, 1);
+    /* Abrupt exits consume the finally token and optional placeholder. */
+    cg_pop(s, state->finally_needs_placeholder ? 2 : 1);
     return;
   }
   cg_op_pop1(s, OPCODE_END_FINALLY, 0);
+  if (state->finally_needs_placeholder) {
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
+  }
 
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
@@ -883,14 +895,15 @@ static void emit_try_end(struct cg_state *s, struct try_state *state)
 
   if (state->had_except) {
     struct basic_block *excepts = state->excepts;
-    if (excepts != NULL) {
-      if (footer == NULL) {
-        footer = cg_block_allocate(s);
-      }
-      cg_block_begin(s, excepts);
-      cg_op(s, OPCODE_END_FINALLY, 0);
-      cg_jump(s, footer);
+    if (excepts == NULL) {
+      excepts = cg_block_allocate(s);
     }
+    if (footer == NULL) {
+      footer = cg_block_allocate(s);
+    }
+    cg_block_begin(s, excepts);
+    cg_op(s, OPCODE_END_FINALLY, 0);
+    cg_jump(s, footer);
   } else {
     struct basic_block *setup_except = state->setup_except;
     struct basic_block *setup_except_next = state->setup_except->next;
@@ -1032,6 +1045,7 @@ static void emit_for_begin_impl(struct cg_state        *s,
     .continue_block = header,
     .break_block = footer,
     .pending_at_loop = s->code.pending_finally,
+    .finally_depth = s->code.active_finally_body_depth,
     .pop_on_break = true,
   };
 }
@@ -1088,6 +1102,7 @@ static void emit_for_begin_async(struct cg_state        *s,
     .continue_block = header,
     .break_block = footer,
     .pending_at_loop = s->code.pending_finally,
+    .finally_depth = s->code.active_finally_body_depth,
     .pop_on_break = true,
   };
 }
@@ -1151,11 +1166,27 @@ static void emit_for_end(struct cg_state *s, struct for_while_state *state)
   emit_loop_end(s, state);
 }
 
+static void emit_finally_abrupt_exit_prefix(struct cg_state *s)
+{
+  if (s->code.active_finally_body_depth == 0) return;
+  cg_op(s, OPCODE_POP_FINALLY, 0);
+  /* Keep stack tracking conservative for conditional abrupt exits. */
+  cg_op(s, OPCODE_POP_TOP, 0);
+}
+
+static bool break_or_continue_exits_active_finally(struct cg_state *s)
+{
+  return s->code.active_finally_body_depth > s->code.loop_state.finally_depth;
+}
+
 static bool emit_continue(struct cg_state         *s,
                           struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   if (target == NULL) return false;
+  if (break_or_continue_exits_active_finally(s)) {
+    emit_finally_abrupt_exit_prefix(s);
+  }
   emit_pending_finally(s, current_function,
                        s->code.loop_state.pending_at_loop);
   if (unreachable(s)) return true;
@@ -1170,6 +1201,9 @@ static bool emit_break(struct cg_state         *s,
 {
   struct basic_block *target = s->code.loop_state.break_block;
   if (target == NULL) return false;
+  if (break_or_continue_exits_active_finally(s)) {
+    emit_finally_abrupt_exit_prefix(s);
+  }
   emit_pending_finally(s, current_function,
                        s->code.loop_state.pending_at_loop);
   if (unreachable(s)) return true;
@@ -1198,7 +1232,7 @@ static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
   cg_block_begin(s, header);
 
   emit_condjump_expr(s, expression, /*true_block=*/body,
-                     /*false_block=*/footer, /*next=*/body);
+                     /*false_block=*/else_block, /*next=*/body);
 
   cg_block_begin(s, body);
 
@@ -1208,6 +1242,7 @@ static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
     .continue_block = header,
     .break_block = footer,
     .pending_at_loop = s->code.pending_finally,
+    .finally_depth = s->code.active_finally_body_depth,
     .pop_on_break = false,
   };
 }
@@ -1380,6 +1415,7 @@ void emit_generator_expression_code(
       .continue_block = header,
       .break_block = footer,
       .pending_at_loop = s->code.pending_finally,
+      .finally_depth = s->code.active_finally_body_depth,
       .pop_on_break = true,
     };
   } else {
@@ -1556,6 +1592,11 @@ static void emit_pending_finally(struct cg_state         *s,
       break;
     case CLEANUP_FINALLY:
       cg_op(s, OPCODE_POP_BLOCK, 0);
+      if (state->finally_needs_placeholder) {
+        /* Keep loop iterator stack tracking stable in synthetic cleanup paths.
+         */
+        cg_op(s, OPCODE_POP_TOP, 0);
+      }
       emit_statement_list_with_function(s, state->finally_body,
                                         current_function);
       break;
@@ -2060,7 +2101,8 @@ static void analyze_statement_collect(struct binding_scope *scope,
   case AST_STATEMENT_ANNOTATION:
     analyze_expression(scope, statement->annotation.annotation);
     analyze_assignment_target(scope, statement->annotation.target,
-                              /*bind=*/true);
+                              /*bind=*/statement->annotation.value != NULL
+                                  || statement->annotation.simple);
     if (statement->annotation.value != NULL) {
       analyze_expression(scope, statement->annotation.value);
     }
@@ -3070,6 +3112,89 @@ static bool statement_list_has_scope_annotation(
   return false;
 }
 
+static bool finally_body_needs_placeholder_statement_list(
+    const struct ast_statement_list *nullable statements, unsigned loop_depth);
+
+static bool
+finally_body_needs_placeholder_statement(const union ast_statement *statement,
+                                         unsigned                   loop_depth)
+{
+  switch (ast_statement_type((union ast_statement *)statement)) {
+  case AST_STATEMENT_RETURN:
+    return true;
+  case AST_STATEMENT_BREAK:
+  case AST_STATEMENT_CONTINUE:
+    return loop_depth == 0;
+  case AST_STATEMENT_IF: {
+    const struct ast_if *if_stmt = &statement->if_;
+    if (finally_body_needs_placeholder_statement_list(if_stmt->body,
+                                                      loop_depth)) {
+      return true;
+    }
+    for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
+      if (finally_body_needs_placeholder_statement_list(if_stmt->elifs[i].body,
+                                                        loop_depth)) {
+        return true;
+      }
+    }
+    return finally_body_needs_placeholder_statement_list(if_stmt->else_body,
+                                                         loop_depth);
+  }
+  case AST_STATEMENT_FOR:
+    if (finally_body_needs_placeholder_statement_list(statement->for_.body,
+                                                      loop_depth + 1)) {
+      return true;
+    }
+    return finally_body_needs_placeholder_statement_list(
+        statement->for_.else_body, loop_depth);
+  case AST_STATEMENT_WHILE:
+    if (finally_body_needs_placeholder_statement_list(statement->while_.body,
+                                                      loop_depth + 1)) {
+      return true;
+    }
+    return finally_body_needs_placeholder_statement_list(
+        statement->while_.else_body, loop_depth);
+  case AST_STATEMENT_WITH:
+    return finally_body_needs_placeholder_statement_list(statement->with.body,
+                                                         loop_depth);
+  case AST_STATEMENT_TRY:
+    if (finally_body_needs_placeholder_statement_list(statement->try_.body,
+                                                      loop_depth)) {
+      return true;
+    }
+    for (unsigned i = 0; i < statement->try_.num_excepts; ++i) {
+      if (finally_body_needs_placeholder_statement_list(
+              statement->try_.excepts[i].body, loop_depth)) {
+        return true;
+      }
+    }
+    if (finally_body_needs_placeholder_statement_list(
+            statement->try_.else_body, loop_depth)) {
+      return true;
+    }
+    return finally_body_needs_placeholder_statement_list(
+        statement->try_.finally_body, loop_depth);
+  case AST_STATEMENT_CLASS:
+  case AST_STATEMENT_DEF:
+    return false;
+  default:
+    return false;
+  }
+}
+
+static bool finally_body_needs_placeholder_statement_list(
+    const struct ast_statement_list *nullable statements, unsigned loop_depth)
+{
+  if (statements == NULL) return false;
+  for (unsigned i = 0; i < statements->num_statements; ++i) {
+    if (finally_body_needs_placeholder_statement(statements->statements[i],
+                                                 loop_depth)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
                     struct ast_def *nullable current_function)
 {
@@ -3144,6 +3269,10 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   struct pending_finally_state *saved_pending = s->code.pending_finally;
   bool                          has_finally = (try_stmt->finally_body != NULL);
   bool                          has_except = (try_stmt->num_excepts > 0);
+  bool                          finally_needs_placeholder
+      = has_finally
+        && finally_body_needs_placeholder_statement_list(
+            try_stmt->finally_body, /*loop_depth=*/0);
 
   /* Push cleanup entries for break/continue/return inside the try body.
    * Order: finally (outermost) then except POP_BLOCK (innermost). */
@@ -3152,6 +3281,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
     finally_cleanup = (struct pending_finally_state){
       .kind = CLEANUP_FINALLY,
       .finally_body = try_stmt->finally_body,
+      .finally_needs_placeholder = finally_needs_placeholder,
       .prev = saved_pending,
     };
     s->code.pending_finally = &finally_cleanup;
@@ -3169,6 +3299,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
 
   struct try_state state;
   emit_try_body_begin(s, &state);
+  state.finally_needs_placeholder = finally_needs_placeholder;
   emit_statement_list_with_function(s, try_stmt->body, current_function);
   emit_try_body_end(s, &state);
 
@@ -3218,8 +3349,11 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   if (try_stmt->finally_body != NULL) {
     s->code.pending_finally = saved_pending;
     emit_try_finally_begin(s, &state);
+    s->code.active_finally_body_depth++;
     emit_statement_list_with_function(s, try_stmt->finally_body,
                                       current_function);
+    assert(s->code.active_finally_body_depth > 0);
+    s->code.active_finally_body_depth--;
     emit_try_finally_end(s, &state);
   }
 
@@ -3290,7 +3424,8 @@ static void emit_annotation_stmt(struct cg_state                 *s,
     union ast_expression *targets[] = { annotation->target };
     emit_assign(s, 1, targets, annotation->value);
   }
-  emit_annotation(s, annotation->target, annotation->annotation);
+  emit_annotation(s, annotation->target, annotation->annotation,
+                  annotation->simple);
 }
 
 static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
@@ -3361,6 +3496,7 @@ static void emit_return(struct cg_state *s, struct location location,
     diag_end(s->d);
   }
   if (!unreachable(s)) {
+    emit_finally_abrupt_exit_prefix(s);
     if (return_stmt->expression != NULL) {
       emit_expression(s, return_stmt->expression);
     } else {

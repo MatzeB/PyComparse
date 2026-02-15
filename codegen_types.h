@@ -40,6 +40,7 @@ struct loop_state {
   struct basic_block *nullable           continue_block;
   struct basic_block *nullable           break_block;
   struct pending_finally_state *nullable pending_at_loop;
+  unsigned                               finally_depth;
   bool                                   pop_on_break;
 };
 
@@ -67,6 +68,7 @@ struct code_state {
   bool                                   in_function;
   bool                                   in_async_function;
   bool                                   in_class_body;
+  unsigned                               active_finally_body_depth;
   bool                                   setup_annotations;
   const char *nullable                   qualname_prefix;
   struct pending_finally_state *nullable pending_finally;

@@ -17,6 +17,10 @@ struct constant_fold_state {
   struct arena         *ast_arena;
 };
 
+#define CONSTANT_FOLD_MAX_COLLECTION_SIZE 256u
+#define CONSTANT_FOLD_MAX_STR_SIZE        4096u
+#define CONSTANT_FOLD_MAX_TOTAL_ITEMS     1024u
+
 static void fold_statement_list(struct constant_fold_state *s,
                                 struct ast_statement_list  *statements);
 
@@ -128,6 +132,189 @@ static void int64_floor_divmod(int64_t left, int64_t right, int64_t *quotient,
   }
   *quotient = q;
   *remainder = r;
+}
+
+static inline bool object_is_string_like(enum object_type type)
+{
+  return type == OBJECT_STRING || type == OBJECT_BYTES;
+}
+
+static union object *nullable fold_string_like_add(
+    struct constant_fold_state *s, union object *left, union object *right)
+{
+  enum object_type left_type = object_type(left);
+  enum object_type right_type = object_type(right);
+  if (left_type != right_type || !object_is_string_like(left_type)) {
+    return NULL;
+  }
+  uint64_t left_length = object_string_length(left);
+  uint64_t right_length = object_string_length(right);
+  uint64_t combined_length = left_length + right_length;
+  if (combined_length > UINT32_MAX) {
+    return NULL;
+  }
+  if (combined_length == 0) {
+    return object_intern_string(s->intern, left_type, 0, "");
+  }
+  char *chars = arena_allocate(s->ast_arena, (size_t)combined_length, 1);
+  memcpy(chars, left->string.chars, (size_t)left_length);
+  memcpy(chars + left_length, right->string.chars, (size_t)right_length);
+  return object_intern_string(s->intern, left_type, (uint32_t)combined_length,
+                              chars);
+}
+
+static union object *nullable fold_tuple_add(struct constant_fold_state *s,
+                                             union object               *left,
+                                             union object               *right)
+{
+  if (object_type(left) != OBJECT_TUPLE
+      || object_type(right) != OBJECT_TUPLE) {
+    return NULL;
+  }
+
+  uint64_t left_length = object_tuple_length(left);
+  uint64_t right_length = object_tuple_length(right);
+  uint64_t combined_length = left_length + right_length;
+  if (combined_length > UINT32_MAX) {
+    return NULL;
+  }
+
+  struct tuple_prep *tuple
+      = object_intern_tuple_begin(s->intern, (uint32_t)combined_length);
+  for (uint64_t i = 0; i < left_length; ++i) {
+    object_new_tuple_set_at(tuple, (uint32_t)i,
+                            object_tuple_at(left, (uint32_t)i));
+  }
+  for (uint64_t i = 0; i < right_length; ++i) {
+    object_new_tuple_set_at(tuple, (uint32_t)(left_length + i),
+                            object_tuple_at(right, (uint32_t)i));
+  }
+  return object_intern_tuple_end(s->intern, tuple, /*may_free_arena=*/true);
+}
+
+static int64_t check_tuple_complexity(union object *tuple, int64_t limit)
+{
+  if (object_type(tuple) != OBJECT_TUPLE) {
+    return limit;
+  }
+  uint32_t tuple_length = object_tuple_length(tuple);
+  limit -= (int64_t)tuple_length;
+  if (limit < 0) {
+    return limit;
+  }
+  for (uint32_t i = 0; i < tuple_length && limit >= 0; ++i) {
+    limit = check_tuple_complexity(object_tuple_at(tuple, i), limit);
+  }
+  return limit;
+}
+
+static bool try_sequence_repeat_operands(union object  *left,
+                                         union object  *right,
+                                         union object **sequence,
+                                         uint32_t      *repeat_count)
+{
+  int64_t count = 0;
+  if (object_as_fast_int(left, &count)) {
+    if (count < 0 || count > UINT32_MAX) {
+      return false;
+    }
+    *sequence = right;
+    *repeat_count = (uint32_t)count;
+    return true;
+  }
+  if (object_as_fast_int(right, &count)) {
+    if (count < 0 || count > UINT32_MAX) {
+      return false;
+    }
+    *sequence = left;
+    *repeat_count = (uint32_t)count;
+    return true;
+  }
+  return false;
+}
+
+static union object *nullable
+fold_string_like_repeat(struct constant_fold_state *s, union object *sequence,
+                        uint32_t repeat_count)
+{
+  enum object_type sequence_type = object_type(sequence);
+  if (!object_is_string_like(sequence_type)) {
+    return NULL;
+  }
+
+  uint32_t sequence_length = object_string_length(sequence);
+  if (sequence_length != 0
+      && repeat_count > CONSTANT_FOLD_MAX_STR_SIZE / sequence_length) {
+    return NULL;
+  }
+
+  uint64_t total_length = (uint64_t)sequence_length * repeat_count;
+  if (total_length > UINT32_MAX) {
+    return NULL;
+  }
+  if (total_length == 0) {
+    return object_intern_string(s->intern, sequence_type, 0, "");
+  }
+
+  char *chars = arena_allocate(s->ast_arena, (size_t)total_length, 1);
+  for (uint32_t i = 0; i < repeat_count; ++i) {
+    memcpy(chars + (size_t)i * sequence_length, sequence->string.chars,
+           sequence_length);
+  }
+  return object_intern_string(s->intern, sequence_type, (uint32_t)total_length,
+                              chars);
+}
+
+static union object *nullable fold_tuple_repeat(struct constant_fold_state *s,
+                                                union object *sequence,
+                                                uint32_t      repeat_count)
+{
+  if (object_type(sequence) != OBJECT_TUPLE) {
+    return NULL;
+  }
+
+  uint32_t sequence_length = object_tuple_length(sequence);
+  if (sequence_length != 0
+      && repeat_count > CONSTANT_FOLD_MAX_COLLECTION_SIZE / sequence_length) {
+    return NULL;
+  }
+  if (repeat_count != 0
+      && check_tuple_complexity(
+             sequence, (int64_t)(CONSTANT_FOLD_MAX_TOTAL_ITEMS / repeat_count))
+             < 0) {
+    return NULL;
+  }
+
+  uint64_t total_length = (uint64_t)sequence_length * repeat_count;
+  if (total_length > UINT32_MAX) {
+    return NULL;
+  }
+
+  struct tuple_prep *tuple
+      = object_intern_tuple_begin(s->intern, (uint32_t)total_length);
+  uint32_t write_index = 0;
+  for (uint32_t i = 0; i < repeat_count; ++i) {
+    for (uint32_t j = 0; j < sequence_length; ++j) {
+      object_new_tuple_set_at(tuple, write_index++,
+                              object_tuple_at(sequence, j));
+    }
+  }
+  return object_intern_tuple_end(s->intern, tuple, /*may_free_arena=*/true);
+}
+
+static union object *nullable try_fold_sequence_repeat(
+    struct constant_fold_state *s, union object *left, union object *right)
+{
+  union object *sequence = NULL;
+  uint32_t      repeat_count = 0;
+  if (!try_sequence_repeat_operands(left, right, &sequence, &repeat_count)) {
+    return NULL;
+  }
+  union object *folded = fold_string_like_repeat(s, sequence, repeat_count);
+  if (folded != NULL) {
+    return folded;
+  }
+  return fold_tuple_repeat(s, sequence, repeat_count);
 }
 
 static size_t ast_expression_size(union ast_expression *expression)
@@ -253,6 +440,7 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
   case AST_UNEXPR_PLUS:
   case AST_UNEXPR_NEGATIVE:
   case AST_UNEXPR_INVERT:
+  case AST_UNEXPR_NOT:
     break;
   default:
     return NULL;
@@ -293,6 +481,14 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
       return NULL;
     }
     return object_intern_int(s->intern, ~value);
+  case AST_UNEXPR_NOT: {
+    bool truth = false;
+    if (!object_constant_truth_value(object, &truth)) {
+      return NULL;
+    }
+    return object_intern_singleton(s->intern,
+                                   truth ? OBJECT_FALSE : OBJECT_TRUE);
+  }
   default:
     return NULL;
   }
@@ -323,10 +519,30 @@ static union object *nullable try_fold_binexpr(
       = ast_expression_as_constant(expression->binexpr.left);
   union object *right_object
       = ast_expression_as_constant(expression->binexpr.right);
+  if (left_object == NULL || right_object == NULL) {
+    return NULL;
+  }
+
+  if (type == AST_BINEXPR_ADD) {
+    union object *folded = fold_string_like_add(s, left_object, right_object);
+    if (folded != NULL) {
+      return folded;
+    }
+    folded = fold_tuple_add(s, left_object, right_object);
+    if (folded != NULL) {
+      return folded;
+    }
+  } else if (type == AST_BINEXPR_MUL) {
+    union object *folded
+        = try_fold_sequence_repeat(s, left_object, right_object);
+    if (folded != NULL) {
+      return folded;
+    }
+  }
+
   int64_t left_value;
   int64_t right_value;
-  if (left_object == NULL || right_object == NULL
-      || !object_as_fast_int(left_object, &left_value)
+  if (!object_as_fast_int(left_object, &left_value)
       || !object_as_fast_int(right_object, &right_value)) {
     return NULL;
   }

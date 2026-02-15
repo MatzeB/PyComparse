@@ -53,6 +53,7 @@ struct try_state {
   struct basic_block *except_unassign_as;
   struct basic_block *else_block;
   struct basic_block *enter_finally;
+  struct basic_block *finally_body;
   struct basic_block *footer;
   bool                try_reachable;
   bool                had_except;

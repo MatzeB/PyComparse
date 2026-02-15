@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fcntl
 import fnmatch
 import os
 import re
@@ -11,6 +12,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
@@ -340,89 +342,118 @@ def process_bytecode(file_path: Path, cfg: Config) -> FileResult:
 
 
 def process_runtime(file_path: Path, cfg: Config) -> FileResult:
-    pyc_file = file_path.with_name(file_path.name + ".pycomparse-tmp.pyc")
-    try:
-        try:
-            pyc_file.unlink()
-        except FileNotFoundError:
-            pass
+    # Keep __file__ shape close to source runs for tests that derive paths via
+    # os.path.splitext(__file__) + ".py".
+    pyc_file = file_path.with_suffix(".pyc")
+    lock_file = file_path.with_name(file_path.name + ".pycomparse-runtime.lock")
+    backup_file: Path | None = None
+    tmp_pyc_file: Path | None = None
+    compiled_file_installed = False
 
-        with pyc_file.open("wb") as out_file:
-            compile_rc, _, compile_err, compile_timed_out = run_process(
-                [str(cfg.parser_test), str(file_path)],
-                timeout=cfg.timeout,
-                env=cfg.env,
-                stdout_target=out_file,
-            )
-        if compile_timed_out:
-            return FileResult(file_path, False, "compile_timeout")
-        if compile_rc != 0:
-            if is_crash_return_code(compile_rc):
-                return FileResult(
-                    file_path, False, "compile_crash", detail=f"code={compile_rc}"
+    with lock_file.open("a+b") as lock_fd:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        try:
+            if pyc_file.exists():
+                backup_file = file_path.with_name(
+                    f"{file_path.name}.pycomparse-bak."
+                    f"{os.getpid()}.{uuid.uuid4().hex}.pyc"
                 )
-            return FileResult(
-                file_path,
-                False,
-                "compile_fail",
-                detail=f"code={compile_rc} stderr={compile_err.decode(errors='replace')}",
+                pyc_file.rename(backup_file)
+
+            with tempfile.NamedTemporaryFile(
+                dir=file_path.parent,
+                prefix=f"{file_path.stem}.pycomparse-tmp.",
+                suffix=".pyc",
+                delete=False,
+            ) as out_file:
+                tmp_pyc_file = Path(out_file.name)
+                compile_rc, _, compile_err, compile_timed_out = run_process(
+                    [str(cfg.parser_test), str(file_path)],
+                    timeout=cfg.timeout,
+                    env=cfg.env,
+                    stdout_target=out_file,
+                )
+            if compile_timed_out:
+                return FileResult(file_path, False, "compile_timeout")
+            if compile_rc != 0:
+                if is_crash_return_code(compile_rc):
+                    return FileResult(
+                        file_path, False, "compile_crash", detail=f"code={compile_rc}"
+                    )
+                return FileResult(
+                    file_path,
+                    False,
+                    "compile_fail",
+                    detail=f"code={compile_rc} stderr={compile_err.decode(errors='replace')}",
+                )
+
+            os.replace(tmp_pyc_file, pyc_file)
+            tmp_pyc_file = None
+            compiled_file_installed = True
+
+            ref_args = [*cfg.python_cmd, str(file_path)]
+            pyc_args = [*cfg.python_cmd, str(pyc_file)]
+            ref_rc, ref_out_raw, ref_err_raw, ref_timed_out = run_process(
+                ref_args, timeout=cfg.timeout, env=cfg.env
+            )
+            if ref_timed_out:
+                return FileResult(file_path, False, "runtime_timeout", detail="source")
+
+            pyc_rc, pyc_out_raw, pyc_err_raw, pyc_timed_out = run_process(
+                pyc_args, timeout=cfg.timeout, env=cfg.env
+            )
+            if pyc_timed_out:
+                return FileResult(file_path, False, "runtime_timeout", detail="compiled")
+
+            ref_out = normalize_text(
+                ref_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
+            )
+            ref_err = normalize_text(
+                ref_err_raw.decode(errors="replace"), cfg.normalize_unittest_timing
+            )
+            pyc_out = normalize_text(
+                pyc_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
+            )
+            pyc_err = normalize_text(
+                pyc_err_raw.decode(errors="replace"), cfg.normalize_unittest_timing
             )
 
-        ref_args = [*cfg.python_cmd, str(file_path)]
-        pyc_args = [*cfg.python_cmd, str(pyc_file)]
-        ref_rc, ref_out_raw, ref_err_raw, ref_timed_out = run_process(
-            ref_args, timeout=cfg.timeout, env=cfg.env
-        )
-        if ref_timed_out:
-            return FileResult(file_path, False, "runtime_timeout", detail="source")
-
-        pyc_rc, pyc_out_raw, pyc_err_raw, pyc_timed_out = run_process(
-            pyc_args, timeout=cfg.timeout, env=cfg.env
-        )
-        if pyc_timed_out:
-            return FileResult(file_path, False, "runtime_timeout", detail="compiled")
-
-        ref_out = normalize_text(
-            ref_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
-        )
-        ref_err = normalize_text(
-            ref_err_raw.decode(errors="replace"), cfg.normalize_unittest_timing
-        )
-        pyc_out = normalize_text(
-            pyc_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
-        )
-        pyc_err = normalize_text(
-            pyc_err_raw.decode(errors="replace"), cfg.normalize_unittest_timing
-        )
-
-        if pyc_rc != ref_rc:
-            return FileResult(
-                file_path,
-                False,
-                "runtime_exit_mismatch",
-                detail=f"code={pyc_rc}/{ref_rc}",
-                ref_rc=ref_rc,
-                pyc_rc=pyc_rc,
-            )
-        if pyc_out != ref_out or pyc_err != ref_err:
-            return FileResult(
-                file_path,
-                False,
-                "runtime_output_mismatch",
-                detail=f"code={pyc_rc}",
-                ref_rc=ref_rc,
-                pyc_rc=pyc_rc,
-                ref_out=ref_out,
-                pyc_out=pyc_out,
-                ref_err=ref_err,
-                pyc_err=pyc_err,
-            )
-        return FileResult(file_path, True, "ok")
-    finally:
-        try:
-            pyc_file.unlink()
-        except FileNotFoundError:
-            pass
+            if pyc_rc != ref_rc:
+                return FileResult(
+                    file_path,
+                    False,
+                    "runtime_exit_mismatch",
+                    detail=f"code={pyc_rc}/{ref_rc}",
+                    ref_rc=ref_rc,
+                    pyc_rc=pyc_rc,
+                )
+            if pyc_out != ref_out or pyc_err != ref_err:
+                return FileResult(
+                    file_path,
+                    False,
+                    "runtime_output_mismatch",
+                    detail=f"code={pyc_rc}",
+                    ref_rc=ref_rc,
+                    pyc_rc=pyc_rc,
+                    ref_out=ref_out,
+                    pyc_out=pyc_out,
+                    ref_err=ref_err,
+                    pyc_err=pyc_err,
+                )
+            return FileResult(file_path, True, "ok")
+        finally:
+            if tmp_pyc_file is not None:
+                try:
+                    tmp_pyc_file.unlink()
+                except FileNotFoundError:
+                    pass
+            if compiled_file_installed:
+                try:
+                    pyc_file.unlink()
+                except FileNotFoundError:
+                    pass
+            if backup_file is not None and backup_file.exists():
+                backup_file.rename(pyc_file)
 
 
 def build_default_path_globs(cpython_lib: Path) -> list[str]:

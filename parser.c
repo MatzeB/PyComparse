@@ -2819,9 +2819,12 @@ static union ast_statement *parse_try(struct parser_state *s)
   struct idynarray      excepts;
   idynarray_init(&excepts, inline_storage, sizeof(inline_storage));
 
-  while (accept(s, T_except)) {
+  while (peek(s) == T_except) {
+    struct location except_location = scanner_location(&s->scanner);
+    eat(s, T_except);
     struct ast_try_except *except_stmt
         = idynarray_append(&excepts, struct ast_try_except);
+    except_stmt->location = except_location;
     except_stmt->match = NULL;
     except_stmt->as = NULL;
 
@@ -2934,8 +2937,11 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
     struct ast_with_item *item
         = idynarray_append(&items, struct ast_with_item);
     item->expression = parse_expression(s, PREC_TEST);
+    item->as_location = (struct location){ 0 };
     item->targets = NULL;
-    if (accept(s, T_as)) {
+    if (peek(s) == T_as) {
+      item->as_location = scanner_location(&s->scanner);
+      eat(s, T_as);
       item->targets = parse_expression(s, PREC_NAMED);
       /* TODO: check_assignment_target */
     }

@@ -166,6 +166,7 @@ struct ast_return {
 };
 
 struct ast_try_except {
+  struct location                location;
   union ast_expression *nullable match;
   struct symbol *nullable        as;
   struct ast_statement_list     *body;
@@ -189,6 +190,7 @@ struct ast_while {
 
 struct ast_with_item {
   union ast_expression          *expression;
+  struct location                as_location;
   union ast_expression *nullable targets;
 };
 

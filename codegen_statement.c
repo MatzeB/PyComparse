@@ -107,6 +107,7 @@ enum pending_cleanup_kind {
 struct pending_finally_state {
   enum pending_cleanup_kind              kind;
   struct ast_statement_list *nullable    finally_body;
+  struct basic_block *nullable           finally_block;
   bool                                   finally_needs_placeholder;
   struct symbol *nullable                as_symbol;
   bool                                   async_with;
@@ -201,6 +202,17 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
 static bool unreachable(struct cg_state *s)
 {
   return !cg_in_block(s);
+}
+
+static void ensure_dead_block_for_unreachable_finally(struct cg_state *s)
+{
+  if (!unreachable(s) || s->code.active_finally_body_depth == 0) {
+    return;
+  }
+  /* Keep emitting line metadata for statements that are syntactically in the
+   * active finally body, even after control flow became unreachable. */
+  struct basic_block *dead = cg_block_allocate(s);
+  cg_block_begin(s, dead);
 }
 
 void emit_code_end(struct cg_state *s)
@@ -652,7 +664,8 @@ void emit_make_function_end(struct cg_state            *s,
                  /*pop=*/operands, /*push=*/1);
 }
 
-static void emit_try_body_begin(struct cg_state *s, struct try_state *state)
+static void emit_try_body_begin(struct cg_state *s, struct try_state *state,
+                                bool has_finally)
 {
   memset(state, 0, sizeof(*state));
   if (unreachable(s)) return;
@@ -662,6 +675,9 @@ static void emit_try_body_begin(struct cg_state *s, struct try_state *state)
   struct basic_block *setup_except = cg_block_allocate(s);
   state->setup_finally = setup_finally;
   state->setup_except = setup_except;
+  if (has_finally) {
+    state->finally_body = cg_block_allocate(s);
+  }
 
   cg_jump(s, setup_finally);
   cg_block_insert_delayed(s, setup_finally);
@@ -685,6 +701,7 @@ static void emit_try_body_end(struct cg_state *s, struct try_state *state)
 }
 
 static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
+                                  struct location       location,
                                   union ast_expression *match,
                                   struct symbol        *as)
 {
@@ -707,6 +724,7 @@ static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
   }
 
   cg_block_begin(s, excepts);
+  cg_set_lineno(s, location.line);
   cg_push(s, 3); /* runtime pushes traceback, value, type when entering */
   /* SETUP_FINALLY exception state is larger than what we model explicitly. */
   cg_mark_max_stack_extra(s, 5);
@@ -821,7 +839,8 @@ static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   if (!state->try_reachable) return;
   state->had_finally = true;
 
-  struct basic_block *finally_body = cg_block_allocate(s);
+  struct basic_block *finally_body = state->finally_body;
+  assert(finally_body != NULL);
 
   struct basic_block *setup_finally = state->setup_finally;
   cg_block_begin_delayed(s, setup_finally);
@@ -866,6 +885,17 @@ static void emit_try_finally_end(struct cg_state *s, struct try_state *state)
   if (unreachable(s)) {
     /* Abrupt exits consume the finally token and optional placeholder. */
     cg_pop(s, state->finally_needs_placeholder ? 2 : 1);
+
+    /* Match CPython's trailing finally shape even when unreachable:
+     * keep END_FINALLY (and placeholder POP_TOP) so line/block metadata used
+     * by tracing and f_lineno validation stays compatible. */
+    struct basic_block *dead_finally_tail = cg_block_allocate(s);
+    cg_block_begin(s, dead_finally_tail);
+    cg_op(s, OPCODE_END_FINALLY, 0);
+    if (state->finally_needs_placeholder) {
+      cg_op(s, OPCODE_POP_TOP, 0);
+    }
+    cg_block_end(s);
     return;
   }
   cg_op_pop1(s, OPCODE_END_FINALLY, 0);
@@ -1435,6 +1465,7 @@ void emit_generator_expression_code(
 
 static void emit_with_begin(struct cg_state *s, struct with_state *state,
                             union ast_expression *expression,
+                            struct location       as_location,
                             union ast_expression *targets, bool async,
                             struct location location)
 {
@@ -1477,6 +1508,9 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
 
   cg_block_begin(s, body);
   if (targets != NULL) {
+    if (as_location.line != 0) {
+      cg_set_lineno(s, as_location.line);
+    }
     emit_assignment(s, targets);
   } else {
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
@@ -1592,13 +1626,23 @@ static void emit_pending_finally(struct cg_state         *s,
       break;
     case CLEANUP_FINALLY:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      if (state->finally_needs_placeholder) {
-        /* Keep loop iterator stack tracking stable in synthetic cleanup paths.
-         */
-        cg_op(s, OPCODE_POP_TOP, 0);
+      if (state->finally_block != NULL) {
+        struct basic_block *after_finally = cg_block_allocate(s);
+        cg_condjump(s, OPCODE_CALL_FINALLY, state->finally_block,
+                    /*fallthrough=*/NULL);
+        cg_block_begin(s, after_finally);
+        if (state->finally_needs_placeholder) {
+          cg_op(s, OPCODE_POP_TOP, 0);
+        }
+      } else {
+        if (state->finally_needs_placeholder) {
+          /* Keep loop iterator stack tracking stable in synthetic cleanup
+           * fallback paths. */
+          cg_op(s, OPCODE_POP_TOP, 0);
+        }
+        emit_statement_list_with_function(s, state->finally_body,
+                                          current_function);
       }
-      emit_statement_list_with_function(s, state->finally_body,
-                                        current_function);
       break;
     case CLEANUP_EXCEPT_AS:
       cg_op(s, OPCODE_POP_BLOCK, 0);
@@ -3285,6 +3329,10 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
         && finally_body_needs_placeholder_statement_list(
             try_stmt->finally_body, /*loop_depth=*/0);
 
+  struct try_state state;
+  emit_try_body_begin(s, &state, has_finally);
+  state.finally_needs_placeholder = finally_needs_placeholder;
+
   /* Push cleanup entries for break/continue/return inside the try body.
    * Order: finally (outermost) then except POP_BLOCK (innermost). */
   struct pending_finally_state finally_cleanup;
@@ -3292,6 +3340,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
     finally_cleanup = (struct pending_finally_state){
       .kind = CLEANUP_FINALLY,
       .finally_body = try_stmt->finally_body,
+      .finally_block = state.finally_body,
       .finally_needs_placeholder = finally_needs_placeholder,
       .prev = saved_pending,
     };
@@ -3308,9 +3357,6 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
     s->code.pending_finally = &except_cleanup;
   }
 
-  struct try_state state;
-  emit_try_body_begin(s, &state);
-  state.finally_needs_placeholder = finally_needs_placeholder;
   emit_statement_list_with_function(s, try_stmt->body, current_function);
   emit_try_body_end(s, &state);
 
@@ -3321,7 +3367,8 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
 
   for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
     struct ast_try_except *except_stmt = &try_stmt->excepts[i];
-    emit_try_except_begin(s, &state, except_stmt->match, except_stmt->as);
+    emit_try_except_begin(s, &state, except_stmt->location, except_stmt->match,
+                          except_stmt->as);
 
     /* Push cleanup entries for break/continue/return inside the except
      * handler body.  Innermost first: as-cleanup, then POP_EXCEPT. */
@@ -3375,6 +3422,29 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
 static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
                        struct ast_def *nullable current_function)
 {
+  union object *condition_constant
+      = ast_expression_as_constant(while_stmt->condition);
+  if (condition_constant != NULL) {
+    enum object_type condition_type = object_type(condition_constant);
+    if (condition_type == OBJECT_FALSE) {
+      if (while_stmt->else_body != NULL) {
+        emit_statement_list_with_function(s, while_stmt->else_body,
+                                          current_function);
+      }
+      return;
+    }
+
+    if (condition_type == OBJECT_TRUE && while_stmt->body != NULL
+        && while_stmt->body->num_statements == 1
+        && ast_statement_type(while_stmt->body->statements[0])
+               == AST_STATEMENT_RETURN) {
+      /* Match CPython dead-block behavior for `while True: return ...`,
+       * including cases with an unreachable `else` block. */
+      emit_statement_list_with_function(s, while_stmt->body, current_function);
+      return;
+    }
+  }
+
   struct for_while_state state;
   emit_while_begin(s, &state, while_stmt->condition);
   emit_statement_list_with_function(s, while_stmt->body, current_function);
@@ -3410,8 +3480,8 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
   struct pending_finally_state *saved_pending = s->code.pending_finally;
   for (unsigned i = 0; i < num_items; ++i) {
     struct ast_with_item *item = &with->items[i];
-    emit_with_begin(s, &states[i], item->expression, item->targets,
-                    with->async, with->base.location);
+    emit_with_begin(s, &states[i], item->expression, item->as_location,
+                    item->targets, with->async, with->base.location);
     with_cleanups[i] = (struct pending_finally_state){
       .kind = CLEANUP_WITH,
       .async_with = with->async,
@@ -3508,23 +3578,30 @@ static void emit_return(struct cg_state *s, struct location location,
   }
   if (!unreachable(s)) {
     emit_finally_abrupt_exit_prefix(s);
-    if (return_stmt->expression != NULL) {
+    bool has_value = (return_stmt->expression != NULL);
+    if (has_value) {
       emit_expression(s, return_stmt->expression);
-    } else {
-      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
     }
     if (s->code.pending_finally != NULL) {
-      struct symbol *tmp
-          = symbol_table_get_or_insert(s->symbol_table, "<pycomparse-return>");
-      if (cg_in_function(s)) {
-        cg_declare(s, tmp, SYMBOL_LOCAL);
+      struct symbol *nullable tmp = NULL;
+      if (has_value) {
+        tmp = symbol_table_get_or_insert(s->symbol_table,
+                                         "<pycomparse-return>");
+        if (cg_in_function(s)) {
+          cg_declare(s, tmp, SYMBOL_LOCAL);
+        }
+        cg_store(s, tmp);
       }
-      cg_store(s, tmp);
       emit_pending_finally(s, current_function, /*stop=*/NULL);
       if (unreachable(s)) {
         return;
       }
-      cg_load(s, tmp);
+      if (tmp != NULL) {
+        cg_load(s, tmp);
+      }
+    }
+    if (!has_value) {
+      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
     }
     cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
     cg_block_end(s);
@@ -3551,6 +3628,7 @@ static void emit_yield_from_statement(struct cg_state  *s,
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function)
 {
+  ensure_dead_block_for_unreachable_finally(s);
   cg_set_lineno(s, statement->base.location.line);
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION:

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.11)
 project(pycomparse)
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGUREATION_TYPES)
@@ -71,6 +71,25 @@ if (NOT PYCOMPARSE_PGO_COMPILE_FLAGS STREQUAL "")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${PYCOMPARSE_PGO_LINK_FLAGS}")
 endif()
 
+set(PYCOMPARSE_ICONV_FOUND OFF)
+set(PYCOMPARSE_ICONV_LIBRARIES "")
+set(PYCOMPARSE_ICONV_TARGET "")
+
+find_package(Iconv QUIET)
+if (Iconv_FOUND)
+  set(PYCOMPARSE_ICONV_FOUND ON)
+  if (TARGET Iconv::Iconv)
+    set(PYCOMPARSE_ICONV_TARGET Iconv::Iconv)
+  elseif (NOT Iconv_LIBRARIES STREQUAL "")
+    set(PYCOMPARSE_ICONV_LIBRARIES "${Iconv_LIBRARIES}")
+  endif()
+endif()
+
+if (NOT PYCOMPARSE_ICONV_FOUND)
+  message(WARNING "iconv not found; building with PYCOMPARSE_NO_ICONV")
+  add_compile_definitions(PYCOMPARSE_NO_ICONV)
+endif()
+
 add_executable(arena_test
   arena_test.c
   adt/arena.h
@@ -106,10 +125,12 @@ add_executable(scanner_test
   util.h
 )
 target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(scanner_test PRIVATE ${PYCOMPARSE_ICONV_TARGET}
+                                           ${PYCOMPARSE_ICONV_LIBRARIES})
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET scanner_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
-add_executable(parser_test
+add_executable(pycomparse
   adt/arena.h
   adt/dynmemory.h
   adt/stack.h
@@ -140,7 +161,7 @@ add_executable(parser_test
   object_types.h
   parser.c
   parser.h
-  parser_test.c
+  pycomparse.c
   parser_types.h
   scanner.c
   scanner.h
@@ -161,9 +182,11 @@ add_executable(parser_test
   writer.c
   writer.h
 )
-target_include_directories(parser_test PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(pycomparse PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(pycomparse PRIVATE ${PYCOMPARSE_ICONV_TARGET}
+                                          ${PYCOMPARSE_ICONV_LIBRARIES})
 if (PYCOMPARSE_ENABLE_LTO)
-  set_property(TARGET parser_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET pycomparse PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET arena_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

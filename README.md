@@ -5,12 +5,29 @@ It scans and parses Python source, then emits `.pyc` bytecode executable by CPyt
 PyComparse currently targets Python 3.8 syntax and bytecode.
 The parser uses recursive descent with precedence climbing for expressions, and the implementation style is straightforward and performance-focused.
 
+This project is also an experiment in heavy AI-assisted coding 🤖.
+
+## Status
+
+- Scanner, parser, and code generator for complete Python 3.8 language parity
+- Successfully handles files from the Python 3.8 standard library and test
+  suite, except tests that depend on exact line-number table details and tests
+  that fail when running from precompiled `.pyc` files.
+
+### Known Limitations
+
+- Constant folding currently supports a subset of operations: `+`, `-`, `*`
+  for integers below 63 bits and floats, string concatenation/multiplication,
+  and dead-code elimination during code generation.
+- Line number tables do not always agree with CPython (TODO).
+- Maximum stack computation results overestimate in some circumstances (TODO).
+
 ## Quick Start
 
 Requirements:
 
-- CMake 3.10+
-- A C compiler
+- CMake 3.11+
+- A C99 compiler
 - Python 3.8 (for running integration tests), or a working `uv` setup that can provision Python 3.8
 
 Configure and build:
@@ -24,31 +41,20 @@ Compile and run a sample input:
 
 ```sh
 ./build/scanner_test
-./build/parser_test test/hello.py > /tmp/test.pyc
+./build/pycomparse --out /tmp/test.pyc test/hello.py
 uv python /tmp/test.pyc
 ```
 
-## Testing
+## Development
 
-Run the integration test script:
-
-```sh
-./test.sh
-```
-
-By default it uses `build/parser_test`. Override with:
-
-```sh
-PARSER_TEST=build2/parser_test ./test.sh
-```
-
-## Build Configuration
+### Build Configuration
 
 CMake options currently available:
 
 - `-DPYCOMPARSE_ENABLE_LTO=ON` to enable LTO/IPO (if supported by toolchain)
 - `-DPYCOMPARSE_PGO_MODE=off|generate|use`
 - `-DPYCOMPARSE_PGO_DATA=/path/to/profile-data` when `PYCOMPARSE_PGO_MODE=use`
+- `-DCMAKE_DISABLE_FIND_PACKAGE_Iconv=TRUE` builds without iconv
 
 For a full PGO+LTO build flow:
 
@@ -56,7 +62,20 @@ For a full PGO+LTO build flow:
 scripts/build_pgo_lto.sh
 ```
 
-## Project Layout
+### Testing
+
+Run the integration test script:
+
+```sh
+./test.sh
+```
+
+By default it uses `build/pycomparse`. Override with:
+
+```sh
+PARSER_TEST=build2/pycomparse ./test.sh
+```
+### Project Layout
 
 - `scanner.c`, `scanner.h`: tokenization
 - `parser.c`, `parser.h`: parsing to AST

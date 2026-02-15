@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PARSER_TEST="${PARSER_TEST:-build/parser_test}"
+PARSER_TEST="${PARSER_TEST:-build/pycomparse}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 total_tests=0
@@ -26,7 +26,7 @@ run_positive_test() {
 
     total_tests=$((total_tests + 1))
 
-    if ! "${PARSER_TEST}" "$t" > "$pyc" 2> "$compile_err"; then
+    if ! "${PARSER_TEST}" --out "$pyc" "$t" 2> "$compile_err"; then
         report_fail "$t (compile)"
         cat "$compile_err"
         return
@@ -58,7 +58,7 @@ run_error_test() {
 
     total_tests=$((total_tests + 1))
 
-    "${PARSER_TEST}" "$t" > "$stderr_out" 2> "$err_out"
+    "${PARSER_TEST}" --out "$stderr_out" "$t" > /dev/null 2> "$err_out"
     local status=$?
     if [ "$status" -eq 0 ]; then
         report_fail "$t (expected nonzero exit)"
@@ -80,7 +80,7 @@ run_compile_only_test() {
 
     total_tests=$((total_tests + 1))
 
-    if ! "${PARSER_TEST}" "$t" > "$pyc" 2> "$compile_err"; then
+    if ! "${PARSER_TEST}" --out "$pyc" "$t" 2> "$compile_err"; then
         report_fail "$t (compile_only)"
         cat "$compile_err"
     fi

@@ -109,7 +109,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--parser",
-        default=os.environ.get("PARSER_TEST", "build/parser_test"),
+        default=os.environ.get(
+            "PYCOMPARSE", os.environ.get("PARSER_TEST", "build/pycomparse")
+        ),
         help="path to parser executable",
     )
     parser.add_argument(
@@ -301,12 +303,26 @@ def compile_reference_syntax(file_path: Path, cfg: Config) -> tuple[int, bool]:
 
 
 def process_compile(file_path: Path, cfg: Config) -> FileResult:
-    rc, _, _, timed_out = run_process(
-        [str(cfg.parser_test), str(file_path)],
-        timeout=cfg.timeout,
-        env=cfg.env,
-        stdout_target=subprocess.DEVNULL,
-    )
+    out_pyc_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="pycomparse-compile-",
+            suffix=".pyc",
+            delete=False,
+        ) as tmp:
+            out_pyc_path = tmp.name
+        rc, _, _, timed_out = run_process(
+            [str(cfg.parser_test), "--out", out_pyc_path, str(file_path)],
+            timeout=cfg.timeout,
+            env=cfg.env,
+            stdout_target=subprocess.DEVNULL,
+        )
+    finally:
+        if out_pyc_path is not None:
+            try:
+                os.unlink(out_pyc_path)
+            except FileNotFoundError:
+                pass
     if timed_out:
         return FileResult(file_path, False, "compile_timeout")
     if is_crash_return_code(rc):
@@ -397,12 +413,16 @@ def process_runtime(file_path: Path, cfg: Config) -> FileResult:
                 delete=False,
             ) as out_file:
                 tmp_pyc_file = Path(out_file.name)
-                compile_rc, _, compile_err, compile_timed_out = run_process(
-                    [str(cfg.parser_test), str(file_path)],
-                    timeout=cfg.timeout,
-                    env=cfg.env,
-                    stdout_target=out_file,
-                )
+            compile_rc, _, compile_err, compile_timed_out = run_process(
+                [
+                    str(cfg.parser_test),
+                    "--out",
+                    str(tmp_pyc_file),
+                    str(file_path),
+                ],
+                timeout=cfg.timeout,
+                env=cfg.env,
+            )
             if compile_timed_out:
                 return FileResult(file_path, False, "compile_timeout")
             if compile_rc != 0:

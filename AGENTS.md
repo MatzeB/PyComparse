@@ -18,7 +18,7 @@ ninja --quiet -C build
 The build produces three main executables:
 - `arena_test` - Tests for the arena memory allocator
 - `scanner_test` - Tests for the lexical scanner
-- `parser_test` - Main parser/compiler that converts Python source to bytecode
+- `pycomparse` - Main parser/compiler that converts Python source to bytecode
 
 ## Development Commands
 
@@ -35,7 +35,7 @@ not rely on the default build type:
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 ninja --quiet -C build-release
 ```
-Use `build-release/parser_test` (or an equivalent `-O3 -DNDEBUG` binary) for
+Use `build-release/pycomparse` (or an equivalent `-O3 -DNDEBUG` binary) for
 `perf`/`valgrind` runs.
 
 For PGO + LTO builds, use:
@@ -87,7 +87,7 @@ uv run ./test.sh
 
 ### Running Individual Tests
 ```bash
-build/parser_test test/simple.py > /tmp/output.pyc && uv run python /tmp/output.pyc
+build/pycomparse --out /tmp/output.pyc test/simple.py && uv run python /tmp/output.pyc
 ```
 
 ### Compiling and print bytecode for reference compiler
@@ -98,7 +98,7 @@ uv run utils/decode.py /tmp/test.py
 ### Compile and print bytecode for PyComparse
 - remember to build first
 ```bash
-build/parser_test /tmp/test.py | uv run utils/decode.py
+build/pycomparse --out /tmp/test.pyc /tmp/test.py && uv run utils/decode.py /tmp/test.pyc
 ```
 
 ## Architecture

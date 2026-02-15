@@ -70,7 +70,7 @@ cmake --build "${GEN_DIR}" -j "${jobs}"
 rm -rf "${PROFRAW_DIR}"
 mkdir -p "${PROFRAW_DIR}"
 
-export PARSER_TEST="${GEN_DIR}/parser_test"
+export PARSER_TEST="${GEN_DIR}/pycomparse"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pycomparse-%p.profraw"
 
 echo "[3/5] Running training workload"
@@ -94,7 +94,7 @@ else
 
   for _round in 1 2 3; do
     for f in "${files[@]}"; do
-      "${PARSER_TEST}" "${f}" >/dev/null
+      "${PARSER_TEST}" --out /dev/null "${f}"
     done
   done
 fi
@@ -119,4 +119,4 @@ cmake -S . -B "${BUILD_DIR}" \
 cmake --build "${BUILD_DIR}" -j "${jobs}"
 
 echo "Done."
-echo "Optimized parser binary: ${BUILD_DIR}/parser_test"
+echo "Optimized parser binary: ${BUILD_DIR}/pycomparse"

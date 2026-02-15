@@ -121,8 +121,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--parser-test",
-        default="build/parser_test",
-        help="Path to pycomparse parser executable (default: build/parser_test)",
+        default="build/pycomparse",
+        help="Path to pycomparse parser executable (default: build/pycomparse)",
     )
     parser.add_argument(
         "--cpython-cmd",
@@ -175,12 +175,11 @@ def compile_reference(
 
 
 def compile_pycomparse(source: Path, out_pyc: Path, parser_test: Path) -> tuple[bool, str]:
-    with out_pyc.open("wb") as out_fp:
-        proc = subprocess.run(
-            [str(parser_test), str(source)],
-            stdout=out_fp,
-            stderr=subprocess.PIPE,
-        )
+    proc = subprocess.run(
+        [str(parser_test), "--out", str(out_pyc), str(source)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     if proc.returncode != 0:
         return False, proc.stderr.decode("utf-8", errors="replace")
     return True, ""

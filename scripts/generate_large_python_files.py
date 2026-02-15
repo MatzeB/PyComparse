@@ -6,6 +6,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+PATTERN_STATEMENTS = "statements"
+PATTERN_MANY_FUNCTIONS = "many functions"
+PATTERN_FUNCTIONS_ALIAS = "functions"
+
 
 STATEMENT_BLOCK = (
     "x = 1\n"
@@ -45,7 +49,8 @@ def build_path(output_dir: Path, size_mb: int, pattern: str, index: int) -> Path
         suffix = ""
     else:
         suffix = f"_{index}"
-    return output_dir / f"huge_{pattern}_{size_mb}mb{suffix}.py"
+    pattern_slug = pattern.replace(" ", "_")
+    return output_dir / f"huge_{pattern_slug}_{size_mb}mb{suffix}.py"
 
 
 def generate_one_file(path: Path, target_size_mb: int, pattern: str) -> int:
@@ -61,7 +66,7 @@ def generate_one_file(path: Path, target_size_mb: int, pattern: str) -> int:
     with path.open("w", encoding="utf-8", newline="\n") as fp:
         fp.write(header)
 
-        if pattern == "statements":
+        if pattern == PATTERN_STATEMENTS:
             block = STATEMENT_BLOCK
             while fp.tell() < target_bytes:
                 fp.write(block)
@@ -96,8 +101,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--pattern",
-        choices=("statements", "functions"),
-        default="statements",
+        choices=(PATTERN_STATEMENTS, PATTERN_MANY_FUNCTIONS, PATTERN_FUNCTIONS_ALIAS),
+        default=PATTERN_STATEMENTS,
         help="Code pattern used to fill files.",
     )
     parser.add_argument(
@@ -119,11 +124,15 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    pattern = args.pattern
+    if pattern == PATTERN_FUNCTIONS_ALIAS:
+        pattern = PATTERN_MANY_FUNCTIONS
+
     print(f"Generating files in {output_dir} ...")
     for size_mb in sizes_mb:
         for i in range(args.copies):
-            path = build_path(output_dir, size_mb, args.pattern, i)
-            size_bytes = generate_one_file(path, size_mb, args.pattern)
+            path = build_path(output_dir, size_mb, pattern, i)
+            size_bytes = generate_one_file(path, size_mb, pattern)
             print(f"  wrote {path} ({size_bytes} bytes)")
 
     print("Done.")

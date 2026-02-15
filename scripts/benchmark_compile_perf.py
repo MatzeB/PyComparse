@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shlex
@@ -22,6 +23,8 @@ import sys
 
 py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)
 """
+
+FILE_COL_WIDTH = 43
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,14 +51,22 @@ def parse_args() -> argparse.Namespace:
         help="Number of largest files to benchmark from --lib-root (default: 20).",
     )
     parser.add_argument(
+        "--tested",
         "--parser-test",
-        default="build-release/parser_test",
-        help="Path to pycomparse parser executable (default: build-release/parser_test).",
+        dest="tested",
+        default="build-release/pycomparse",
+        help=(
+            "Path to tested compiler executable "
+            "(default: build-release/pycomparse). "
+            "Alias: --parser-test."
+        ),
     )
     parser.add_argument(
+        "--baseline",
         "--cpython-cmd",
+        dest="baseline",
         default="uv run python",
-        help='Reference CPython command (default: "uv run python").',
+        help='Baseline compiler command (default: "uv run python"). Alias: --cpython-cmd.',
     )
     parser.add_argument(
         "--warmup",
@@ -80,6 +91,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to write structured benchmark results as JSON.",
     )
     parser.add_argument(
+        "--tsv-out",
+        default="",
+        help="Optional path to write per-file benchmark results as TSV.",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="Abort immediately when one file fails in either compiler.",
@@ -98,6 +114,7 @@ def parse_args() -> argparse.Namespace:
 
 def cpython_env(cpython_cmd: list[str]) -> dict[str, str]:
     env = os.environ.copy()
+    # Adjust for AI sandboxes blocking $HOME/.cache/uv
     if len(cpython_cmd) >= 2 and cpython_cmd[0] == "uv" and cpython_cmd[1] == "run":
         env.setdefault("UV_CACHE_DIR", "/tmp/.uvcache")
     return env
@@ -120,10 +137,11 @@ def run_cpython_compile(
 
 
 def run_pycomparse_compile(source: Path, out_pyc: Path, parser_test: Path) -> int:
-    with out_pyc.open("wb") as out_fp:
-        proc = subprocess.run(
-            [str(parser_test), str(source)], stdout=out_fp, stderr=subprocess.PIPE
-        )
+    proc = subprocess.run(
+        [str(parser_test), "--out", str(out_pyc), str(source)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     return proc.returncode
 
 
@@ -157,7 +175,10 @@ def benchmark_with_hyperfine(
         code = run_pycomparse_compile(source, out_pyc, parser_test)
         if code != 0:
             return None, f"pycomparse exited with code {code}"
-        cmd = f"{shlex.quote(str(parser_test))} {shlex.quote(str(source))} > {shlex.quote(str(out_pyc))}"
+        cmd = (
+            f"{shlex.quote(str(parser_test))} --out {shlex.quote(str(out_pyc))} "
+            f"{shlex.quote(str(source))}"
+        )
 
     safe_name = str(source).replace("/", "_")
     export_json = work_dir / f"hyperfine_{engine}_{safe_name}.json"
@@ -190,11 +211,14 @@ def benchmark_with_hyperfine(
         return None, f"failed to parse hyperfine output: {err}"
 
     samples_ms = [float(t) * 1000.0 for t in times_s]
+    mean_ms = float(entry["mean"]) * 1000.0
+    stddev_ms = statistics.pstdev(samples_ms) if len(samples_ms) > 1 else 0.0
     summary = {
         "min_ms": float(entry["min"]) * 1000.0,
         "median_ms": float(entry["median"]) * 1000.0,
-        "mean_ms": float(entry["mean"]) * 1000.0,
+        "mean_ms": mean_ms,
         "max_ms": float(entry["max"]) * 1000.0,
+        "stddev_ms": stddev_ms,
         "samples_ms": samples_ms,
     }
     return summary, None
@@ -232,17 +256,112 @@ def summarize_samples(samples: list[float]) -> dict[str, float]:
     }
 
 
+def safe_ratio(numerator: float, denominator: float) -> float | None:
+    if denominator <= 0.0:
+        return None
+    return numerator / denominator
+
+
+def format_plus_minus(summary: dict[str, Any]) -> str:
+    stddev = summary.get("stddev_ms")
+    if not isinstance(stddev, (int, float)):
+        return "-"
+    return f"±{float(stddev):.2f}ms"
+
+
+def truncate_middle(text: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if width == 1:
+        return "…"
+    if width == 2:
+        return text[:1] + "…"
+    keep = width - 1
+    head = (keep + 1) // 2
+    tail = keep // 2
+    return f"{text[:head]}…{text[-tail:]}"
+
+
+def write_tsv(path: Path, results: list[dict[str, Any]]) -> None:
+    def metric(result: dict[str, Any], engine: str, key: str) -> str:
+        value = result.get(engine, {}).get(key)
+        if isinstance(value, (int, float)):
+            return f"{float(value):.6f}"
+        return ""
+
+    def error_text(result: dict[str, Any], engine: str) -> str:
+        value = result.get(engine, {}).get("error")
+        if not isinstance(value, str):
+            return ""
+        return value.replace("\r", "\\r").replace("\n", "\\n")
+
+    with path.open("w", encoding="utf-8", newline="") as fp:
+        writer = csv.writer(fp, delimiter="\t")
+        writer.writerow(
+            [
+                "file",
+                "size_bytes",
+                "status",
+                "cpython_min_ms",
+                "cpython_median_ms",
+                "cpython_mean_ms",
+                "cpython_max_ms",
+                "pycomparse_min_ms",
+                "pycomparse_median_ms",
+                "pycomparse_mean_ms",
+                "pycomparse_max_ms",
+                "ratio_cpython_over_pycomparse",
+                "cpython_error",
+                "pycomparse_error",
+            ]
+        )
+        for result in results:
+            ratio = result.get("ratio_cpython_over_pycomparse")
+            if isinstance(ratio, (int, float)):
+                ratio_text = f"{float(ratio):.6f}"
+            else:
+                ratio_text = ""
+            writer.writerow(
+                [
+                    result.get("file", ""),
+                    result.get("size_bytes", ""),
+                    result.get("status", ""),
+                    metric(result, "cpython", "min_ms"),
+                    metric(result, "cpython", "median_ms"),
+                    metric(result, "cpython", "mean_ms"),
+                    metric(result, "cpython", "max_ms"),
+                    metric(result, "pycomparse", "min_ms"),
+                    metric(result, "pycomparse", "median_ms"),
+                    metric(result, "pycomparse", "mean_ms"),
+                    metric(result, "pycomparse", "max_ms"),
+                    ratio_text,
+                    error_text(result, "cpython"),
+                    error_text(result, "pycomparse"),
+                ]
+            )
+
+
 def print_file_row(
     rel_file: str,
     size_bytes: int,
     cpython_median_ms: float,
     pycomparse_median_ms: float,
+    baseline_plus_minus: str | None = None,
+    tested_plus_minus: str | None = None,
 ) -> None:
-    ratio = cpython_median_ms / pycomparse_median_ms
-    print(
-        f"{rel_file:58} {size_bytes:10d} "
-        f"{cpython_median_ms:12.3f} {pycomparse_median_ms:14.3f} {ratio:11.3f}"
-    )
+    ratio = safe_ratio(cpython_median_ms, pycomparse_median_ms)
+    ratio_text = "inf" if ratio is None else f"{ratio:.2f}"
+    file_display = truncate_middle(rel_file, FILE_COL_WIDTH)
+    row = f"{file_display:{FILE_COL_WIDTH}} {size_bytes:>12,} {cpython_median_ms:12.2f}"
+    if baseline_plus_minus is not None and tested_plus_minus is not None:
+        row += f" {baseline_plus_minus:>9}"
+    row += f" {pycomparse_median_ms:14.2f}"
+    if baseline_plus_minus is not None and tested_plus_minus is not None:
+        row += f" {tested_plus_minus:>9}"
+    row += f" {ratio_text:>11}"
+    print(row)
 
 
 def main() -> int:
@@ -252,14 +371,14 @@ def main() -> int:
         print("error: --warmup must be >= 0 and --repeats must be > 0", file=sys.stderr)
         return 2
 
-    parser_test = Path(args.parser_test)
+    parser_test = Path(args.tested)
     if not parser_test.is_file():
-        print(f"error: parser executable not found: {parser_test}", file=sys.stderr)
+        print(f"error: tested executable not found: {parser_test}", file=sys.stderr)
         return 2
 
-    cpython_cmd = shlex.split(args.cpython_cmd)
+    cpython_cmd = shlex.split(args.baseline)
     if not cpython_cmd:
-        print("error: --cpython-cmd is empty", file=sys.stderr)
+        print("error: --baseline is empty", file=sys.stderr)
         return 2
     cpython_env_vars = cpython_env(cpython_cmd)
     hyperfine_path = shutil.which("hyperfine")
@@ -294,8 +413,8 @@ def main() -> int:
     work_dir.mkdir(parents=True, exist_ok=True)
 
     print("Benchmark configuration:")
-    print(f"  parser_test: {parser_test}")
-    print(f"  cpython_cmd: {' '.join(cpython_cmd)}")
+    print(f"  tested:      {parser_test}")
+    print(f"  baseline:    {' '.join(cpython_cmd)}")
     print(f"  warmup:      {args.warmup}")
     print(f"  repeats:     {args.repeats}")
     print(f"  runner:      {runner}")
@@ -303,9 +422,14 @@ def main() -> int:
     print()
 
     header = (
-        f"{'file':58} {'size(bytes)':>10} {'cpython(ms)':>12} "
-        f"{'pycomparse(ms)':>14} {'ratio':>11}"
+        f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} "
+        f"{'pycomparse(ms)':>14} {'speedup':>11}"
     )
+    if runner == "hyperfine":
+        header = (
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} {'':>9} "
+            f"{'pycomparse(ms)':>14} {'':>9} {'speedup':>11}"
+        )
     print(header)
     print("-" * len(header))
 
@@ -388,13 +512,35 @@ def main() -> int:
         if file_result["status"] == "ok":
             cpython_median = file_result["cpython"]["median_ms"]
             pycomparse_median = file_result["pycomparse"]["median_ms"]
-            print_file_row(str(source), size_bytes, cpython_median, pycomparse_median)
-            file_result["ratio_cpython_over_pycomparse"] = (
-                cpython_median / pycomparse_median
+            baseline_plus_minus = None
+            tested_plus_minus = None
+            if runner == "hyperfine":
+                baseline_plus_minus = format_plus_minus(file_result["cpython"])
+                tested_plus_minus = format_plus_minus(file_result["pycomparse"])
+            print_file_row(
+                str(source),
+                size_bytes,
+                cpython_median,
+                pycomparse_median,
+                baseline_plus_minus=baseline_plus_minus,
+                tested_plus_minus=tested_plus_minus,
+            )
+            file_result["ratio_cpython_over_pycomparse"] = safe_ratio(
+                cpython_median, pycomparse_median
             )
         else:
             failed += 1
-            print(f"{str(source):58} {'-':>10} {'FAILED':>12} {'FAILED':>14} {'-':>11}")
+            failed_file_display = truncate_middle(str(source), FILE_COL_WIDTH)
+            failed_row = (
+                f"{failed_file_display:{FILE_COL_WIDTH}} {'-':>12} {'FAILED':>12} "
+                f"{'FAILED':>14} {'-':>11}"
+            )
+            if runner == "hyperfine":
+                failed_row = (
+                    f"{failed_file_display:{FILE_COL_WIDTH}} {'-':>12} {'FAILED':>12} {'-':>9} "
+                    f"{'FAILED':>14} {'-':>9} {'-':>11}"
+                )
+            print(failed_row)
             if args.fail_fast:
                 results.append(file_result)
                 break
@@ -407,15 +553,19 @@ def main() -> int:
         total_pycomparse = sum(r["pycomparse"]["median_ms"] for r in ok_results)
         print()
         print("Totals (sum of per-file medians):")
-        print(f"  cpython:    {total_cpython:.3f} ms")
-        print(f"  pycomparse: {total_pycomparse:.3f} ms")
-        print(f"  ratio:      {total_cpython / total_pycomparse:.3f}x")
+        print(f"  cpython:    {total_cpython:.2f} ms")
+        print(f"  pycomparse: {total_pycomparse:.2f} ms")
+        total_ratio = safe_ratio(total_cpython, total_pycomparse)
+        if total_ratio is None:
+            print("  ratio:      infx")
+        else:
+            print(f"  ratio:      {total_ratio:.2f}x")
 
     if args.json_out:
         payload: dict[str, Any] = {
             "config": {
-                "parser_test": str(parser_test),
-                "cpython_cmd": cpython_cmd,
+                "tested": str(parser_test),
+                "baseline": cpython_cmd,
                 "warmup": args.warmup,
                 "repeats": args.repeats,
                 "work_dir": str(work_dir),
@@ -426,6 +576,9 @@ def main() -> int:
         }
         Path(args.json_out).write_text(json.dumps(payload, indent=2) + "\n")
         print(f"\nWrote JSON results to: {args.json_out}")
+    if args.tsv_out:
+        write_tsv(Path(args.tsv_out), results)
+        print(f"Wrote TSV results to: {args.tsv_out}")
 
     if failed > 0:
         print(f"\nCompleted with {failed} failing file(s).", file=sys.stderr)

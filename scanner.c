@@ -2513,10 +2513,12 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
 
 void scanner_free(struct scanner_state *s)
 {
+#ifndef PYCOMPARSE_NO_ICONV
   if (s->transcoded_input != NULL) {
     fclose(s->transcoded_input);
   }
   free(s->transcoded_source);
+#endif
   free(s->fstring_debug.spilled_prefix);
   free(s->read_buffer);
 }

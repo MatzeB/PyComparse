@@ -536,12 +536,8 @@ emit_set_comprehension(struct cg_state                 *s,
 static void emit_set_display(struct cg_state            *s,
                              struct ast_expression_list *list)
 {
-  unsigned num_expressions = list->num_expressions;
-  for (unsigned i = 0; i < num_expressions; i++) {
-    emit_expression(s, list->expressions[i]);
-  }
-  cg_op_pop_push(s, OPCODE_BUILD_SET, num_expressions,
-                 /*pop=*/num_expressions, /*push=*/1);
+  emit_expression_list_helper(s, list, OPCODE_BUILD_SET,
+                              OPCODE_BUILD_SET_UNPACK);
 }
 
 static void emit_none(struct cg_state *s)

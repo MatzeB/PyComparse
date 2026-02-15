@@ -1,0 +1,2 @@
+test/errors/legacy_not_equal_operator.py:1 error: invalid comparison operator `<>`; use `!=`
+test/errors/legacy_not_equal_operator.py:1 error: expected new line, got 2

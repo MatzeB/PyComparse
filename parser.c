@@ -1543,12 +1543,20 @@ static int parse_compare_op(struct parser_state *s)
   case T_LESS_THAN_EQUALS:
     next_token(s);
     return COMPARE_OP_LE;
-  case T_LESS_THAN_GREATER_THAN:
+  case T_LESS_THAN_GREATER_THAN: {
+    struct location location = scanner_location(&s->scanner);
+    next_token(s);
     if (future_barry_as_bdfl) {
-      next_token(s);
       return COMPARE_OP_NE;
     }
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "invalid comparison operator ");
+    diag_token_kind(s->d, T_LESS_THAN_GREATER_THAN);
+    diag_frag(s->d, "; use ");
+    diag_token_kind(s->d, T_EXCLAMATIONMARK_EQUALS);
+    diag_end(s->d);
     return -1;
+  }
   case T_EQUALS_EQUALS:
     next_token(s);
     return COMPARE_OP_EQ;
@@ -1591,7 +1599,9 @@ static union ast_expression *parse_comparison(struct parser_state  *s,
                                               union ast_expression *left)
 {
   int op = parse_compare_op(s);
-  assert(op >= 0);
+  if (op < 0) {
+    return invalid_expression(s);
+  }
 
   struct comparison_op inline_storage[2];
   struct idynarray     operands;

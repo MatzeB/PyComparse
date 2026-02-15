@@ -424,7 +424,6 @@ emit_parameter_defaults(struct cg_state *s, struct make_function_state *state,
 {
   /* create tuple with default values */
   unsigned num_parameters = parameter_shape->num_parameters;
-  bool     all_positional_const = true;
   unsigned num_positional_defaults = 0;
   unsigned num_keyword_defaults = 0;
   unsigned keyword_parameters_begin = parameter_shape->keyword_only_begin;
@@ -438,39 +437,20 @@ emit_parameter_defaults(struct cg_state *s, struct make_function_state *state,
 
     if (i < keyword_parameters_begin) {
       ++num_positional_defaults;
-      if (ast_expression_as_constant(initializer) == NULL) {
-        all_positional_const = false;
-      }
     } else {
       ++num_keyword_defaults;
     }
   }
 
   if (num_positional_defaults > 0) {
-    if (all_positional_const) {
-      struct tuple_prep *tuple_prep
-          = object_intern_tuple_begin(&s->objects, num_positional_defaults);
-      unsigned tuple_idx = 0;
-      for (unsigned i = 0; i < keyword_parameters_begin; i++) {
-        struct parameter     *parameter = &parameters[i];
-        union ast_expression *initializer = parameter->initializer;
-        if (initializer == NULL) continue;
-        union object *constant = ast_expression_as_constant(initializer);
-        object_new_tuple_set_at(tuple_prep, tuple_idx++, constant);
-      }
-      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
-                                                    /*may_free_arena=*/true);
-      cg_load_const(s, tuple);
-    } else {
-      for (unsigned i = 0; i < keyword_parameters_begin; i++) {
-        struct parameter     *parameter = &parameters[i];
-        union ast_expression *initializer = parameter->initializer;
-        if (initializer == NULL) continue;
-        emit_expression(s, initializer);
-      }
-      cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_positional_defaults,
-                     /*pop=*/num_positional_defaults, /*push=*/1);
+    for (unsigned i = 0; i < keyword_parameters_begin; i++) {
+      struct parameter     *parameter = &parameters[i];
+      union ast_expression *initializer = parameter->initializer;
+      if (initializer == NULL) continue;
+      emit_expression(s, initializer);
     }
+    cg_op_pop_push(s, OPCODE_BUILD_TUPLE, num_positional_defaults,
+                   /*pop=*/num_positional_defaults, /*push=*/1);
     state->defaults = true;
   }
   if (num_keyword_defaults > 0) {

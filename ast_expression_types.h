@@ -121,6 +121,7 @@ struct ast_expression_list {
 
 struct ast_generator_expression {
   struct ast_expression_base          base;
+  struct location                     location;
   unsigned                            num_parts;
   bool                                is_async;
   struct ast_scope_bindings *nullable scope;
@@ -136,6 +137,7 @@ struct ast_identifier {
 
 struct ast_lambda {
   struct ast_expression_base          base;
+  struct location                     location;
   union ast_expression               *expression;
   struct parameter_shape              parameter_shape;
   struct ast_scope_bindings *nullable scope;

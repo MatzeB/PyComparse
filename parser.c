@@ -534,6 +534,7 @@ static union ast_expression *
 parse_generator_expression(struct parser_state     *s,
                            enum ast_expression_type type)
 {
+  struct location location = scanner_location(&s->scanner);
   assert(type == AST_GENERATOR_EXPRESSION || type == AST_LIST_COMPREHENSION
          || type == AST_SET_COMPREHENSION || type == AST_DICT_COMPREHENSION);
   struct generator_expression_part inline_storage[4];
@@ -588,6 +589,7 @@ parse_generator_expression(struct parser_state     *s,
   size_t parts_size = num_parts * sizeof(struct generator_expression_part);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_generator_expression) + parts_size, type);
+  expression->generator_expression.location = location;
   expression->generator_expression.num_parts = num_parts;
   expression->generator_expression.is_async = is_async;
   memcpy(expression->generator_expression.parts, idynarray_data(&parts),
@@ -1121,6 +1123,7 @@ static union ast_expression *parse_invert(struct parser_state *s)
 
 static union ast_expression *parse_lambda(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_lambda);
 
   struct parameter inline_storage[8];
@@ -1135,6 +1138,7 @@ static union ast_expression *parse_lambda(struct parser_state *s)
   size_t   parameters_size = num_parameters * sizeof(struct parameter);
   union ast_expression *lambda = ast_allocate_expression_(
       s, sizeof(struct ast_lambda) + parameters_size, AST_LAMBDA);
+  lambda->lambda.location = location;
   lambda->lambda.expression = expression;
   lambda->lambda.parameter_shape = parameter_shape;
   memcpy(lambda->lambda.parameters, idynarray_data(&parameters),

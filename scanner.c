@@ -845,6 +845,42 @@ static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
   }
 }
 
+static bool scan_starts_exponent_part(struct scanner_state *s)
+{
+  assert(s->c == 'e' || s->c == 'E');
+
+  int exp_char = s->c;
+  int consumed = 0;
+
+  next_char(s);
+  if (s->c != C_EOF) {
+    consumed = 1;
+  }
+
+  if (s->c == '+' || s->c == '-') {
+    /* Across refill boundaries, defer to full exponent parsing. */
+    if (s->p >= s->buffer_end) {
+      if (consumed > 0) {
+        s->p -= consumed;
+      }
+      s->c = exp_char;
+      return true;
+    }
+    next_char(s);
+    if (s->c != C_EOF) {
+      consumed = 2;
+    }
+  }
+
+  bool starts_exponent = ('0' <= s->c && s->c <= '9');
+
+  if (consumed > 0) {
+    s->p -= consumed;
+  }
+  s->c = exp_char;
+  return starts_exponent;
+}
+
 static void scan_float_fraction(struct scanner_state *s)
 {
   struct arena *strings = s->strings;
@@ -883,7 +919,7 @@ static void scan_float_fraction(struct scanner_state *s)
     had_error = true;
   }
 
-  if (s->c == 'e' || s->c == 'E') {
+  if ((s->c == 'e' || s->c == 'E') && scan_starts_exponent_part(s)) {
     arena_grow_char(strings, s->c);
     next_char(s);
     if (s->c == '+' || s->c == '-') {
@@ -918,8 +954,15 @@ static void scan_float_fraction(struct scanner_state *s)
       had_error = true;
     }
     if (!had_digit) {
-      // TODO: show error
-      abort();
+      if (!had_error) {
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "invalid decimal exponent");
+        diag_end(s->d);
+      }
+      void *chars = arena_grow_finish(strings);
+      arena_free_to(strings, chars);
+      s->token.kind = T_INVALID;
+      return;
     }
   }
   bool is_imag = false;
@@ -1027,8 +1070,10 @@ static void scan_number(struct scanner_state *s)
     scan_float_fraction(s);
     return;
   } else if (s->c == 'e' || s->c == 'E') {
-    scan_float_fraction(s);
-    return;
+    if (scan_starts_exponent_part(s)) {
+      scan_float_fraction(s);
+      return;
+    }
   }
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);
@@ -1665,6 +1710,10 @@ static void scan_string_literal(struct scanner_state    *s,
          * Which mostly means '\'' won't end the string. */
         arena_grow_char(strings, s->c);
         next_char(s);
+        if (flags.format && (s->c == '{' || s->c == '}')) {
+          /* In raw f-strings, braces still delimit replacements/escapes. */
+          continue;
+        }
         break;
       }
       scan_escape_sequence(s, strings, flags.unicode);

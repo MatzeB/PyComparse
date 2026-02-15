@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -42,6 +43,7 @@
 #include "symbol_table_types.h"
 #include "symbol_types.h"
 #include "token_kinds.h"
+#include "unicode_name_lookup.h"
 #include "unicode_nfkc_table.h"
 #include "unicode_xid_table.h"
 #include "util.h"
@@ -1061,6 +1063,56 @@ static void scan_number(struct scanner_state *s)
   s->token.kind = T_INTEGER;
 }
 
+enum scan_named_escape_status {
+  SCAN_NAMED_ESCAPE_OK = 0,
+  SCAN_NAMED_ESCAPE_MALFORMED,
+  SCAN_NAMED_ESCAPE_UNKNOWN_NAME,
+};
+
+static enum scan_named_escape_status scan_named_escape(struct scanner_state *s,
+                                                       uint32_t *codepoint)
+{
+  assert(s->c == 'N');
+  next_char(s);
+
+  if (s->c != '{') {
+    return SCAN_NAMED_ESCAPE_MALFORMED;
+  }
+  next_char(s);
+
+  char    *name = NULL;
+  unsigned length = 0;
+  unsigned capacity = 0;
+  for (;;) {
+    if (s->c == C_EOF || s->c == '\n' || s->c == '\r' || s->c == '\''
+        || s->c == '\"' || s->c == '}') {
+      break;
+    }
+
+    if (length == UINT_MAX) {
+      abort();
+    }
+    unsigned next_length = length + 1;
+    if (next_length > capacity) {
+      name = dynmemory_grow(name, &capacity, next_length, sizeof(char));
+    }
+    name[length] = (char)s->c;
+    length = next_length;
+    next_char(s);
+  }
+
+  if (length == 0 || s->c != '}') {
+    free(name);
+    return SCAN_NAMED_ESCAPE_MALFORMED;
+  }
+
+  bool ok = unicode_name_lookup(name, length, codepoint);
+  free(name);
+
+  next_char(s);
+  return ok ? SCAN_NAMED_ESCAPE_OK : SCAN_NAMED_ESCAPE_UNKNOWN_NAME;
+}
+
 static void scan_escape_sequence(struct scanner_state *s,
                                  struct arena *strings, bool is_unicode)
 {
@@ -1125,7 +1177,29 @@ static void scan_escape_sequence(struct scanner_state *s,
     expected_hex_digits = 2;
     goto parse_hex;
   case 'N':
-    unimplemented("\\N escape sequence");
+    if (!is_unicode) {
+      arena_grow_char(strings, '\\');
+      arena_grow_char(strings, 'N');
+      next_char(s);
+      return;
+    }
+    switch (scan_named_escape(s, &codepoint)) {
+    case SCAN_NAMED_ESCAPE_OK:
+      goto append_codepoint;
+    case SCAN_NAMED_ESCAPE_MALFORMED:
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "malformed \\N character escape");
+      diag_end(s->d);
+      codepoint = 0xfffc;
+      goto append_codepoint;
+    case SCAN_NAMED_ESCAPE_UNKNOWN_NAME:
+      diag_begin_error(s->d, scanner_location(s));
+      diag_frag(s->d, "unknown Unicode character name");
+      diag_end(s->d);
+      codepoint = 0xfffc;
+      goto append_codepoint;
+    }
+    abort();
   case 'u':
     next_char(s);
     expected_hex_digits = 4;

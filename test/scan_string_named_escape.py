@@ -1,0 +1,8 @@
+print(repr("\N{LATIN SMALL LETTER A}"))
+print(repr("\N{latin small letter a}"))
+print(repr("\N{GREEK CAPITAL LETTER DELTA}"))
+print(repr("\N{HANGUL SYLLABLE GA}"))
+print(repr("\N{CJK UNIFIED IDEOGRAPH-4E00}"))
+print(repr(f"\N{GREEK CAPITAL LETTER DELTA}"))
+print(repr(b"\N{LATIN SMALL LETTER A}"))
+print(repr(r"\N{LATIN SMALL LETTER A}"))

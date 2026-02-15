@@ -90,6 +90,10 @@ add_executable(scanner_test
   scanner.h
   scanner_test.c
   scanner_types.h
+  unicode_name_lookup.c
+  unicode_name_lookup.h
+  unicode_name_table.c
+  unicode_name_table.h
   symbol_table.c
   symbol_table.h
   symbol_table_types.h
@@ -137,6 +141,10 @@ add_executable(parser_test
   scanner.c
   scanner.h
   scanner_types.h
+  unicode_name_lookup.c
+  unicode_name_lookup.h
+  unicode_name_table.c
+  unicode_name_table.h
   symbol_info_types.h
   symbol_table.c
   symbol_table.h

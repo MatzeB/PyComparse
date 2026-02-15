@@ -1,0 +1,5 @@
+"\N{"
+"\N{NOT A REAL NAME}"
+"\NSPACE"
+"\N{CJK UNIFIED IDEOGRAPH-4e00}"
+"\N{}"

@@ -1377,10 +1377,6 @@ static void emit_generator_expression_part(
 void emit_generator_expression_code(
     struct cg_state *s, struct ast_generator_expression *generator_expression)
 {
-  struct symbol *dot_zero = symbol_table_get_or_insert(s->symbol_table, ".0");
-  cg_declare(s, dot_zero, SYMBOL_LOCAL);
-  s->code.argcount = 1;
-
   enum ast_expression_type type
       = ast_expression_type((union ast_expression *)generator_expression);
   bool return_value;

@@ -83,6 +83,13 @@ emit_generator_helper(struct cg_state                 *s,
   cg_push_code(s);
   cg_code_begin(s, /*in_function=*/true);
   s->code.in_async_function = async_comprehension;
+  /* Keep '.0' as FAST local slot 0 for generated comprehension functions. */
+  {
+    struct symbol *dot_zero
+        = symbol_table_get_or_insert(s->symbol_table, ".0");
+    cg_declare(s, dot_zero, SYMBOL_LOCAL);
+    s->code.argcount = 1;
+  }
   apply_generator_bindings(s, generator_expression);
   cg_set_lineno(s, generator_expression->base.location.line);
 

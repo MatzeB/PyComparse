@@ -13,11 +13,11 @@ Those are handled by code in unicode_name_lookup.c.
 
 from __future__ import annotations
 
-import math
 import unicodedata
 from pathlib import Path
 
 BLOCK_SIZE = 16
+CODEPOINT_BITS = 20
 MAX_CP = 0x110000
 ALGO_HANGUL_PREFIX = "HANGUL SYLLABLE "
 ALGO_CJK_PREFIX = "CJK UNIFIED IDEOGRAPH-"
@@ -57,11 +57,28 @@ def emit_u8_array(f, ctype: str, name: str, values: list[int], per_line: int = 1
 
 
 def emit_u32_array(f, ctype: str, name: str, values: list[int], per_line: int = 8) -> None:
-    f.write(f"const {ctype} {name}[{len(values)}] = {{\n")
-    for i in range(0, len(values), per_line):
+  f.write(f"const {ctype} {name}[{len(values)}] = {{\n")
+  for i in range(0, len(values), per_line):
         chunk = values[i : i + per_line]
         f.write("  " + ", ".join(str(v) for v in chunk) + ",\n")
-    f.write("};\n\n")
+  f.write("};\n\n")
+
+
+def pack_fixed_bits(values: list[int], bits: int) -> bytearray:
+    out = bytearray()
+    bitbuf = 0
+    bitcount = 0
+    for value in values:
+        assert 0 <= value < (1 << bits)
+        bitbuf |= value << bitcount
+        bitcount += bits
+        while bitcount >= 8:
+            out.append(bitbuf & 0xFF)
+            bitbuf >>= 8
+            bitcount -= 8
+    if bitcount > 0:
+        out.append(bitbuf & 0xFF)
+    return out
 
 
 def generate() -> None:
@@ -73,6 +90,7 @@ def generate() -> None:
     assert max_name_len <= 255
 
     codepoints = [cp for _, cp in entries]
+    packed_codepoints = pack_fixed_bits(codepoints, CODEPOINT_BITS)
 
     first_offsets: list[int] = []
     first_blob = bytearray()
@@ -113,13 +131,16 @@ def generate() -> None:
         f.write("#include <stdint.h>\n")
         f.write("\n")
         f.write(f"#define UNICODE_NAME_BLOCK_SIZE {BLOCK_SIZE}\n")
+        f.write(f"#define UNICODE_NAME_CODEPOINT_BITS {CODEPOINT_BITS}\n")
+        f.write(
+            f"#define UNICODE_NAME_CODEPOINT_MASK ((1u << {CODEPOINT_BITS}) - 1u)\n"
+        )
         f.write(f"#define UNICODE_NAME_ENTRY_COUNT {entry_count}\n")
         f.write(f"#define UNICODE_NAME_BLOCK_COUNT {block_count}\n")
         f.write(f"#define UNICODE_NAME_MAX_LENGTH {max_name_len}\n")
+        f.write(f"#define UNICODE_NAME_CODEPOINT_BYTES {len(packed_codepoints)}\n")
         f.write("\n")
-        f.write(
-            f"extern const uint32_t unicode_name_codepoints[{entry_count}];\n"
-        )
+        f.write(f"extern const uint8_t unicode_name_codepoints[{len(packed_codepoints)}];\n")
         f.write(
             f"extern const uint32_t unicode_name_block_first_offsets[{block_count}];\n"
         )
@@ -138,7 +159,12 @@ def generate() -> None:
         f.write("\n")
         f.write('#include "unicode_name_table.h"\n\n')
 
-        emit_u32_array(f, "uint32_t", "unicode_name_codepoints", codepoints)
+        emit_u8_array(
+            f,
+            "uint8_t",
+            "unicode_name_codepoints",
+            list(packed_codepoints),
+        )
         emit_u32_array(
             f,
             "uint32_t",
@@ -165,7 +191,7 @@ def generate() -> None:
         )
 
     total_size = (
-        len(codepoints) * 4
+        len(packed_codepoints)
         + len(first_offsets) * 4
         + len(first_blob)
         + len(block_data_offsets) * 4
@@ -175,7 +201,7 @@ def generate() -> None:
     print(
         "sizes: codepoints={} first_offsets={} first_blob={} "
         "block_data_offsets={} block_data={} total={} bytes".format(
-            len(codepoints) * 4,
+            len(packed_codepoints),
             len(first_offsets) * 4,
             len(first_blob),
             len(block_data_offsets) * 4,

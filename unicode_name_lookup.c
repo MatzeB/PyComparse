@@ -7,6 +7,22 @@
 
 #include "unicode_name_table.h"
 
+static uint32_t unicode_name_codepoint_at(size_t index)
+{
+  size_t   bit_index = index * UNICODE_NAME_CODEPOINT_BITS;
+  size_t   byte_index = bit_index >> 3;
+  unsigned shift = (unsigned)(bit_index & 7u);
+
+  uint32_t chunk = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    size_t b = byte_index + i;
+    if (b < UNICODE_NAME_CODEPOINT_BYTES) {
+      chunk |= (uint32_t)unicode_name_codepoints[b] << (8u * i);
+    }
+  }
+  return (chunk >> shift) & UNICODE_NAME_CODEPOINT_MASK;
+}
+
 static bool is_unified_ideograph(uint32_t code)
 {
   return (0x3400 <= code && code <= 0x4DB5)
@@ -194,7 +210,7 @@ static bool unicode_name_lookup_table(const char *name, size_t len,
     return false;
   }
   if (cmp == 0) {
-    *out = unicode_name_codepoints[index_base];
+    *out = unicode_name_codepoint_at(index_base);
     return true;
   }
 
@@ -231,7 +247,7 @@ static bool unicode_name_lookup_table(const char *name, size_t len,
       return false;
     }
     if (cmp == 0) {
-      *out = unicode_name_codepoints[index_base + i];
+      *out = unicode_name_codepoint_at(index_base + i);
       return true;
     }
   }

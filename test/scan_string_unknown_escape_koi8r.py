@@ -1,0 +1,2 @@
+# -*- coding: koi8-r -*-
+print("\ð".encode("utf-8"))

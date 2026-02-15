@@ -1166,6 +1166,13 @@ static enum scan_named_escape_status scan_named_escape(struct scanner_state *s,
   return ok ? SCAN_NAMED_ESCAPE_OK : SCAN_NAMED_ESCAPE_UNKNOWN_NAME;
 }
 
+static void error_invalid_utf8_source(struct scanner_state *s)
+{
+  diag_begin_error(s->d, scanner_location(s));
+  diag_frag(s->d, "failed to decode source with encoding: utf-8");
+  diag_end(s->d);
+}
+
 static void scan_escape_sequence(struct scanner_state *s,
                                  struct arena *strings, bool is_unicode)
 {
@@ -1311,6 +1318,23 @@ static void scan_escape_sequence(struct scanner_state *s,
   default:
     /* TODO: report error */
     arena_grow_char(strings, '\\');
+    if ((unsigned char)s->c >= 0x80) {
+      uint32_t cp;
+      char     utf8[4];
+      int      len = decode_utf8(s, &cp, utf8);
+      if (len == 0) {
+        error_invalid_utf8_source(s);
+        if ((unsigned char)s->c >= 0x80) {
+          next_char(s);
+        }
+        return;
+      }
+      for (int i = 0; i < len; i++) {
+        arena_grow_char(strings, utf8[i]);
+      }
+      next_char(s);
+      return;
+    }
     arena_grow_char(strings, s->c);
     next_char(s);
     return;
@@ -1323,13 +1347,6 @@ static void error_unterminated_string(struct scanner_state *s)
 {
   diag_begin_error(s->d, scanner_location(s));
   diag_frag(s->d, "unterminated string literal");
-  diag_end(s->d);
-}
-
-static void error_invalid_utf8_source(struct scanner_state *s)
-{
-  diag_begin_error(s->d, scanner_location(s));
-  diag_frag(s->d, "failed to decode source with encoding: utf-8");
   diag_end(s->d);
 }
 

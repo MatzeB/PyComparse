@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "adt/arena.h"
@@ -18,11 +19,126 @@
 #define INVALID_BLOCK_OFFSET (~0u)
 
 #define DELAYED_BLOCK_MARKER (~0u)
-
 struct saved_symbol_info {
   struct symbol     *symbol;
   struct symbol_info info;
 };
+
+struct code_index_cache_bucket {
+  const void *nullable key;
+  unsigned             hash;
+  uint32_t             index;
+};
+
+static unsigned pointer_hash(const void *key)
+{
+  uintptr_t x = (uintptr_t)key;
+  x ^= x >> 16;
+  x *= 0x85ebca6bu;
+  x ^= x >> 13;
+  x *= 0xc2b2ae35u;
+  x ^= x >> 16;
+  return (unsigned)x;
+}
+
+static void code_index_cache_insert_raw(struct code_index_cache *cache,
+                                        const void *key, unsigned hash,
+                                        uint32_t index)
+{
+  hash_set_increment_num_elements(&cache->set);
+  struct hash_set_chain_iteration_state c;
+  hash_set_chain_iteration_begin(&c, &cache->set, hash);
+  for (;; hash_set_chain_iteration_next(&c)) {
+    struct code_index_cache_bucket *bucket = &cache->buckets[c.index];
+    if (bucket->key == NULL) {
+      bucket->key = key;
+      bucket->hash = hash;
+      bucket->index = index;
+      return;
+    }
+  }
+}
+
+static void code_index_cache_resize(struct code_index_cache *cache,
+                                    unsigned                 new_size)
+{
+  struct code_index_cache_bucket *old_buckets = cache->buckets;
+  unsigned old_num_buckets = hash_set_num_buckets(&cache->set);
+
+  cache->buckets = calloc(new_size, sizeof(cache->buckets[0]));
+  if (cache->buckets == NULL) {
+    internal_error("out of memory");
+  }
+  hash_set_init(&cache->set, new_size);
+
+  if (old_buckets != NULL) {
+    for (unsigned i = 0; i < old_num_buckets; ++i) {
+      struct code_index_cache_bucket *bucket = &old_buckets[i];
+      if (bucket->key != NULL) {
+        code_index_cache_insert_raw(cache, bucket->key, bucket->hash,
+                                    bucket->index);
+      }
+    }
+  }
+
+  free(old_buckets);
+}
+
+static void code_index_cache_init(struct code_index_cache *cache,
+                                  unsigned                 minimum_size)
+{
+  if (minimum_size < 32u) {
+    minimum_size = 32u;
+  } else {
+    minimum_size = ceil_po2(minimum_size);
+  }
+  code_index_cache_resize(cache, minimum_size);
+}
+
+static void code_index_cache_insert(struct code_index_cache *cache,
+                                    const void *key, unsigned hash,
+                                    uint32_t index)
+{
+  unsigned new_size = hash_set_should_resize(&cache->set);
+  if (UNLIKELY(new_size != 0)) {
+    code_index_cache_resize(cache, new_size);
+  }
+  code_index_cache_insert_raw(cache, key, hash, index);
+}
+
+static bool code_index_cache_lookup(struct code_index_cache *cache,
+                                    const void *key, unsigned hash,
+                                    uint32_t *out_index)
+{
+  if (cache->buckets == NULL) {
+    return false;
+  }
+
+  struct hash_set_chain_iteration_state c;
+  hash_set_chain_iteration_begin(&c, &cache->set, hash);
+  for (;; hash_set_chain_iteration_next(&c)) {
+    struct code_index_cache_bucket *bucket = &cache->buckets[c.index];
+    if (bucket->key == NULL) {
+      return false;
+    }
+    if (bucket->hash == hash && bucket->key == key) {
+      *out_index = bucket->index;
+      return true;
+    }
+  }
+}
+
+static void code_index_cache_free(struct code_index_cache *cache)
+{
+  free(cache->buckets);
+  memset(cache, 0, sizeof(*cache));
+}
+
+static void code_state_free_index_caches(struct code_state *code)
+{
+  code_index_cache_free(&code->const_index_cache);
+  code_index_cache_free(&code->name_index_cache);
+}
 
 static inline void arena_grow_u8(struct arena *arena, uint8_t value)
 {
@@ -242,6 +358,36 @@ static void pop_symbol_infos(struct cg_state *s)
     struct symbol *symbol = saved->symbol;
     memcpy(&symbol->info, &saved->info, sizeof(symbol->info));
     stack_pop(&s->stack, sizeof(*saved));
+  }
+}
+
+static void cg_ensure_const_index_cache(struct cg_state *s)
+{
+  struct code_index_cache *cache = &s->code.const_index_cache;
+  if (cache->buckets != NULL) {
+    return;
+  }
+  union object *consts = s->code.consts;
+  uint32_t      length = object_list_length(consts);
+  code_index_cache_init(cache, length * 2u);
+  for (uint32_t i = 0; i < length; ++i) {
+    union object *object = object_list_at(consts, i);
+    code_index_cache_insert_raw(cache, object, pointer_hash(object), i);
+  }
+}
+
+static void cg_ensure_name_index_cache(struct cg_state *s)
+{
+  struct code_index_cache *cache = &s->code.name_index_cache;
+  if (cache->buckets != NULL) {
+    return;
+  }
+  union object *names = s->code.names;
+  uint32_t      length = object_list_length(names);
+  code_index_cache_init(cache, length * 2u);
+  for (uint32_t i = 0; i < length; ++i) {
+    union object *object = object_list_at(names, i);
+    code_index_cache_insert_raw(cache, object, pointer_hash(object), i);
   }
 }
 
@@ -604,6 +750,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.name = name_string;
   object->code.lnotab = lnotab;
 
+  code_state_free_index_caches(&s->code);
   free(s->code.lnotab_marks);
   arena_free(&s->code.opcodes);
   return object;
@@ -649,6 +796,7 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
 
 void cg_free(struct cg_state *s)
 {
+  code_state_free_index_caches(&s->code);
   arena_free(&s->code.opcodes);
   object_intern_free(&s->objects);
   stack_free(&s->stack);
@@ -663,15 +811,24 @@ unsigned cg_register_unique_object(struct cg_state *s, union object *object)
 {
   union object *consts = s->code.consts;
   object_list_append(consts, object);
-  return object_list_length(consts) - 1;
+  uint32_t index = object_list_length(consts) - 1;
+  if (s->code.const_index_cache.buckets != NULL) {
+    code_index_cache_insert(&s->code.const_index_cache, object,
+                            pointer_hash(object), index);
+  }
+  return index;
 }
 
 unsigned cg_register_object(struct cg_state *s, union object *object)
 {
-  union object *consts = s->code.consts;
-  for (uint32_t i = 0, l = object_list_length(consts); i < l; i++) {
-    if (object_list_at(consts, i) == object) return i;
+  cg_ensure_const_index_cache(s);
+  uint32_t index;
+  unsigned hash = pointer_hash(object);
+  if (code_index_cache_lookup(&s->code.const_index_cache, object, hash,
+                              &index)) {
+    return index;
   }
+
   return cg_register_unique_object(s, object);
 }
 
@@ -692,30 +849,29 @@ void cg_set_function_docstring(struct cg_state *s, union object *nullable doc)
   consts->list.items[0] = doc;
 }
 
-static unsigned cg_append_name_from_cstring(struct cg_state *s,
-                                            const char      *cstring)
+static unsigned cg_append_name(struct cg_state *s, union object *string)
 {
   union object *names = s->code.names;
-  union object *string = object_intern_cstring(&s->objects, cstring);
   object_list_append(names, string);
-  return object_list_length(names) - 1;
+  uint32_t index = object_list_length(names) - 1;
+  if (s->code.name_index_cache.buckets != NULL) {
+    code_index_cache_insert(&s->code.name_index_cache, string,
+                            pointer_hash(string), index);
+  }
+  return index;
 }
 
 unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
 {
-  union object *names = s->code.names;
-  unsigned      length = strlen(cstring);
-  for (unsigned i = 0, num_names = object_list_length(names); i < num_names;
-       ++i) {
-    const union object *object = object_list_at(names, i);
-    if (object->type != OBJECT_STRING) continue;
-    const struct object_string *string = &object->string;
-    if (string->length == length
-        && memcmp(string->chars, cstring, length) == 0) {
-      return i;
-    }
+  union object *string = object_intern_cstring(&s->objects, cstring);
+  cg_ensure_name_index_cache(s);
+  uint32_t index;
+  unsigned hash = pointer_hash(string);
+  if (code_index_cache_lookup(&s->code.name_index_cache, string, hash,
+                              &index)) {
+    return index;
   }
-  return cg_append_name_from_cstring(s, cstring);
+  return cg_append_name(s, string);
 }
 
 unsigned cg_register_name(struct cg_state *s, struct symbol *name)

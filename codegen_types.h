@@ -1,8 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "adt/arena.h"
+#include "adt/hashset.h"
 #include "adt/stack.h"
 #include "nullable.h"
 #include "object_intern_types.h"
@@ -44,6 +46,13 @@ struct loop_state {
   bool                                   pop_on_break;
 };
 
+struct code_index_cache_bucket;
+
+struct code_index_cache {
+  struct hash_set                          set;
+  struct code_index_cache_bucket *nullable buckets;
+};
+
 struct code_state {
   struct arena                           opcodes;
   union object                          *consts;
@@ -51,6 +60,8 @@ struct code_state {
   union object                          *varnames;
   union object                          *freevars;
   union object                          *cellvars;
+  struct code_index_cache                const_index_cache;
+  struct code_index_cache                name_index_cache;
   struct basic_block                    *current_block;
   struct basic_block                    *first_block;
   struct basic_block                    *last_block;

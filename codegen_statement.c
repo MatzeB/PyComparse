@@ -3436,6 +3436,36 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
       emit_statement_list_with_function(s, while_stmt->body, current_function);
       return;
     }
+
+    if (condition_type == OBJECT_TRUE) {
+      if (unreachable(s)) {
+        return;
+      }
+
+      struct basic_block *header = cg_block_allocate(s);
+      struct basic_block *footer = cg_block_allocate(s);
+
+      cg_jump(s, header);
+      cg_block_begin(s, header);
+
+      struct loop_state saved = s->code.loop_state;
+      s->code.loop_state = (struct loop_state){
+        .continue_block = header,
+        .break_block = footer,
+        .pending_at_loop = s->code.pending_finally,
+        .finally_depth = s->code.active_finally_body_depth,
+        .pop_on_break = false,
+      };
+
+      emit_statement_list_with_function(s, while_stmt->body, current_function);
+
+      s->code.loop_state = saved;
+      if (!unreachable(s)) {
+        cg_jump(s, header);
+      }
+      cg_block_begin(s, footer);
+      return;
+    }
   }
 
   struct for_while_state state;

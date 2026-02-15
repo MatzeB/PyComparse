@@ -324,6 +324,9 @@ static struct basic_block *skip_empty_blocks(struct basic_block *target)
   while (target->code_length == 0 && target->jump_opcode == 0) {
     struct basic_block *default_target = target->default_target;
     if (default_target == NULL) break;
+    if (default_target == target) {
+      break;
+    }
     target = default_target;
   }
   return target;
@@ -539,7 +542,6 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
     unsigned offset_delta = abs_offset - prev_offset;
     int      line_delta = (int)lineno - (int)prev_lineno;
-
     while (offset_delta > 255) {
       arena_grow_u8(arena, 255);
       arena_grow_u8(arena, 0);

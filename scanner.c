@@ -2417,7 +2417,13 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
   s->fstring_debug.tail_start = NULL;
   s->at_begin_of_line = true;
   s->d = diagnostics;
-  next_char(s);
+  s->c = refill_buffer(s);
+  if (s->c == 0xEF && s->p + 1 < s->buffer_end
+      && (unsigned char)s->p[0] == 0xBB && (unsigned char)s->p[1] == 0xBF) {
+    next_char(s);
+    next_char(s);
+    next_char(s);
+  }
 }
 
 void scanner_free(struct scanner_state *s)

@@ -22,6 +22,8 @@ static void fold_statement_list(struct constant_fold_state *s,
 
 static union ast_expression *fold_expression(struct constant_fold_state *s,
                                              union ast_expression *expression);
+static union ast_expression *
+new_const_expression(struct constant_fold_state *s, union object *object);
 
 static inline union ast_expression *nullable fold_expression_nullable(
     struct constant_fold_state *s, union ast_expression *nullable expression)
@@ -30,6 +32,68 @@ static inline union ast_expression *nullable fold_expression_nullable(
     return NULL;
   }
   return fold_expression(s, expression);
+}
+
+static bool object_constant_truth_value(const union object *object,
+                                        bool               *truth)
+{
+  switch (object_type(object)) {
+  case OBJECT_FALSE:
+  case OBJECT_NONE:
+    *truth = false;
+    return true;
+  case OBJECT_TRUE:
+  case OBJECT_ELLIPSIS:
+  case OBJECT_CODE:
+    *truth = true;
+    return true;
+  case OBJECT_INT:
+    *truth = object_int_value(object) != 0;
+    return true;
+  case OBJECT_BIG_INT:
+    *truth = object->big_int.num_pydigits != 0;
+    return true;
+  case OBJECT_FLOAT:
+    *truth = object_float_value(object) != 0.0;
+    return true;
+  case OBJECT_COMPLEX:
+    *truth = object_complex_real(object) != 0.0
+             || object_complex_imag(object) != 0.0;
+    return true;
+  case OBJECT_STRING:
+  case OBJECT_BYTES:
+    *truth = object_string_length(object) != 0;
+    return true;
+  case OBJECT_TUPLE:
+    *truth = object_tuple_length(object) != 0;
+    return true;
+  case OBJECT_LIST:
+    *truth = object_list_length((union object *)object) != 0;
+    return true;
+  default:
+    return false;
+  }
+}
+
+static union ast_expression *
+canonicalize_condition_constant(struct constant_fold_state *s,
+                                union ast_expression       *condition)
+{
+  union object *constant = ast_expression_as_constant(condition);
+  if (constant == NULL) {
+    return condition;
+  }
+  enum object_type constant_type = object_type(constant);
+  if (constant_type == OBJECT_TRUE || constant_type == OBJECT_FALSE) {
+    return condition;
+  }
+  bool truth = false;
+  if (!object_constant_truth_value(constant, &truth)) {
+    return condition;
+  }
+  return new_const_expression(
+      s,
+      object_intern_singleton(s->intern, truth ? OBJECT_TRUE : OBJECT_FALSE));
 }
 
 static inline bool object_as_fast_int(const union object *object,
@@ -541,6 +605,8 @@ static void fold_if_elifs_inplace(struct constant_fold_state  *s,
   }
   for (unsigned i = 0; i < num_elifs; ++i) {
     elifs[i].condition = fold_expression(s, elifs[i].condition);
+    elifs[i].condition
+        = canonicalize_condition_constant(s, elifs[i].condition);
     fold_statement_list(s, elifs[i].body);
   }
 }
@@ -646,6 +712,8 @@ static void fold_statement(struct constant_fold_state *s,
     break;
   case AST_STATEMENT_IF:
     statement->if_.condition = fold_expression(s, statement->if_.condition);
+    statement->if_.condition
+        = canonicalize_condition_constant(s, statement->if_.condition);
     fold_statement_list(s, statement->if_.body);
     fold_if_elifs_inplace(s, statement->if_.elifs, statement->if_.num_elifs);
     if (statement->if_.else_body != NULL) {
@@ -681,6 +749,8 @@ static void fold_statement(struct constant_fold_state *s,
   case AST_STATEMENT_WHILE:
     statement->while_.condition
         = fold_expression(s, statement->while_.condition);
+    statement->while_.condition
+        = canonicalize_condition_constant(s, statement->while_.condition);
     fold_statement_list(s, statement->while_.body);
     if (statement->while_.else_body != NULL) {
       fold_statement_list(s, statement->while_.else_body);

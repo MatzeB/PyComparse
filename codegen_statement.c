@@ -1626,6 +1626,27 @@ static void emit_pending_finally(struct cg_state         *s,
   s->code.pending_finally = head;
 }
 
+static bool statement_list_has_scope_annotation(
+    const struct ast_statement_list *nullable statements);
+
+static void emit_if_constant_branch(struct cg_state *s, struct ast_if *if_stmt,
+                                    struct ast_def *nullable current_function,
+                                    bool                     condition_truth)
+{
+  if (current_function == NULL
+      && (statement_list_has_scope_annotation(if_stmt->body)
+          || statement_list_has_scope_annotation(if_stmt->else_body))) {
+    s->code.setup_annotations = true;
+  }
+  if (condition_truth) {
+    emit_statement_list_with_function(s, if_stmt->body, current_function);
+    return;
+  }
+  if (if_stmt->else_body != NULL) {
+    emit_statement_list_with_function(s, if_stmt->else_body, current_function);
+  }
+}
+
 static bool symbol_array_append_unique(struct idynarray *array,
                                        struct symbol    *symbol)
 {
@@ -3204,20 +3225,10 @@ static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
     union object *condition_constant
         = ast_expression_as_constant(if_stmt->condition);
     if (condition_constant != NULL) {
-      if (current_function == NULL
-          && (statement_list_has_scope_annotation(if_stmt->body)
-              || statement_list_has_scope_annotation(if_stmt->else_body))) {
-        s->code.setup_annotations = true;
-      }
-      if (object_type(condition_constant) == OBJECT_TRUE) {
-        emit_statement_list_with_function(s, if_stmt->body, current_function);
-        return;
-      }
-      if (object_type(condition_constant) == OBJECT_FALSE) {
-        if (if_stmt->else_body != NULL) {
-          emit_statement_list_with_function(s, if_stmt->else_body,
-                                            current_function);
-        }
+      enum object_type condition_type = object_type(condition_constant);
+      if (condition_type == OBJECT_TRUE || condition_type == OBJECT_FALSE) {
+        emit_if_constant_branch(s, if_stmt, current_function,
+                                condition_type == OBJECT_TRUE);
         return;
       }
     }

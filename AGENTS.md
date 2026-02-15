@@ -12,7 +12,7 @@ This project uses CMake and Ninja for building:
 
 ```bash
 cmake -S . -B build -G Ninja
-ninja -C build
+ninja --quiet -C build
 ```
 
 The build produces three main executables:
@@ -25,7 +25,7 @@ The build produces three main executables:
 ### Building
 ```bash
 cmake -S . -B build -G Ninja
-ninja -C build
+ninja --quiet -C build
 ```
 
 ### Performance Builds
@@ -33,7 +33,7 @@ For performance profiling/benchmarking, use an optimized CMake build and do
 not rely on the default build type:
 ```bash
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-ninja -C build-release
+ninja --quiet -C build-release
 ```
 Use `build-release/parser_test` (or an equivalent `-O3 -DNDEBUG` binary) for
 `perf`/`valgrind` runs.

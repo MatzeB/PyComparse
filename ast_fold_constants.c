@@ -245,8 +245,12 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
                                               union ast_expression *expression)
 {
   enum ast_expression_type type = ast_expression_type(expression);
-  if (type != AST_UNEXPR_PLUS && type != AST_UNEXPR_NEGATIVE
-      && type != AST_UNEXPR_INVERT) {
+  switch (type) {
+  case AST_UNEXPR_PLUS:
+  case AST_UNEXPR_NEGATIVE:
+  case AST_UNEXPR_INVERT:
+    break;
+  default:
     return NULL;
   }
 
@@ -255,30 +259,39 @@ static union object *nullable try_fold_unexpr(struct constant_fold_state *s,
     return NULL;
   }
   enum object_type object_kind = object_type(object);
-  if (type == AST_UNEXPR_PLUS) {
-    if (object_kind == OBJECT_INT || object_kind == OBJECT_BIG_INT) {
+  switch (type) {
+  case AST_UNEXPR_PLUS:
+    if (object_kind == OBJECT_INT || object_kind == OBJECT_BIG_INT
+        || object_kind == OBJECT_FLOAT || object_kind == OBJECT_COMPLEX) {
       return object;
     }
     return NULL;
-  }
-  if (object_kind != OBJECT_INT) {
+  case AST_UNEXPR_NEGATIVE:
+    if (object_kind == OBJECT_INT) {
+      int64_t value = object_int_value(object);
+      assert(value != INT64_MIN);
+      return object_intern_int(s->intern, -value);
+    }
+    if (object_kind == OBJECT_FLOAT) {
+      return object_intern_float(s->intern, -object_float_value(object));
+    }
+    if (object_kind == OBJECT_COMPLEX) {
+      return object_intern_complex(s->intern, -object_complex_real(object),
+                                   -object_complex_imag(object));
+    }
     return NULL;
-  }
-
-  if (type == AST_UNEXPR_NEGATIVE) {
-    int64_t value = object_int_value(object);
-    assert(value != INT64_MIN);
-    return object_intern_int(s->intern, -value);
-  }
-  if (type == AST_UNEXPR_INVERT) {
+  case AST_UNEXPR_INVERT:
+    if (object_kind != OBJECT_INT) {
+      return NULL;
+    }
     int64_t value = object_int_value(object);
     if (value == INT64_MAX) {
       return NULL;
     }
     return object_intern_int(s->intern, ~value);
+  default:
+    return NULL;
   }
-
-  return object;
 }
 
 static union object *nullable try_fold_binexpr(

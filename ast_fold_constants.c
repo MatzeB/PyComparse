@@ -23,7 +23,8 @@ static void fold_statement_list(struct constant_fold_state *s,
 static union ast_expression *fold_expression(struct constant_fold_state *s,
                                              union ast_expression *expression);
 static union ast_expression *
-new_const_expression(struct constant_fold_state *s, union object *object);
+new_const_expression(struct constant_fold_state *s, union object *object,
+                     struct location location);
 
 static inline union ast_expression *nullable fold_expression_nullable(
     struct constant_fold_state *s, union ast_expression *nullable expression)
@@ -93,7 +94,8 @@ canonicalize_condition_constant(struct constant_fold_state *s,
   }
   return new_const_expression(
       s,
-      object_intern_singleton(s->intern, truth ? OBJECT_TRUE : OBJECT_FALSE));
+      object_intern_singleton(s->intern, truth ? OBJECT_TRUE : OBJECT_FALSE),
+      get_expression_location(condition));
 }
 
 static inline bool object_as_fast_int(const union object *object,
@@ -231,12 +233,14 @@ static union ast_expression *clone_expression(struct constant_fold_state *s,
 }
 
 static union ast_expression *
-new_const_expression(struct constant_fold_state *s, union object *object)
+new_const_expression(struct constant_fold_state *s, union object *object,
+                     struct location location)
 {
   union ast_expression *result = (union ast_expression *)arena_allocate(
       s->ast_arena, sizeof(struct ast_const), alignof(union ast_expression));
   memset(result, 0, sizeof(struct ast_const));
   result->type = AST_CONST;
+  result->cnst.base.location = location;
   result->cnst.object = object;
   return result;
 }
@@ -462,7 +466,8 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
     {
       union object *folded = try_fold_binexpr(s, result);
       if (folded != NULL) {
-        return new_const_expression(s, folded);
+        return new_const_expression(s, folded,
+                                    get_expression_location(result));
       }
     }
     break;
@@ -569,7 +574,8 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
     {
       union object *folded = try_fold_unexpr(s, result);
       if (folded != NULL) {
-        return new_const_expression(s, folded);
+        return new_const_expression(s, folded,
+                                    get_expression_location(result));
       }
     }
     break;

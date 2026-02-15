@@ -84,7 +84,7 @@ emit_generator_helper(struct cg_state                 *s,
   cg_code_begin(s, /*in_function=*/true);
   s->code.in_async_function = async_comprehension;
   apply_generator_bindings(s, generator_expression);
-  cg_set_lineno(s, generator_expression->location.line);
+  cg_set_lineno(s, generator_expression->base.location.line);
 
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
@@ -497,7 +497,7 @@ static void emit_lambda(struct cg_state *s, struct ast_lambda *lambda)
     cg_promote_to_cell(s, scope->cellvars[i]);
   }
 
-  cg_set_lineno(s, lambda->location.line);
+  cg_set_lineno(s, lambda->base.location.line);
   emit_expression(s, lambda->expression);
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
 
@@ -1072,10 +1072,12 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_UNEXPR_STAR_STAR:
     internal_error("attempted to emit `*`/`**` as value");
   case AST_YIELD:
-    emit_yield(s, expression->yield.value, INVALID_LOCATION);
+    emit_yield(s, expression->yield.value,
+               get_expression_location(expression));
     return;
   case AST_YIELD_FROM:
-    emit_yield_from(s, expression->yield.value, INVALID_LOCATION);
+    emit_yield_from(s, expression->yield.value,
+                    get_expression_location(expression));
     return;
   }
 }

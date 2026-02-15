@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nullable.h"
+#include "scanner_location.h"
 
 ASSUME_NONNULL_BEGIN
 
@@ -104,6 +105,8 @@ enum ast_statement_type ast_statement_type(union ast_statement *statement);
 
 union object *nullable
 ast_expression_as_constant(union ast_expression *expression);
+
+struct location get_expression_location(union ast_expression *expression);
 
 union object *nullable ast_tuple_compute_constant(
     struct object_intern *intern, struct ast_expression_list *tuple);

@@ -346,10 +346,12 @@ ast_expression_array_copy_dyn(struct parser_state *s, struct idynarray *array)
 }
 
 static union ast_expression *ast_const_new(struct parser_state *s,
-                                           union object        *object)
+                                           union object        *object,
+                                           struct location      location)
 {
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_CONST);
+  expression->cnst.base.location = location;
   expression->cnst.object = object;
   return expression;
 }
@@ -357,8 +359,10 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 static union ast_expression *invalid_expression(struct parser_state *s)
 {
   assert(s->d->had_error);
+  struct location       location = scanner_location(&s->scanner);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
+  expression->cnst.base.location = location;
   expression->cnst.object
       = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
   return expression;
@@ -426,11 +430,13 @@ static inline union ast_expression *parse_unexpr(struct parser_state *s,
                                                  enum precedence      prec_op,
                                                  enum ast_expression_type type)
 {
+  struct location location = scanner_location(&s->scanner);
   next_token(s);
   union ast_expression *op = parse_expression(s, prec_op);
 
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_unexpr, type);
+  expression->unexpr.base.location = location;
   expression->unexpr.op = op;
   return expression;
 }
@@ -498,6 +504,7 @@ static union ast_expression *parse_expression_list_helper(
   size_t expressions_size = num_expressions * sizeof(union ast_expression *);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_expression_list) + expressions_size, type);
+  expression->expression_list.base.location = get_expression_location(first);
   expression->expression_list.has_star_expression = has_star_expression;
   expression->expression_list.num_expressions = num_expressions;
   memcpy(expression->expression_list.expressions, idynarray_data(&expressions),
@@ -589,7 +596,7 @@ parse_generator_expression(struct parser_state     *s,
   size_t parts_size = num_parts * sizeof(struct generator_expression_part);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_generator_expression) + parts_size, type);
-  expression->generator_expression.location = location;
+  expression->generator_expression.base.location = location;
   expression->generator_expression.num_parts = num_parts;
   expression->generator_expression.is_async = is_async;
   memcpy(expression->generator_expression.parts, idynarray_data(&parts),
@@ -870,9 +877,10 @@ static void parse_parameters(struct parser_state    *s,
 static union ast_expression *parse_singleton(struct parser_state *s,
                                              enum object_type     type)
 {
+  struct location location = scanner_location(&s->scanner);
   next_token(s);
   union object *object = object_intern_singleton(&s->cg.objects, type);
-  return ast_const_new(s, object);
+  return ast_const_new(s, object, location);
 }
 
 static union ast_expression *parse_await(struct parser_state *s)
@@ -883,11 +891,13 @@ static union ast_expression *parse_await(struct parser_state *s)
 
 static union ast_expression *parse_l_bracket(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, '[');
 
   if (accept(s, ']')) {
     union ast_expression *expression = ast_allocate_expression(
         s, struct ast_expression_list, AST_LIST_DISPLAY);
+    expression->expression_list.base.location = location;
     expression->expression_list.num_expressions = 0;
     return expression;
   }
@@ -903,6 +913,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
   if (peek(s) == T_for || peek(s) == T_async) {
     /* TODO: disallow star-expression */
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
+    expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
@@ -920,10 +931,12 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
 
 static union ast_expression *parse_l_curly(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, '{');
   if (accept(s, '}')) {
     union ast_expression *expression = ast_allocate_expression(
         s, struct ast_dict_item_list, AST_DICT_DISPLAY);
+    expression->dict_item_list.base.location = location;
     expression->dict_item_list.num_items = 0;
     return expression;
   }
@@ -955,6 +968,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   } else if (peek(s) == T_for || peek(s) == T_async) {
     /* set comprehension */
     expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
+    expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
@@ -968,6 +982,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
     /* dict comprehension */
     if (peek(s) == T_for || peek(s) == T_async) {
       expression = parse_generator_expression(s, AST_DICT_COMPREHENSION);
+      expression->generator_expression.base.location = location;
       set_generator_expression_item(expression, key, first_has_await, value,
                                     value_has_await);
     } else {
@@ -1001,6 +1016,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
       size_t   items_size = num_items * sizeof(struct dict_item);
       expression = ast_allocate_expression_(
           s, sizeof(struct ast_dict_item_list) + items_size, AST_DICT_DISPLAY);
+      expression->dict_item_list.base.location = location;
       expression->dict_item_list.num_items = num_items;
       memcpy(expression->dict_item_list.items, idynarray_data(&items),
              items_size);
@@ -1016,6 +1032,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
 
 static union ast_expression *parse_yield_expression(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_yield);
   bool                     is_yield_from = accept(s, T_from);
   enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
@@ -1032,6 +1049,7 @@ static union ast_expression *parse_yield_expression(struct parser_state *s)
   }
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_expression_yield, type);
+  expression->yield.base.location = location;
   expression->yield.value = yield_expression;
   if (s->current_function_has_yield != NULL) {
     *s->current_function_has_yield = true;
@@ -1041,10 +1059,12 @@ static union ast_expression *parse_yield_expression(struct parser_state *s)
 
 static union ast_expression *parse_l_paren(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, '(');
   if (accept(s, ')')) {
     union ast_expression *expression = ast_allocate_expression(
         s, struct ast_expression_list, AST_EXPRESSION_LIST);
+    expression->expression_list.base.location = location;
     expression->expression_list.num_expressions = 0;
     expression->expression_list.as_constant = ast_tuple_compute_constant(
         &s->cg.objects, &expression->expression_list);
@@ -1064,6 +1084,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     if (peek(s) == T_for || peek(s) == T_async) {
       /* TODO: disallow star-expression */
       expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
+      expression->generator_expression.base.location = location;
       set_generator_expression_item(expression, first, first_has_await,
                                     /*item_value=*/NULL,
                                     /*item_value_has_await=*/false);
@@ -1094,26 +1115,30 @@ static union ast_expression *parse_false(struct parser_state *s)
 
 static union ast_expression *parse_float(struct parser_state *s)
 {
-  union object *object = peek_get_object(s, T_FLOAT);
+  struct location location = scanner_location(&s->scanner);
+  union object   *object = peek_get_object(s, T_FLOAT);
   eat(s, T_FLOAT);
-  return ast_const_new(s, object);
+  return ast_const_new(s, object, location);
 }
 
 static union ast_expression *parse_prefix_identifier(struct parser_state *s)
 {
-  struct symbol *symbol = parse_identifier(s);
+  struct location location = scanner_location(&s->scanner);
+  struct symbol  *symbol = parse_identifier(s);
 
   union ast_expression *node
       = ast_allocate_expression(s, struct ast_identifier, AST_IDENTIFIER);
+  node->identifier.base.location = location;
   node->identifier.symbol = symbol;
   return node;
 }
 
 static union ast_expression *parse_integer(struct parser_state *s)
 {
-  union object *object = peek_get_object(s, T_INTEGER);
+  struct location location = scanner_location(&s->scanner);
+  union object   *object = peek_get_object(s, T_INTEGER);
   eat(s, T_INTEGER);
-  return ast_const_new(s, object);
+  return ast_const_new(s, object, location);
 }
 
 static union ast_expression *parse_invert(struct parser_state *s)
@@ -1138,7 +1163,7 @@ static union ast_expression *parse_lambda(struct parser_state *s)
   size_t   parameters_size = num_parameters * sizeof(struct parameter);
   union ast_expression *lambda = ast_allocate_expression_(
       s, sizeof(struct ast_lambda) + parameters_size, AST_LAMBDA);
-  lambda->lambda.location = location;
+  lambda->lambda.base.location = location;
   lambda->lambda.expression = expression;
   lambda->lambda.parameter_shape = parameter_shape;
   memcpy(lambda->lambda.parameters, idynarray_data(&parameters),
@@ -1184,13 +1209,14 @@ static union object *concat_strings(struct parser_state *s,
 
 static union ast_expression *parse_string(struct parser_state *s)
 {
-  union object *string;
+  struct location location = scanner_location(&s->scanner);
+  union object   *string;
   // fast-path: single string literal
   if (peek(s) == T_STRING) {
     string = peek_get_object(s, T_STRING);
     eat(s, T_STRING);
     if (peek(s) != T_STRING && peek(s) != T_FSTRING_START) {
-      return ast_const_new(s, string);
+      return ast_const_new(s, string, location);
     }
   } else {
     string = NULL;
@@ -1357,12 +1383,13 @@ static union ast_expression *parse_string(struct parser_state *s)
       object = object_intern_cstring(&s->cg.objects, "");
     }
     idynarray_free(&elements);
-    return ast_const_new(s, object);
+    return ast_const_new(s, object, location);
   }
 
   size_t elements_size = num_elements * sizeof(struct fstring_element);
   union ast_expression *expression = ast_allocate_expression_(
       s, sizeof(struct ast_fstring) + elements_size, AST_FSTRING);
+  expression->fstring.base.location = location;
   expression->fstring.num_elements = num_elements;
   memcpy(expression->fstring.elements, idynarray_data(&elements),
          elements_size);
@@ -2593,10 +2620,10 @@ static void parse_type_parameters(struct parser_state *s)
 }
 
 static union ast_statement *parse_class(struct parser_state   *s,
-                                        struct location        location,
                                         unsigned               num_decorators,
                                         union ast_expression **decorators)
 {
+  struct location location = scanner_location(&s->scanner);
   eat(s, T_class);
   struct symbol *name = parse_identifier(s);
 
@@ -2630,7 +2657,6 @@ static union ast_statement *parse_class(struct parser_state   *s,
 }
 
 static union ast_statement *parse_def(struct parser_state   *s,
-                                      struct location        location,
                                       unsigned               num_decorators,
                                       union ast_expression **decorators,
                                       bool async_prefix_consumed)
@@ -2640,6 +2666,7 @@ static union ast_statement *parse_def(struct parser_state   *s,
     assert(!async_prefix_consumed);
     async = true;
   }
+  struct location location = scanner_location(&s->scanner);
   expect(s, T_def);
   struct symbol *name = parse_identifier(s);
 
@@ -2687,7 +2714,6 @@ static union ast_statement *parse_def(struct parser_state   *s,
 static union ast_statement *nullable
 parse_decorator_statement(struct parser_state *s)
 {
-  struct location       location = scanner_location(&s->scanner);
   union ast_expression *inline_storage[4];
   struct idynarray      decorators;
   idynarray_init(&decorators, inline_storage, sizeof(inline_storage));
@@ -2707,10 +2733,10 @@ parse_decorator_statement(struct parser_state *s)
 
   switch (peek(s)) {
   case T_class:
-    return parse_class(s, location, num_decorators, decorator_arr);
+    return parse_class(s, num_decorators, decorator_arr);
   case T_async:
   case T_def:
-    return parse_def(s, location, num_decorators, decorator_arr,
+    return parse_def(s, num_decorators, decorator_arr,
                      /*async_prefix_consumed=*/false);
   default:
     diag_begin_error(s->d, scanner_location(&s->scanner));
@@ -3013,20 +3039,16 @@ static void parse_statement(struct parser_state *s,
     break;
   }
   case T_class:
-    append_statement(s, statements,
-                     parse_class(s, scanner_location(&s->scanner),
-                                 /*num_decorators=*/0, NULL),
+    append_statement(s, statements, parse_class(s, /*num_decorators=*/0, NULL),
                      top_level);
     break;
   case T_def:
     append_statement(s, statements,
-                     parse_def(s, scanner_location(&s->scanner),
-                               /*num_decorators=*/0, NULL,
+                     parse_def(s, /*num_decorators=*/0, NULL,
                                /*async_prefix_consumed=*/false),
                      top_level);
     break;
   case T_async: {
-    struct location location = scanner_location(&s->scanner);
     eat(s, T_async);
     if (peek(s) == T_for) {
       append_statement(s, statements, parse_for(s, /*async=*/true), top_level);
@@ -3035,7 +3057,7 @@ static void parse_statement(struct parser_state *s,
                        top_level);
     } else if (peek(s) == T_def) {
       append_statement(s, statements,
-                       parse_def(s, location, /*num_decorators=*/0, NULL,
+                       parse_def(s, /*num_decorators=*/0, NULL,
                                  /*async_prefix_consumed=*/true),
                        top_level);
     } else {

@@ -9,6 +9,11 @@ union object;
 union ast_expression;
 struct symbol;
 
+struct ast_expression_with_location {
+  struct ast_expression_base base;
+  struct location            location;
+};
+
 struct argument {
   union ast_expression   *expression;
   struct symbol *nullable name;
@@ -90,14 +95,14 @@ struct ast_conditional {
 };
 
 struct ast_const {
-  struct ast_expression_base base;
-  union object              *object;
+  struct ast_expression_with_location base;
+  union object                       *object;
 };
 
 struct ast_fstring {
-  struct ast_expression_base base;
-  unsigned                   num_elements;
-  struct fstring_element     elements[];
+  struct ast_expression_with_location base;
+  unsigned                            num_elements;
+  struct fstring_element              elements[];
 };
 
 struct dict_item {
@@ -106,22 +111,21 @@ struct dict_item {
 };
 
 struct ast_dict_item_list {
-  struct ast_expression_base base;
-  unsigned                   num_items;
-  struct dict_item           items[];
+  struct ast_expression_with_location base;
+  unsigned                            num_items;
+  struct dict_item                    items[];
 };
 
 struct ast_expression_list {
-  struct ast_expression_base    base;
-  unsigned                      num_expressions;
-  bool                          has_star_expression;
-  union object *nullable        as_constant;
-  union ast_expression *nonnull expressions[];
+  struct ast_expression_with_location base;
+  unsigned                            num_expressions;
+  bool                                has_star_expression;
+  union object *nullable              as_constant;
+  union ast_expression *nonnull       expressions[];
 };
 
 struct ast_generator_expression {
-  struct ast_expression_base          base;
-  struct location                     location;
+  struct ast_expression_with_location base;
   unsigned                            num_parts;
   bool                                is_async;
   struct ast_scope_bindings *nullable scope;
@@ -131,13 +135,12 @@ struct ast_generator_expression {
 };
 
 struct ast_identifier {
-  struct ast_expression_base base;
-  struct symbol             *symbol;
+  struct ast_expression_with_location base;
+  struct symbol                      *symbol;
 };
 
 struct ast_lambda {
-  struct ast_expression_base          base;
-  struct location                     location;
+  struct ast_expression_with_location base;
   union ast_expression               *expression;
   struct parameter_shape              parameter_shape;
   struct ast_scope_bindings *nullable scope;
@@ -152,18 +155,19 @@ struct ast_slice {
 };
 
 struct ast_unexpr {
-  struct ast_expression_base base;
-  union ast_expression      *op;
+  struct ast_expression_with_location base;
+  union ast_expression               *op;
 };
 
 struct ast_expression_yield {
-  struct ast_expression_base     base;
-  union ast_expression *nullable value;
+  struct ast_expression_with_location base;
+  union ast_expression *nullable      value;
 };
 
 union ast_expression {
-  uint8_t                    type;
-  struct ast_expression_base base;
+  uint8_t                             type;
+  struct ast_expression_base          base;
+  struct ast_expression_with_location with_location;
 
   struct ast_attr                 attr;
   struct ast_binexpr              binexpr;

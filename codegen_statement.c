@@ -1316,7 +1316,8 @@ static void emit_generator_expression_part(
 {
   if (part_index >= generator_expression->num_parts) {
     emit_expression(s, generator_expression->expression);
-    enum ast_expression_type type = generator_expression->base.base.type;
+    enum ast_expression_type type
+        = ast_expression_type((union ast_expression *)generator_expression);
     if (type == AST_LIST_COMPREHENSION || type == AST_SET_COMPREHENSION
         || type == AST_DICT_COMPREHENSION) {
       /* Need to compute position of list/set in stack...
@@ -1380,8 +1381,9 @@ void emit_generator_expression_code(
   cg_declare(s, dot_zero, SYMBOL_LOCAL);
   s->code.argcount = 1;
 
-  enum ast_expression_type type = generator_expression->base.base.type;
-  bool                     return_value;
+  enum ast_expression_type type
+      = ast_expression_type((union ast_expression *)generator_expression);
+  bool return_value;
   if (type == AST_LIST_COMPREHENSION) {
     cg_op_push1(s, OPCODE_BUILD_LIST, 0);
     return_value = true;
@@ -2938,8 +2940,13 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   }
   analyze_function_bindings(s, def, /*parent=*/NULL);
   for (unsigned i = 0; i < def->num_decorators; ++i) {
+    struct location location = get_expression_location(def->decorators[i]);
+    if (location.line > 0) {
+      cg_set_lineno(s, location.line);
+    }
     emit_expression(s, def->decorators[i]);
   }
+  cg_set_lineno(s, def->base.location.line);
 
   struct make_function_state state;
   bool global_binding = cg_symbol_is_global(s, def->name);
@@ -2973,8 +2980,14 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
 {
   analyze_class_bindings(s, class_stmt, /*parent=*/NULL);
   for (unsigned i = 0; i < class_stmt->num_decorators; ++i) {
+    struct location location
+        = get_expression_location(class_stmt->decorators[i]);
+    if (location.line > 0) {
+      cg_set_lineno(s, location.line);
+    }
     emit_expression(s, class_stmt->decorators[i]);
   }
+  cg_set_lineno(s, class_stmt->base.location.line);
 
   cg_op_push1(s, OPCODE_LOAD_BUILD_CLASS, 0);
   bool        global_binding = cg_symbol_is_global(s, class_stmt->name);

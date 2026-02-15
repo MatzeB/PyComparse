@@ -117,8 +117,7 @@ def compile_reference(
     proc = run_command(cmd, env=env)
     if proc.returncode != 0:
         raise RuntimeError(
-            "CPython compile failed:\n"
-            + proc.stderr.decode("utf-8", errors="replace")
+            "CPython compile failed:\n" + proc.stderr.decode("utf-8", errors="replace")
         )
 
 
@@ -177,9 +176,7 @@ def normalize_larger_stackdepth_diffs(
         py_stack = int(py_match.group("stack"))
         if py_stack >= ref_stack:
             unified_line = (
-                ref_match.group("prefix")
-                + str(ref_stack)
-                + ref_match.group("suffix")
+                ref_match.group("prefix") + str(ref_stack) + ref_match.group("suffix")
             )
             normalized_ref[i] = unified_line
             normalized_py[i] = unified_line

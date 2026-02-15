@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #include "nullable.h"
 
 ASSUME_NONNULL_BEGIN
@@ -14,7 +16,7 @@ enum symbol_info_type {
 
 struct symbol_info {
   unsigned char type;
-  uint16_t      scope_id;
+  uint32_t      scope_id;
   unsigned      index;
 };
 

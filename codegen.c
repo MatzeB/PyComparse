@@ -329,7 +329,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   code->varnames = object_new_list(arena);
   code->freevars = object_new_list(arena);
   code->cellvars = object_new_list(arena);
-  if (s->next_scope_id == UINT16_MAX) {
+  if (s->next_scope_id == UINT32_MAX) {
     internal_error("Ran out of scope identifiers");
   }
   code->scope_id = s->next_scope_id++;

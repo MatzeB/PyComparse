@@ -67,8 +67,8 @@ struct code_state {
   struct basic_block                    *last_block;
   struct loop_state                      loop_state;
   unsigned                               cg_stack_begin;
-  uint16_t                               outer_scope_id;
-  uint16_t                               scope_id;
+  uint32_t                               outer_scope_id;
+  uint32_t                               scope_id;
   unsigned                               argcount;
   unsigned                               positional_only_argcount;
   unsigned                               keyword_only_argcount;
@@ -98,7 +98,7 @@ struct cg_state {
   const char               *filename;
   struct diagnostics_state *d;
 
-  uint16_t next_scope_id;
+  uint32_t next_scope_id;
 };
 
 ASSUME_NONNULL_END

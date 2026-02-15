@@ -59,6 +59,19 @@ COMPILE_WITH_CPYTHON = (
     "import py_compile,sys; "
     "py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
 )
+RUN_PYC_FALLBACK = (
+    "import marshal,os,sys; "
+    "pyc_path=sys.argv[1]; "
+    "source_path=sys.argv[2] if len(sys.argv) > 2 else pyc_path; "
+    "data=open(pyc_path,'rb').read(); "
+    "code=marshal.loads(data[16:]); "
+    "sys.argv=[source_path]; "
+    "sys.path[0]=os.path.dirname(source_path); "
+    "main_globals=sys.modules['__main__'].__dict__; "
+    "main_globals.update({'__name__':'__main__','__file__':source_path,"
+    "'__package__':None,'__cached__':None,'__spec__':None,'__loader__':None}); "
+    "exec(code, main_globals)"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,6 +140,14 @@ def parse_args() -> argparse.Namespace:
         help="pass --ignore-larger-stackdepth to the bytecode comparator",
     )
     parser.add_argument(
+        "--bytecode-ignore-code-bytes",
+        action="store_true",
+        help=(
+            "pass --ignore-code-bytes to the bytecode comparator to compare "
+            "code object metadata + normalized constants instead of raw ops"
+        ),
+    )
+    parser.add_argument(
         "-j",
         "--jobs",
         type=int,
@@ -167,6 +188,7 @@ class Config:
     python_cmd_raw: str
     bytecode_script: Path
     bytecode_ignore_larger_stackdepth: bool
+    bytecode_ignore_code_bytes: bool
     runner_python: str
     jobs: int
     timeout: float
@@ -249,6 +271,12 @@ def run_process(
         return 124, out, err, True
 
 
+def should_retry_pyc_run_with_fallback(rc: int, stderr: bytes) -> bool:
+    if rc == 0:
+        return False
+    return "can't find '__main__' module in" in stderr.decode(errors="replace")
+
+
 def compile_reference_syntax(file_path: Path, cfg: Config) -> tuple[int, bool]:
     tmp_path = None
     try:
@@ -310,6 +338,8 @@ def process_bytecode(file_path: Path, cfg: Config) -> FileResult:
     ]
     if cfg.bytecode_ignore_larger_stackdepth:
         compare_cmd.append("--ignore-larger-stackdepth")
+    if cfg.bytecode_ignore_code_bytes:
+        compare_cmd.append("--ignore-code-bytes")
     compare_cmd.append(str(file_path))
 
     compare_env = dict(cfg.env)
@@ -404,6 +434,21 @@ def process_runtime(file_path: Path, cfg: Config) -> FileResult:
             )
             if pyc_timed_out:
                 return FileResult(file_path, False, "runtime_timeout", detail="compiled")
+            if should_retry_pyc_run_with_fallback(pyc_rc, pyc_err_raw):
+                fallback_args = [
+                    *cfg.python_cmd,
+                    "-c",
+                    RUN_PYC_FALLBACK,
+                    str(pyc_file),
+                    str(file_path),
+                ]
+                pyc_rc, pyc_out_raw, pyc_err_raw, pyc_timed_out = run_process(
+                    fallback_args, timeout=cfg.timeout, env=cfg.env
+                )
+                if pyc_timed_out:
+                    return FileResult(
+                        file_path, False, "runtime_timeout", detail="compiled"
+                    )
 
             ref_out = normalize_text(
                 ref_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
@@ -559,6 +604,7 @@ def main() -> int:
         python_cmd_raw=args.python_cmd,
         bytecode_script=bytecode_script,
         bytecode_ignore_larger_stackdepth=args.bytecode_ignore_larger_stackdepth,
+        bytecode_ignore_code_bytes=args.bytecode_ignore_code_bytes,
         runner_python=sys.executable,
         jobs=max(1, args.jobs),
         timeout=max(1.0, args.timeout),

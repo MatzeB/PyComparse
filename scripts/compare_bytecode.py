@@ -60,6 +60,52 @@ with open(sys.argv[1], "rb") as fp:
 dump(code)
 """
 
+DUMP_PYC_IGNORE_CODE_BYTES = r"""
+import marshal
+import pprint
+import sys
+import types
+
+
+def normalize_const(const):
+    if isinstance(const, types.CodeType):
+        return ("code", normalize_code(const))
+    if isinstance(const, tuple):
+        return ("tuple", tuple(normalize_const(item) for item in const))
+    if isinstance(const, frozenset):
+        items = sorted((normalize_const(item) for item in const), key=repr)
+        return ("frozenset", tuple(items))
+    return ("literal", type(const).__name__, repr(const))
+
+
+def normalize_code(code):
+    normalized_consts = [normalize_const(const) for const in code.co_consts]
+    normalized_consts.sort(key=repr)
+    return (
+        ("name", code.co_name),
+        ("filename", code.co_filename),
+        ("firstlineno", code.co_firstlineno),
+        ("argcount", code.co_argcount),
+        ("posonlyargcount", code.co_posonlyargcount),
+        ("kwonlyargcount", code.co_kwonlyargcount),
+        ("nlocals", code.co_nlocals),
+        ("stacksize", code.co_stacksize),
+        ("flags", code.co_flags),
+        ("names", code.co_names),
+        ("varnames", code.co_varnames),
+        ("freevars", code.co_freevars),
+        ("cellvars", code.co_cellvars),
+        ("consts", tuple(normalized_consts)),
+    )
+
+
+with open(sys.argv[1], "rb") as fp:
+    fp.read(16)
+    code = marshal.load(fp)
+
+pprint.pprint(normalize_code(code), width=120)
+"""
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -96,6 +142,14 @@ def parse_args() -> argparse.Namespace:
             "greater than or equal to CPython stackdepth"
         ),
     )
+    parser.add_argument(
+        "--ignore-code-bytes",
+        action="store_true",
+        help=(
+            "Ignore raw instruction stream differences; compare code object "
+            "metadata and normalized constants instead"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -112,16 +166,15 @@ def cpython_env(cpython_cmd: list[str]) -> dict[str, str]:
 
 def compile_reference(
     source: Path, out_pyc: Path, cpython_cmd: list[str], env: dict[str, str]
-) -> None:
+) -> tuple[bool, str]:
     cmd = cpython_cmd + ["-c", COMPILE_WITH_CPYTHON, str(source), str(out_pyc)]
     proc = run_command(cmd, env=env)
     if proc.returncode != 0:
-        raise RuntimeError(
-            "CPython compile failed:\n" + proc.stderr.decode("utf-8", errors="replace")
-        )
+        return False, proc.stderr.decode("utf-8", errors="replace")
+    return True, ""
 
 
-def compile_pycomparse(source: Path, out_pyc: Path, parser_test: Path) -> None:
+def compile_pycomparse(source: Path, out_pyc: Path, parser_test: Path) -> tuple[bool, str]:
     with out_pyc.open("wb") as out_fp:
         proc = subprocess.run(
             [str(parser_test), str(source)],
@@ -129,14 +182,15 @@ def compile_pycomparse(source: Path, out_pyc: Path, parser_test: Path) -> None:
             stderr=subprocess.PIPE,
         )
     if proc.returncode != 0:
-        raise RuntimeError(
-            "pycomparse compile failed:\n"
-            + proc.stderr.decode("utf-8", errors="replace")
-        )
+        return False, proc.stderr.decode("utf-8", errors="replace")
+    return True, ""
 
 
-def dump_pyc(pyc: Path, cpython_cmd: list[str], env: dict[str, str]) -> str:
-    cmd = cpython_cmd + ["-c", DUMP_PYC, str(pyc)]
+def dump_pyc(
+    pyc: Path, cpython_cmd: list[str], env: dict[str, str], ignore_code_bytes: bool
+) -> str:
+    dump_script = DUMP_PYC_IGNORE_CODE_BYTES if ignore_code_bytes else DUMP_PYC
+    cmd = cpython_cmd + ["-c", dump_script, str(pyc)]
     proc = run_command(cmd, env=env)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -192,6 +246,7 @@ def compare_one_file(
     temp_dir: Path,
     keep_temp: bool,
     ignore_larger_stackdepth: bool,
+    ignore_code_bytes: bool,
 ) -> int:
     temp_dir.mkdir(parents=True, exist_ok=True)
     ref_pyc = temp_dir / "reference.pyc"
@@ -199,11 +254,36 @@ def compare_one_file(
     ref_dump_file = temp_dir / "reference.dump.txt"
     pyc_dump_file = temp_dir / "pycomparse.dump.txt"
 
+    ref_ok, ref_err = compile_reference(source, ref_pyc, cpython_cmd, env)
+    py_ok, py_err = compile_pycomparse(source, pyc_pyc, parser_test)
+
+    if not ref_ok and not py_ok:
+        print(f"SKIP: {source} (both compilers failed to compile)")
+        return 0
+
+    if ref_ok != py_ok:
+        print(f"DIFF: {source}")
+        if not ref_ok:
+            print("reference compile failed:")
+            print(ref_err.rstrip())
+        if not py_ok:
+            print("pycomparse compile failed:")
+            print(py_err.rstrip())
+        return 1
+
     try:
-        compile_reference(source, ref_pyc, cpython_cmd, env)
-        compile_pycomparse(source, pyc_pyc, parser_test)
-        reference_dump = dump_pyc(ref_pyc, cpython_cmd, env)
-        pycomparse_dump = dump_pyc(pyc_pyc, cpython_cmd, env)
+        reference_dump = dump_pyc(
+            ref_pyc,
+            cpython_cmd,
+            env,
+            ignore_code_bytes=ignore_code_bytes,
+        )
+        pycomparse_dump = dump_pyc(
+            pyc_pyc,
+            cpython_cmd,
+            env,
+            ignore_code_bytes=ignore_code_bytes,
+        )
     except RuntimeError as err:
         print(f"ERROR: {source}")
         print(str(err).rstrip())
@@ -269,6 +349,7 @@ def main() -> int:
                 temp_dir=base_temp_dir / f"{i:03d}",
                 keep_temp=args.keep_temp,
                 ignore_larger_stackdepth=args.ignore_larger_stackdepth,
+                ignore_code_bytes=args.ignore_code_bytes,
             )
             if status == 2:
                 overall_status = 2

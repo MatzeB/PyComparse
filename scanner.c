@@ -2421,8 +2421,29 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
   s->at_begin_of_line = true;
   s->d = diagnostics;
 #ifndef PYCOMPARSE_NO_ICONV
-  encoding_maybe_transcode_to_utf8(&s->input, &s->transcoded_input,
-                                   &s->transcoded_source);
+  struct encoding_error encoding_error = encoding_maybe_transcode_to_utf8(
+      &s->input, &s->transcoded_input, &s->transcoded_source);
+  if (encoding_error.kind != ENCODING_ERROR_NONE) {
+    diag_begin_error(s->d, scanner_location(s));
+    switch (encoding_error.kind) {
+    case ENCODING_ERROR_UNKNOWN_ENCODING:
+      diag_frag(s->d, "unknown encoding: ");
+      diag_frag(s->d, encoding_error.encoding);
+      break;
+    case ENCODING_ERROR_BOM_COOKIE_MISMATCH:
+      diag_frag(s->d, "encoding problem: ");
+      diag_frag(s->d, encoding_error.encoding);
+      diag_frag(s->d, " with BOM");
+      break;
+    case ENCODING_ERROR_DECODE_FAILED:
+      diag_frag(s->d, "failed to decode source with encoding: ");
+      diag_frag(s->d, encoding_error.encoding);
+      break;
+    case ENCODING_ERROR_NONE:
+      break;
+    }
+    diag_end(s->d);
+  }
 #endif
   s->c = refill_buffer(s);
   if (s->c == 0xEF && s->p + 1 < s->buffer_end

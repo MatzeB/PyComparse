@@ -1,0 +1,1 @@
+test/errors/scan_bad_coding_bom_utf8.py:1 error: encoding problem: utf8 with BOM

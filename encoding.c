@@ -13,6 +13,12 @@
 typedef int encoding_no_iconv_translation_unit;
 #else
 
+struct source_encoding_info {
+  bool has_utf8_bom;
+  bool has_encoding_cookie;
+  char encoding[64];
+};
+
 static inline unsigned char ascii_lower(unsigned char c)
 {
   if (c >= 'A' && c <= 'Z') {
@@ -71,17 +77,30 @@ static bool detect_pep263_encoding_in_line(const unsigned char *line,
   return false;
 }
 
-static void detect_source_encoding(const unsigned char *prefix,
-                                   size_t prefix_size, char *encoding_out,
-                                   size_t encoding_size)
+static struct encoding_error make_encoding_error(enum encoding_error_kind kind,
+                                                 const char *encoding)
 {
-  strncpy(encoding_out, "utf-8", encoding_size);
-  encoding_out[encoding_size - 1] = '\0';
+  struct encoding_error result = { kind, { 0 } };
+  if (encoding != NULL) {
+    strncpy(result.encoding, encoding, sizeof(result.encoding));
+    result.encoding[sizeof(result.encoding) - 1] = '\0';
+  }
+  return result;
+}
+
+static void detect_source_encoding(const unsigned char         *prefix,
+                                   size_t                       prefix_size,
+                                   struct source_encoding_info *result)
+{
+  memset(result, 0, sizeof(*result));
+  strncpy(result->encoding, "utf-8", sizeof(result->encoding));
+  result->encoding[sizeof(result->encoding) - 1] = '\0';
 
   size_t offset = 0;
   if (prefix_size >= 3 && prefix[0] == 0xEF && prefix[1] == 0xBB
       && prefix[2] == 0xBF) {
     offset = 3;
+    result->has_utf8_bom = true;
   }
 
   size_t line_start = offset;
@@ -96,7 +115,9 @@ static void detect_source_encoding(const unsigned char *prefix,
       --line_length;
     }
     if (detect_pep263_encoding_in_line(prefix + line_start, line_length,
-                                       encoding_out, encoding_size)) {
+                                       result->encoding,
+                                       sizeof(result->encoding))) {
+      result->has_encoding_cookie = true;
       return;
     }
     if (line_end >= prefix_size) {
@@ -119,6 +140,49 @@ static bool encoding_is_utf8(const char *encoding)
   }
   normalized[n] = '\0';
   return strcmp(normalized, "utf8") == 0;
+}
+
+static bool encoding_is_bom_compatible_utf8(const char *encoding)
+{
+  char     lower[32];
+  unsigned n = 0;
+  for (const unsigned char *p = (const unsigned char *)encoding;
+       *p != '\0' && n < sizeof(lower) - 1; ++p) {
+    lower[n++] = (char)ascii_lower(*p);
+  }
+  lower[n] = '\0';
+  return strcmp(lower, "utf-8") == 0;
+}
+
+static void normalize_encoding_alias(const char *encoding, char *out,
+                                     size_t out_size)
+{
+  unsigned n = 0;
+  for (const unsigned char *p = (const unsigned char *)encoding;
+       *p != '\0' && n + 1 < out_size; ++p) {
+    if (*p == '-' || *p == '_' || *p == '.') {
+      continue;
+    }
+    out[n++] = (char)ascii_lower(*p);
+  }
+  out[n] = '\0';
+}
+
+static iconv_t open_utf8_converter(const char *encoding)
+{
+  iconv_t converter = iconv_open("UTF-8", encoding);
+  if (converter != (iconv_t)-1) {
+    return converter;
+  }
+
+  char normalized[64];
+  normalize_encoding_alias(encoding, normalized, sizeof(normalized));
+  if (strcmp(normalized, "latin1") == 0
+      || strcmp(normalized, "iso88591") == 0) {
+    return iconv_open("UTF-8", "ISO-8859-1");
+  }
+
+  return (iconv_t)-1;
 }
 
 static unsigned char *read_all_bytes(FILE *input, size_t *raw_size)
@@ -156,12 +220,14 @@ static unsigned char *read_all_bytes(FILE *input, size_t *raw_size)
   return raw;
 }
 
-void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
-                                      char **owned_source_out)
+struct encoding_error encoding_maybe_transcode_to_utf8(FILE **input_io,
+                                                       FILE **owned_input_out,
+                                                       char **owned_source_out)
 {
-  FILE *input = *input_io;
+  struct encoding_error no_error = { ENCODING_ERROR_NONE, { 0 } };
+  FILE                 *input = *input_io;
   if (input == NULL) {
-    return;
+    return no_error;
   }
 
   unsigned char prefix[1024];
@@ -169,16 +235,21 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
   if (ferror(input)) {
     clearerr(input);
     (void)fseek(input, 0, SEEK_SET);
-    return;
+    return no_error;
   }
   if (fseek(input, 0, SEEK_SET) != 0) {
-    return;
+    return no_error;
   }
 
-  char encoding[64];
-  detect_source_encoding(prefix, prefix_size, encoding, sizeof(encoding));
-  if (encoding_is_utf8(encoding)) {
-    return;
+  struct source_encoding_info source_encoding;
+  detect_source_encoding(prefix, prefix_size, &source_encoding);
+  if (source_encoding.has_utf8_bom && source_encoding.has_encoding_cookie
+      && !encoding_is_bom_compatible_utf8(source_encoding.encoding)) {
+    return make_encoding_error(ENCODING_ERROR_BOM_COOKIE_MISMATCH,
+                               source_encoding.encoding);
+  }
+  if (encoding_is_utf8(source_encoding.encoding)) {
+    return no_error;
   }
 
   size_t         raw_size = 0;
@@ -188,14 +259,15 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
       clearerr(input);
       (void)fseek(input, 0, SEEK_SET);
     }
-    return;
+    return no_error;
   }
   (void)fseek(input, 0, SEEK_SET);
 
-  iconv_t converter = iconv_open("UTF-8", encoding);
+  iconv_t converter = open_utf8_converter(source_encoding.encoding);
   if (converter == (iconv_t)-1) {
     free(raw);
-    return;
+    return make_encoding_error(ENCODING_ERROR_UNKNOWN_ENCODING,
+                               source_encoding.encoding);
   }
 
   size_t out_capacity = raw_size * 4 + 16;
@@ -203,7 +275,7 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
   if (out == NULL) {
     iconv_close(converter);
     free(raw);
-    return;
+    return no_error;
   }
 
   char  *in_ptr = (char *)raw;
@@ -223,7 +295,7 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
         iconv_close(converter);
         free(raw);
         free(out);
-        return;
+        return no_error;
       }
       out = new_out;
       out_capacity = new_capacity;
@@ -234,7 +306,8 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
     iconv_close(converter);
     free(raw);
     free(out);
-    return;
+    return make_encoding_error(ENCODING_ERROR_DECODE_FAILED,
+                               source_encoding.encoding);
   }
   iconv_close(converter);
   free(raw);
@@ -243,11 +316,12 @@ void encoding_maybe_transcode_to_utf8(FILE **input_io, FILE **owned_input_out,
   FILE  *memory_input = fmemopen(out, out_size, "rb");
   if (memory_input == NULL) {
     free(out);
-    return;
+    return no_error;
   }
 
   *input_io = memory_input;
   *owned_input_out = memory_input;
   *owned_source_out = out;
+  return no_error;
 }
 #endif

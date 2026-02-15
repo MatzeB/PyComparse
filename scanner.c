@@ -155,6 +155,11 @@ static const size_t scanner_read_buffer_size = 123;
 // for less dense packing...
 static const unsigned string_alignment = alignof(void *);
 
+struct scan_decimal_integer_result {
+  bool had_error;
+  bool leading_zero_nonzero;
+};
+
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
@@ -192,12 +197,13 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
       return C_EOF;
     }
   }
-  s->p = s->read_buffer + 1;
-  s->buffer_end = s->read_buffer + read_size;
+  char *start = s->read_buffer;
+  s->p = start + 1;
+  s->buffer_end = start + read_size;
   if (s->fstring_debug.depth > 0) {
-    s->fstring_debug.tail_start = s->read_buffer;
+    s->fstring_debug.tail_start = start;
   }
-  return (unsigned char)*s->read_buffer;
+  return (unsigned char)*start;
 }
 
 static void next_char(struct scanner_state *s)
@@ -780,12 +786,11 @@ static void scan_binary_integer(struct scanner_state *s)
   }
 }
 
-static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
-                                 char first)
+static struct scan_decimal_integer_result
+scan_decimal_integer(struct scanner_state *s, struct arena *arena, char first)
 {
+  struct scan_decimal_integer_result result = { 0 };
   arena_grow_char(arena, first);
-  bool had_nonzero = false;
-  bool had_error = false;
   char last = first;
   for (;; last = s->c, next_char(s)) {
     switch (s->c) {
@@ -800,46 +805,40 @@ static void scan_decimal_integer(struct scanner_state *s, struct arena *arena,
     case '7':
     case '8':
     case '9':
-      if (!had_nonzero && first == '0' && !had_error) {
-        diag_begin_error(s->d, scanner_location(s));
-        diag_frag(s->d,
-                  "leading zeros in decimal integer literals are not permitted"
-                  "; use an 0o prefix for octal integers");
-        diag_end(s->d);
-        had_error = true;
+      if (first == '0') {
+        result.leading_zero_nonzero = true;
       }
-      had_nonzero = true;
       break;
     case '_':
-      if (last == '_' && !had_error) {
+      if (last == '_' && !result.had_error) {
         diag_begin_error(s->d, scanner_location(s));
         diag_frag(s->d, "decimal literal cannot have consecutive ");
         diag_quoted_char(s->d, '_');
         diag_end(s->d);
-        had_error = true;
+        result.had_error = true;
       }
       continue;
     default:
       if ((('a' <= s->c && s->c <= 'z') || ('A' <= s->c && s->c <= 'Z')
            || ('0' <= s->c && s->c <= '9'))
           && s->c != 'e' && s->c != 'E' && s->c != 'j' && s->c != 'J') {
-        if (!had_error) {
+        if (!result.had_error) {
           diag_begin_error(s->d, scanner_location(s));
           diag_frag(s->d, "invalid digit for decimal literal: ");
           diag_quoted_char(s->d, s->c);
           diag_end(s->d);
-          had_error = true;
+          result.had_error = true;
         }
         continue;
       }
-      if (last == '_' && !had_error) {
+      if (last == '_' && !result.had_error) {
         diag_begin_error(s->d, scanner_location(s));
         diag_frag(s->d, "decimal literal cannot end with ");
         diag_quoted_char(s->d, '_');
         diag_end(s->d);
-        had_error = true;
+        result.had_error = true;
       }
-      return;
+      return result;
     }
     arena_grow_char(arena, (char)s->c);
   }
@@ -1041,7 +1040,8 @@ static void scan_number(struct scanner_state *s)
 
   struct arena *strings = s->strings;
   arena_grow_begin(strings, alignof(char));
-  scan_decimal_integer(s, strings, first);
+  struct scan_decimal_integer_result decimal_result
+      = scan_decimal_integer(s, strings, first);
 
   if (s->c == 'j' || s->c == 'J') {
     next_char(s);
@@ -1074,6 +1074,13 @@ static void scan_number(struct scanner_state *s)
       scan_float_fraction(s);
       return;
     }
+  }
+  if (decimal_result.leading_zero_nonzero && !decimal_result.had_error) {
+    diag_begin_error(s->d, scanner_location(s));
+    diag_frag(s->d,
+              "leading zeros in decimal integer literals are not permitted; "
+              "use an 0o prefix for octal integers");
+    diag_end(s->d);
   }
   arena_grow_char(strings, '\0');
   char *chars = (char *)arena_grow_finish(strings);

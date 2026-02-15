@@ -91,6 +91,11 @@ static inline union object *peek_get_object(struct parser_state *s,
   return s->scanner.token.u.object;
 }
 
+static inline bool peek_string_is_fstring(const struct parser_state *s)
+{
+  return peek(s) == T_STRING && s->scanner.token.string_is_fstring;
+}
+
 static inline bool accept(struct parser_state *s, enum token_kind token_kind)
 {
   if (peek(s) == token_kind) {
@@ -1210,12 +1215,14 @@ static union object *concat_strings(struct parser_state *s,
 static union ast_expression *parse_string(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
-  union object   *string;
+  bool saw_fstring = (peek(s) == T_FSTRING_START) || peek_string_is_fstring(s);
+  union object *string;
   // fast-path: single string literal
   if (peek(s) == T_STRING) {
+    saw_fstring = peek_string_is_fstring(s);
     string = peek_get_object(s, T_STRING);
     eat(s, T_STRING);
-    if (peek(s) != T_STRING && peek(s) != T_FSTRING_START) {
+    if (!saw_fstring && peek(s) != T_STRING && peek(s) != T_FSTRING_START) {
       return ast_const_new(s, string, location);
     }
   } else {
@@ -1247,6 +1254,7 @@ static union ast_expression *parse_string(struct parser_state *s)
 
   for (;;) {
     if (peek(s) == T_STRING) {
+      saw_fstring |= peek_string_is_fstring(s);
       string = peek_get_object(s, T_STRING);
       eat(s, T_STRING);
       if (object_string_length(string) > 0) {
@@ -1259,6 +1267,7 @@ static union ast_expression *parse_string(struct parser_state *s)
       continue;
     }
     if (peek(s) == T_FSTRING_START) {
+      saw_fstring = true;
       if (type != OBJECT_STRING) {
         mixed_types = scanner_location(&s->scanner);
       }
@@ -1374,7 +1383,16 @@ static union ast_expression *parse_string(struct parser_state *s)
 
   unsigned num_elements = idynarray_length(&elements, struct fstring_element);
   struct fstring_element *element_arr = idynarray_data(&elements);
-  if (num_elements <= 1
+  if (saw_fstring && num_elements == 0) {
+    struct fstring_element *element
+        = idynarray_append(&elements, struct fstring_element);
+    memset(element, 0, sizeof(*element));
+    element->u.string = object_intern_cstring(&s->cg.objects, "");
+    element->is_expression = false;
+    num_elements = 1;
+    element_arr = idynarray_data(&elements);
+  }
+  if (!saw_fstring && num_elements <= 1
       && (num_elements == 0 || element_arr[0].is_expression == false)) {
     union object *object;
     if (num_elements == 1) {

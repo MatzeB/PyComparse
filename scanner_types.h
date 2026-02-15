@@ -23,6 +23,7 @@ struct token_string {
 
 struct token {
   uint16_t kind;
+  uint8_t  string_is_fstring;
   union {
     struct symbol *symbol;
     union object  *object;

@@ -1787,6 +1787,7 @@ finish_string:;
   }
   s->token.u.object = object;
   s->token.kind = kind;
+  s->token.string_is_fstring = (kind == T_STRING && flags.format);
 }
 
 static void scan_eof(struct scanner_state *s)
@@ -1915,6 +1916,7 @@ static bool scan_indentation(struct scanner_state *s)
 void scanner_next_token(struct scanner_state *s)
 {
 begin_new_line:
+  s->token.string_is_fstring = false;
   if (s->at_begin_of_line) {
     if (scan_indentation(s)) {
       return;

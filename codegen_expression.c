@@ -880,6 +880,10 @@ static void emit_fstring(struct cg_state *s, struct ast_fstring *fstring)
 {
   struct fstring_element *elements = fstring->elements;
   unsigned                num_elements = fstring->num_elements;
+  if (num_elements == 0) {
+    cg_load_const(s, object_intern_cstring(&s->objects, ""));
+    return;
+  }
   for (unsigned i = 0; i < num_elements; i++) {
     struct fstring_element *element = &elements[i];
     if (element->is_expression) {

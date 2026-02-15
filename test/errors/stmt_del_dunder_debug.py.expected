@@ -1,0 +1,1 @@
+test/errors/stmt_del_dunder_debug.py error: cannot delete __debug__

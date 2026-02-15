@@ -1564,7 +1564,7 @@ static bool symbol_array_contains(struct idynarray *array,
   return false;
 }
 
-static bool is_class_symbol(struct symbol *symbol)
+static bool is_dunder_class(struct symbol *symbol)
 {
   return strcmp(symbol->string, "__class__") == 0;
 }
@@ -1765,7 +1765,7 @@ static bool resolve_from_parent_scope(struct binding_scope *nullable scope,
   }
 
   if (scope->is_class) {
-    if (is_class_symbol(name)) {
+    if (is_dunder_class(name)) {
       if (symbol_array_contains(&scope->globals, name)) {
         return false;
       }
@@ -2358,7 +2358,7 @@ static void analyze_class_bindings(struct cg_state               *s,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_class_symbol(name) && scope.parent != NULL
+      if (is_dunder_class(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
         scope.parent->class_needs_class_cell = true;
@@ -2446,7 +2446,7 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_class_symbol(name) && scope.parent != NULL
+      if (is_dunder_class(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
         scope.parent->class_needs_class_cell = true;
@@ -2474,7 +2474,7 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
     }
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_class_symbol(name) && scope.parent != NULL
+    } else if (is_dunder_class(name) && scope.parent != NULL
                && scope.parent->is_class
                && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);
@@ -2538,7 +2538,7 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_class_symbol(name) && scope.parent != NULL
+      if (is_dunder_class(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
         scope.parent->class_needs_class_cell = true;
@@ -2561,7 +2561,7 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
     }
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_class_symbol(name) && scope.parent != NULL
+    } else if (is_dunder_class(name) && scope.parent != NULL
                && scope.parent->is_class
                && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);
@@ -2639,7 +2639,7 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_class_symbol(name) && scope.parent != NULL
+      if (is_dunder_class(name) && scope.parent != NULL
           && scope.parent->is_class) {
         symbol_array_append_unique(&scope.freevars, name);
         scope.parent->class_needs_class_cell = true;
@@ -2662,7 +2662,7 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
     }
     if (resolve_from_parent_scope(scope.parent, name)) {
       symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_class_symbol(name) && scope.parent != NULL
+    } else if (is_dunder_class(name) && scope.parent != NULL
                && scope.parent->is_class
                && !class_explicitly_binds_class_symbol(scope.parent)) {
       symbol_array_append_unique(&scope.freevars, name);

@@ -1,0 +1,1 @@
+test/errors/stmt_assign_dunder_debug.py error: cannot assign to __debug__

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "nullable.h"
@@ -33,6 +34,14 @@ struct ast_scope_bindings {
   unsigned                           num_freevars;
   struct symbol * nonnull * nullable freevars;
 };
+
+static const struct ast_scope_bindings empty_scope_bindings = { 0 };
+
+static inline const struct ast_scope_bindings *
+scope_bindings_or_empty(const struct ast_scope_bindings *nullable scope)
+{
+  return scope != NULL ? scope : &empty_scope_bindings;
+}
 
 struct parameter_shape {
   unsigned num_parameters;

@@ -1709,14 +1709,6 @@ scope_bindings_from_scope(struct cg_state *s, struct binding_scope *scope)
   return bindings;
 }
 
-static const struct ast_scope_bindings empty_scope_bindings = { 0 };
-
-static const struct ast_scope_bindings *
-scope_bindings_or_empty(const struct ast_scope_bindings *nullable scope)
-{
-  return scope != NULL ? scope : &empty_scope_bindings;
-}
-
 static void binding_scope_init(struct binding_scope          *scope,
                                struct cg_state               *cg,
                                struct binding_scope *nullable parent,

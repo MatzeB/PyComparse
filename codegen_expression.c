@@ -28,14 +28,6 @@ emit_generator_helper(struct cg_state                 *s,
                       struct ast_generator_expression *generator_expression,
                       const char *name, bool is_generator_expression);
 
-static const struct ast_scope_bindings empty_scope_bindings = { 0 };
-
-static const struct ast_scope_bindings *
-scope_bindings_or_empty(const struct ast_scope_bindings *nullable scope)
-{
-  return scope != NULL ? scope : &empty_scope_bindings;
-}
-
 static void
 apply_generator_bindings(struct cg_state                 *s,
                          struct ast_generator_expression *generator_expression)

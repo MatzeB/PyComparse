@@ -188,13 +188,17 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
     s->fstring_debug.tail_start = s->buffer_end;
   }
   size_t read_size = fread(s->read_buffer, 1, s->read_buffer_size, s->input);
+  if (ferror(s->input)) {
+    s->read_error_seen = true;
+  }
   if (read_size < s->read_buffer_size) {
-    if (ferror(s->input)) {
-      /* TODO: better error report */
-      fprintf(stderr, "Error: Read Error! TODO: report error\n");
-    }
-
     if (read_size == 0) {
+      if (s->read_error_seen) {
+        s->read_error_token_pending = true;
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "failed to read source");
+        diag_end(s->d);
+      }
       return C_EOF;
     }
   }
@@ -1854,6 +1858,11 @@ finish_string:;
 
 static void scan_eof(struct scanner_state *s)
 {
+  if (s->read_error_token_pending) {
+    s->read_error_token_pending = false;
+    s->token.kind = T_INVALID;
+    return;
+  }
   if (s->fstring_stack_top > 0) {
     error_unterminated_string(s);
     fstring_pop(s);
@@ -1916,6 +1925,10 @@ static bool scan_indentation(struct scanner_state *s)
       scan_line_comment(s);
       goto new_line;
     case C_EOF:
+      if (s->read_error_token_pending) {
+        scan_eof(s);
+        return true;
+      }
       if (s->last_line_indent > 0) break;
       s->token.kind = T_EOF;
       return true;

@@ -81,6 +81,8 @@ struct scanner_state {
   unsigned                     indentation_stack_top;
 
   struct diagnostics_state *d;
+  bool                      read_error_seen;
+  bool                      read_error_token_pending;
 
   unsigned             indentation_stack[MAXINDENT];
   struct fstring_state fstring_stack[MAX_FSTRING_NESTING];

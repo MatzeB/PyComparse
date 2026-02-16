@@ -51,6 +51,7 @@ int main(int argc, char **argv)
     seed = time(NULL);
   }
   printf("Seed: %d\n", seed);
+  srand(seed);
 
   struct arena arena;
   arena_init(&arena);

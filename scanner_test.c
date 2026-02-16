@@ -52,6 +52,7 @@ int main(int argc, char **argv)
   }
 
   scanner_free(&s);
+  object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
   return 0;

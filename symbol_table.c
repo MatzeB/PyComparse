@@ -14,8 +14,8 @@ static unsigned fnv_hash_string(const char *string)
 {
   unsigned hash = 2166136261;
   for (const char *p = string; *p != '\0'; ++p) {
-    hash *= 16777619;
     hash ^= (unsigned char)*p;
+    hash *= 16777619;
   }
   return hash;
 }

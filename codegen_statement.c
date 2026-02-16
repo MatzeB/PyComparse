@@ -2330,6 +2330,89 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
                                  struct ast_generator_expression *generator,
                                  struct binding_scope *nullable   parent);
 
+static void analyze_children_bindings(struct cg_state    *s,
+                                      struct binding_scope *scope)
+{
+  struct ast_class **class_children = idynarray_data(&scope->class_children);
+  unsigned           num_class_children
+      = idynarray_length(&scope->class_children, struct ast_class *);
+  for (unsigned i = 0; i < num_class_children; ++i) {
+    analyze_class_bindings(s, class_children[i], scope);
+  }
+
+  struct ast_def **children = idynarray_data(&scope->children);
+  unsigned num_children = idynarray_length(&scope->children, struct ast_def *);
+  for (unsigned i = 0; i < num_children; ++i) {
+    analyze_function_bindings(s, children[i], scope);
+  }
+
+  struct ast_lambda **lambda_children
+      = idynarray_data(&scope->lambda_children);
+  unsigned num_lambda_children
+      = idynarray_length(&scope->lambda_children, struct ast_lambda *);
+  for (unsigned i = 0; i < num_lambda_children; ++i) {
+    analyze_lambda_bindings_inner(s, lambda_children[i], scope);
+  }
+
+  struct ast_generator_expression **generator_children
+      = idynarray_data(&scope->generator_children);
+  unsigned num_generator_children = idynarray_length(
+      &scope->generator_children, struct ast_generator_expression *);
+  for (unsigned i = 0; i < num_generator_children; ++i) {
+    analyze_generator_bindings_inner(s, generator_children[i], scope);
+  }
+}
+
+static void resolve_nonlocals(struct cg_state *s, struct binding_scope *scope,
+                               struct location *nullable error_location)
+{
+  struct symbol **nonlocals = idynarray_data(&scope->nonlocals);
+  unsigned num_nonlocals = idynarray_length(&scope->nonlocals, struct symbol *);
+  for (unsigned i = 0; i < num_nonlocals; ++i) {
+    struct symbol *name = nonlocals[i];
+    if (!resolve_from_parent_scope(scope->parent, name)) {
+      if (is_dunder_class(name) && scope->parent != NULL
+          && scope->parent->is_class) {
+        symbol_array_append_unique(&scope->freevars, name);
+        scope->parent->class_needs_class_cell = true;
+        continue;
+      }
+      if (error_location != NULL) {
+        diag_begin_error(s->d, *error_location);
+        diag_frag(s->d, "no binding for nonlocal ");
+        diag_symbol(s->d, name);
+        diag_frag(s->d, " found");
+        diag_end(s->d);
+      }
+    } else {
+      symbol_array_append_unique(&scope->freevars, name);
+    }
+  }
+}
+
+static void resolve_uses(struct binding_scope *scope, bool check_class_binds)
+{
+  struct symbol **uses = idynarray_data(&scope->uses);
+  unsigned        num_uses = idynarray_length(&scope->uses, struct symbol *);
+  for (unsigned i = 0; i < num_uses; ++i) {
+    struct symbol *name = uses[i];
+    if (symbol_array_contains(&scope->locals, name)
+        || symbol_array_contains(&scope->globals, name)
+        || symbol_array_contains(&scope->nonlocals, name)
+        || symbol_array_contains(&scope->freevars, name)) {
+      continue;
+    }
+    if (resolve_from_parent_scope(scope->parent, name)) {
+      symbol_array_append_unique(&scope->freevars, name);
+    } else if (check_class_binds && is_dunder_class(name)
+               && scope->parent != NULL && scope->parent->is_class
+               && !class_explicitly_binds_class_symbol(scope->parent)) {
+      symbol_array_append_unique(&scope->freevars, name);
+      scope->parent->class_needs_class_cell = true;
+    }
+  }
+}
+
 static void analyze_class_bindings(struct cg_state               *s,
                                    struct ast_class              *class_stmt,
                                    struct binding_scope *nullable parent)
@@ -2343,70 +2426,9 @@ static void analyze_class_bindings(struct cg_state               *s,
                      /*is_comprehension=*/false);
   analyze_statement_list_collect(&scope, class_stmt->body);
 
-  struct ast_class **class_children = idynarray_data(&scope.class_children);
-  unsigned           num_class_children
-      = idynarray_length(&scope.class_children, struct ast_class *);
-  for (unsigned i = 0; i < num_class_children; ++i) {
-    analyze_class_bindings(s, class_children[i], &scope);
-  }
-
-  struct ast_def **children = idynarray_data(&scope.children);
-  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
-  for (unsigned i = 0; i < num_children; ++i) {
-    analyze_function_bindings(s, children[i], &scope);
-  }
-
-  struct ast_lambda **lambda_children_cls
-      = idynarray_data(&scope.lambda_children);
-  unsigned num_lambda_children_cls
-      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
-  for (unsigned i = 0; i < num_lambda_children_cls; ++i) {
-    analyze_lambda_bindings_inner(s, lambda_children_cls[i], &scope);
-  }
-
-  struct ast_generator_expression **generator_children_cls
-      = idynarray_data(&scope.generator_children);
-  unsigned num_generator_children_cls = idynarray_length(
-      &scope.generator_children, struct ast_generator_expression *);
-  for (unsigned i = 0; i < num_generator_children_cls; ++i) {
-    analyze_generator_bindings_inner(s, generator_children_cls[i], &scope);
-  }
-
-  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
-  for (unsigned i = 0; i < num_nonlocals; ++i) {
-    struct symbol *name = nonlocals[i];
-    if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_dunder_class(name) && scope.parent != NULL
-          && scope.parent->is_class) {
-        symbol_array_append_unique(&scope.freevars, name);
-        scope.parent->class_needs_class_cell = true;
-        continue;
-      }
-      diag_begin_error(s->d, class_stmt->base.location);
-      diag_frag(s->d, "no binding for nonlocal ");
-      diag_symbol(s->d, name);
-      diag_frag(s->d, " found");
-      diag_end(s->d);
-    } else {
-      symbol_array_append_unique(&scope.freevars, name);
-    }
-  }
-
-  struct symbol **uses = idynarray_data(&scope.uses);
-  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
-  for (unsigned i = 0; i < num_uses; ++i) {
-    struct symbol *name = uses[i];
-    if (symbol_array_contains(&scope.locals, name)
-        || symbol_array_contains(&scope.globals, name)
-        || symbol_array_contains(&scope.nonlocals, name)
-        || symbol_array_contains(&scope.freevars, name)) {
-      continue;
-    }
-    if (resolve_from_parent_scope(scope.parent, name)) {
-      symbol_array_append_unique(&scope.freevars, name);
-    }
-  }
+  analyze_children_bindings(s, &scope);
+  resolve_nonlocals(s, &scope, &class_stmt->base.location);
+  resolve_uses(&scope, /*check_class_binds=*/false);
 
   class_stmt->scope = scope_bindings_from_scope(s, &scope);
   class_stmt->needs_class_cell = scope.class_needs_class_cell;
@@ -2431,75 +2453,9 @@ static void analyze_function_bindings(struct cg_state *s, struct ast_def *def,
 
   analyze_statement_list_collect(&scope, def->body);
 
-  struct ast_class **class_children = idynarray_data(&scope.class_children);
-  unsigned           num_class_children
-      = idynarray_length(&scope.class_children, struct ast_class *);
-  for (unsigned i = 0; i < num_class_children; ++i) {
-    analyze_class_bindings(s, class_children[i], &scope);
-  }
-
-  struct ast_def **children = idynarray_data(&scope.children);
-  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
-  for (unsigned i = 0; i < num_children; ++i) {
-    analyze_function_bindings(s, children[i], &scope);
-  }
-
-  struct ast_lambda **lambda_children_fn
-      = idynarray_data(&scope.lambda_children);
-  unsigned num_lambda_children_fn
-      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
-  for (unsigned i = 0; i < num_lambda_children_fn; ++i) {
-    analyze_lambda_bindings_inner(s, lambda_children_fn[i], &scope);
-  }
-
-  struct ast_generator_expression **generator_children_fn
-      = idynarray_data(&scope.generator_children);
-  unsigned num_generator_children_fn = idynarray_length(
-      &scope.generator_children, struct ast_generator_expression *);
-  for (unsigned i = 0; i < num_generator_children_fn; ++i) {
-    analyze_generator_bindings_inner(s, generator_children_fn[i], &scope);
-  }
-
-  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
-  for (unsigned i = 0; i < num_nonlocals; ++i) {
-    struct symbol *name = nonlocals[i];
-    if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_dunder_class(name) && scope.parent != NULL
-          && scope.parent->is_class) {
-        symbol_array_append_unique(&scope.freevars, name);
-        scope.parent->class_needs_class_cell = true;
-        continue;
-      }
-      diag_begin_error(s->d, def->base.location);
-      diag_frag(s->d, "no binding for nonlocal ");
-      diag_symbol(s->d, name);
-      diag_frag(s->d, " found");
-      diag_end(s->d);
-    } else {
-      symbol_array_append_unique(&scope.freevars, name);
-    }
-  }
-
-  struct symbol **uses = idynarray_data(&scope.uses);
-  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
-  for (unsigned i = 0; i < num_uses; ++i) {
-    struct symbol *name = uses[i];
-    if (symbol_array_contains(&scope.locals, name)
-        || symbol_array_contains(&scope.globals, name)
-        || symbol_array_contains(&scope.nonlocals, name)
-        || symbol_array_contains(&scope.freevars, name)) {
-      continue;
-    }
-    if (resolve_from_parent_scope(scope.parent, name)) {
-      symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_dunder_class(name) && scope.parent != NULL
-               && scope.parent->is_class
-               && !class_explicitly_binds_class_symbol(scope.parent)) {
-      symbol_array_append_unique(&scope.freevars, name);
-      scope.parent->class_needs_class_cell = true;
-    }
-  }
+  analyze_children_bindings(s, &scope);
+  resolve_nonlocals(s, &scope, &def->base.location);
+  resolve_uses(&scope, /*check_class_binds=*/true);
 
   def->scope = scope_bindings_from_scope(s, &scope);
 
@@ -2524,69 +2480,9 @@ analyze_lambda_bindings_inner(struct cg_state *s, struct ast_lambda *lambda,
 
   analyze_expression(&scope, lambda->expression);
 
-  struct ast_class **class_children = idynarray_data(&scope.class_children);
-  unsigned           num_class_children
-      = idynarray_length(&scope.class_children, struct ast_class *);
-  for (unsigned i = 0; i < num_class_children; ++i) {
-    analyze_class_bindings(s, class_children[i], &scope);
-  }
-
-  struct ast_def **children = idynarray_data(&scope.children);
-  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
-  for (unsigned i = 0; i < num_children; ++i) {
-    analyze_function_bindings(s, children[i], &scope);
-  }
-
-  struct ast_lambda **lambda_children = idynarray_data(&scope.lambda_children);
-  unsigned            num_lambda_children
-      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
-  for (unsigned i = 0; i < num_lambda_children; ++i) {
-    analyze_lambda_bindings_inner(s, lambda_children[i], &scope);
-  }
-
-  struct ast_generator_expression **generator_children
-      = idynarray_data(&scope.generator_children);
-  unsigned num_generator_children = idynarray_length(
-      &scope.generator_children, struct ast_generator_expression *);
-  for (unsigned i = 0; i < num_generator_children; ++i) {
-    analyze_generator_bindings_inner(s, generator_children[i], &scope);
-  }
-
-  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
-  for (unsigned i = 0; i < num_nonlocals; ++i) {
-    struct symbol *name = nonlocals[i];
-    if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_dunder_class(name) && scope.parent != NULL
-          && scope.parent->is_class) {
-        symbol_array_append_unique(&scope.freevars, name);
-        scope.parent->class_needs_class_cell = true;
-        continue;
-      }
-    } else {
-      symbol_array_append_unique(&scope.freevars, name);
-    }
-  }
-
-  struct symbol **uses = idynarray_data(&scope.uses);
-  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
-  for (unsigned i = 0; i < num_uses; ++i) {
-    struct symbol *name = uses[i];
-    if (symbol_array_contains(&scope.locals, name)
-        || symbol_array_contains(&scope.globals, name)
-        || symbol_array_contains(&scope.nonlocals, name)
-        || symbol_array_contains(&scope.freevars, name)) {
-      continue;
-    }
-    if (resolve_from_parent_scope(scope.parent, name)) {
-      symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_dunder_class(name) && scope.parent != NULL
-               && scope.parent->is_class
-               && !class_explicitly_binds_class_symbol(scope.parent)) {
-      symbol_array_append_unique(&scope.freevars, name);
-      scope.parent->class_needs_class_cell = true;
-    }
-  }
+  analyze_children_bindings(s, &scope);
+  resolve_nonlocals(s, &scope, /*error_location=*/NULL);
+  resolve_uses(&scope, /*check_class_binds=*/true);
 
   lambda->scope = scope_bindings_from_scope(s, &scope);
 
@@ -2625,69 +2521,9 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
     analyze_expression(&scope, generator->item_value);
   }
 
-  struct ast_class **class_children = idynarray_data(&scope.class_children);
-  unsigned           num_class_children
-      = idynarray_length(&scope.class_children, struct ast_class *);
-  for (unsigned i = 0; i < num_class_children; ++i) {
-    analyze_class_bindings(s, class_children[i], &scope);
-  }
-
-  struct ast_def **children = idynarray_data(&scope.children);
-  unsigned num_children = idynarray_length(&scope.children, struct ast_def *);
-  for (unsigned i = 0; i < num_children; ++i) {
-    analyze_function_bindings(s, children[i], &scope);
-  }
-
-  struct ast_lambda **lambda_children = idynarray_data(&scope.lambda_children);
-  unsigned            num_lambda_children
-      = idynarray_length(&scope.lambda_children, struct ast_lambda *);
-  for (unsigned i = 0; i < num_lambda_children; ++i) {
-    analyze_lambda_bindings_inner(s, lambda_children[i], &scope);
-  }
-
-  struct ast_generator_expression **generator_children
-      = idynarray_data(&scope.generator_children);
-  unsigned num_generator_children = idynarray_length(
-      &scope.generator_children, struct ast_generator_expression *);
-  for (unsigned i = 0; i < num_generator_children; ++i) {
-    analyze_generator_bindings_inner(s, generator_children[i], &scope);
-  }
-
-  struct symbol **nonlocals = idynarray_data(&scope.nonlocals);
-  unsigned num_nonlocals = idynarray_length(&scope.nonlocals, struct symbol *);
-  for (unsigned i = 0; i < num_nonlocals; ++i) {
-    struct symbol *name = nonlocals[i];
-    if (!resolve_from_parent_scope(scope.parent, name)) {
-      if (is_dunder_class(name) && scope.parent != NULL
-          && scope.parent->is_class) {
-        symbol_array_append_unique(&scope.freevars, name);
-        scope.parent->class_needs_class_cell = true;
-        continue;
-      }
-    } else {
-      symbol_array_append_unique(&scope.freevars, name);
-    }
-  }
-
-  struct symbol **uses = idynarray_data(&scope.uses);
-  unsigned        num_uses = idynarray_length(&scope.uses, struct symbol *);
-  for (unsigned i = 0; i < num_uses; ++i) {
-    struct symbol *name = uses[i];
-    if (symbol_array_contains(&scope.locals, name)
-        || symbol_array_contains(&scope.globals, name)
-        || symbol_array_contains(&scope.nonlocals, name)
-        || symbol_array_contains(&scope.freevars, name)) {
-      continue;
-    }
-    if (resolve_from_parent_scope(scope.parent, name)) {
-      symbol_array_append_unique(&scope.freevars, name);
-    } else if (is_dunder_class(name) && scope.parent != NULL
-               && scope.parent->is_class
-               && !class_explicitly_binds_class_symbol(scope.parent)) {
-      symbol_array_append_unique(&scope.freevars, name);
-      scope.parent->class_needs_class_cell = true;
-    }
-  }
+  analyze_children_bindings(s, &scope);
+  resolve_nonlocals(s, &scope, /*error_location=*/NULL);
+  resolve_uses(&scope, /*check_class_binds=*/true);
 
   generator->scope = scope_bindings_from_scope(s, &scope);
 

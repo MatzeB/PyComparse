@@ -173,7 +173,7 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
       assert((size_t)flush_u == flush_size);
       unsigned new_size = s->fstring_debug.spilled_size + flush_u;
       if (new_size < s->fstring_debug.spilled_size) {
-        abort();
+        internal_error("scanner: f-string debug capture overflow");
       }
       if (new_size > s->fstring_debug.spilled_capacity) {
         s->fstring_debug.spilled_prefix = dynmemory_grow(
@@ -980,11 +980,8 @@ static void scan_float_fraction(struct scanner_state *s)
   char *endptr;
   errno = 0;
   double value = strtod(chars, &endptr);
-  if (endptr == chars || *endptr != '\0') {
-    abort(); // TODO: error handling
-  }
-  if (errno != 0 && errno != ERANGE) {
-    internal_error("scanner: strtod failed with unexpected errno");
+  if (endptr == chars || *endptr != '\0' || (errno != 0 && errno != ERANGE)) {
+    internal_error("scanner: invalid float literal parse state");
   }
   arena_free_to(strings, chars);
 
@@ -1056,11 +1053,9 @@ static void scan_number(struct scanner_state *s)
     char *endptr;
     errno = 0;
     double value = strtod(chars, &endptr);
-    if (endptr == chars || *endptr != '\0') {
-      abort(); // TODO: error handling
-    }
-    if (errno != 0 && errno != ERANGE) {
-      internal_error("scanner: strtod failed with unexpected errno");
+    if (endptr == chars || *endptr != '\0'
+        || (errno != 0 && errno != ERANGE)) {
+      internal_error("scanner: invalid imaginary literal parse state");
     }
     arena_free_to(strings, chars);
 
@@ -1094,19 +1089,14 @@ static void scan_number(struct scanner_state *s)
   unsigned long long value;
   errno = 0;
   value = strtoull(chars, &endptr, 10);
-  if (endptr == chars || *endptr != '\0') {
-    /* TODO: report error */
-    abort();
+  if (endptr == chars || *endptr != '\0' || (errno != 0 && errno != ERANGE)) {
+    internal_error("scanner: invalid decimal literal parse state");
   }
   if (errno == ERANGE) {
     s->token.u.object = scan_decimal_big_integer(s, chars);
     arena_free_to(strings, chars);
     s->token.kind = T_INTEGER;
     return;
-  }
-  if (errno != 0) {
-    /* TODO: report error */
-    abort();
   }
   if (value > (unsigned long long)INT64_MAX) {
     s->token.u.object = scan_decimal_big_integer(s, chars);
@@ -1147,7 +1137,8 @@ static enum scan_named_escape_status scan_named_escape(struct scanner_state *s,
     }
 
     if (length == UINT_MAX) {
-      abort();
+      free(name);
+      return SCAN_NAMED_ESCAPE_MALFORMED;
     }
     unsigned next_length = length + 1;
     if (next_length > capacity) {
@@ -1261,7 +1252,7 @@ static void scan_escape_sequence(struct scanner_state *s,
       codepoint = 0xfffc;
       goto append_codepoint;
     }
-    abort();
+    internal_error("scanner: invalid named escape status");
   case 'u':
     next_char(s);
     expected_hex_digits = 4;

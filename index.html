@@ -55,15 +55,15 @@
 
         <h3>Suite Summary</h3>
         <div class="table-wrap">
-          <table>
+          <table id="bench-summary-table">
             <thead>
               <tr>
-                <th>Suite</th>
-                <th>Files</th>
-                <th>CPython total (ms)</th>
-                <th>PyComparse total (ms)</th>
-                <th>Speedup</th>
-                <th>Notes</th>
+                <th class="sortable" data-sort="suite">Suite</th>
+                <th class="sortable" data-sort="files">Files</th>
+                <th class="sortable" data-sort="cpythonMs">CPython total (ms)</th>
+                <th class="sortable" data-sort="pycomparseMs">PyComparse total (ms)</th>
+                <th class="sortable" data-sort="speedup">Speedup</th>
+                <th class="sortable" data-sort="notes">Notes</th>
               </tr>
             </thead>
             <tbody id="bench-table"></tbody>
@@ -95,17 +95,17 @@
         </div>
         <div id="detail-status" class="status">Loading detailed results...</div>
         <div class="table-wrap">
-          <table>
+          <table id="bench-detail-table">
             <thead>
               <tr>
-                <th>File</th>
-                <th>Size (bytes)</th>
-                <th>CPython median (ms)</th>
-                <th>CPython stddev (ms)</th>
-                <th>PyComparse median (ms)</th>
-                <th>PyComparse stddev (ms)</th>
-                <th>Speedup</th>
-                <th>Status</th>
+                <th class="sortable" data-sort="file">File</th>
+                <th class="sortable" data-sort="sizeBytes">Size (bytes)</th>
+                <th class="sortable" data-sort="cpythonMedian">CPython median (ms)</th>
+                <th class="sortable" data-sort="cpythonStddev">CPython stddev (ms)</th>
+                <th class="sortable" data-sort="pycomparseMedian">PyComparse median (ms)</th>
+                <th class="sortable" data-sort="pycomparseStddev">PyComparse stddev (ms)</th>
+                <th class="sortable" data-sort="speedup">Speedup</th>
+                <th class="sortable" data-sort="status">Status</th>
               </tr>
             </thead>
             <tbody id="detail-table"></tbody>

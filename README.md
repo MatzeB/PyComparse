@@ -67,13 +67,19 @@ scripts/build_pgo_lto.sh
 Run the integration test script:
 
 ```sh
-./test.sh
+uv run scripts/test.py parser
 ```
 
 By default it uses `build/pycomparse`. Override with:
 
 ```sh
-PARSER_TEST=build2/pycomparse ./test.sh
+uv run scripts/test.py parser --compiler build2/pycomparse
+```
+
+Run scanner tokenization tests with:
+
+```sh
+uv run scripts/test.py scan
 ```
 ### Project Layout
 

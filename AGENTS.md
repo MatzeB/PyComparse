@@ -50,9 +50,18 @@ The helper performs:
 
 ### Testing
 ```bash
-uv run ./test.sh
+uv run scripts/test.py parser
 ```
-This script runs the parser against test files in `test/` and compares output with reference Python execution. It also tests error cases in `test/errors/` and verifies expected error messages.
+This runner executes parser integration tests in `test/`, compares output with
+reference Python execution, checks expected diagnostics in `test/errors/`, and
+includes `test/compile_only/`.
+Use `--compiler <path>` to override the compiler binary.
+
+Scanner tokenization checks can be run with:
+```bash
+uv run scripts/test.py scan
+```
+Note: scan mode currently has known pre-existing mismatches in this repository.
 
 ### Code Quality
 ```bash
@@ -64,7 +73,7 @@ suite before finishing:
 
 ```bash
 ./scripts/format.sh
-uv run ./test.sh
+uv run scripts/test.py parser
 ```
 
 ### Commit Messages
@@ -92,13 +101,13 @@ build/pycomparse --out /tmp/output.pyc test/simple.py && uv run python /tmp/outp
 
 ### Compiling and print bytecode for reference compiler
 ```bash
-uv run utils/decode.py /tmp/test.py
+uv run scripts/decode.py /tmp/test.py
 ```
 
 ### Compile and print bytecode for PyComparse
 - remember to build first
 ```bash
-build/pycomparse --out /tmp/test.pyc /tmp/test.py && uv run utils/decode.py /tmp/test.pyc
+build/pycomparse --out /tmp/test.pyc /tmp/test.py && uv run scripts/decode.py /tmp/test.pyc
 ```
 
 ## Architecture

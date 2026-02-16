@@ -1179,9 +1179,10 @@ static void scan_escape_sequence(struct scanner_state *s,
   assert(s->c == '\\');
   next_char(s);
 
-  char     decoded_single;
-  uint32_t codepoint;
-  int      expected_hex_digits;
+  char        decoded_single;
+  uint32_t    codepoint;
+  int         expected_hex_digits;
+  const char *hex_escape = NULL;
   switch (s->c) {
   case '\\':
   case '\'':
@@ -1227,14 +1228,11 @@ static void scan_escape_sequence(struct scanner_state *s,
       codepoint <<= 3;
       codepoint |= s->c - '0';
     }
-    if (codepoint > 0377) {
-      /* TODO report warning */
-      abort();
-    }
     goto append_codepoint;
   case 'x':
     next_char(s);
     expected_hex_digits = 2;
+    hex_escape = "\\x";
     goto parse_hex;
   case 'N':
     if (!is_unicode) {
@@ -1263,10 +1261,12 @@ static void scan_escape_sequence(struct scanner_state *s,
   case 'u':
     next_char(s);
     expected_hex_digits = 4;
+    hex_escape = "\\u";
     goto parse_hex;
   case 'U':
     next_char(s);
     expected_hex_digits = 8;
+    hex_escape = "\\U";
     goto parse_hex;
   case '\r':
     next_char(s);
@@ -1291,9 +1291,14 @@ static void scan_escape_sequence(struct scanner_state *s,
       } else if ('A' <= s->c && s->c <= 'F') {
         digit = 10 + (s->c - 'A');
       } else {
-        abort();
-        /* TODO: report invalid hex digit */
-        break;
+        diag_begin_error(s->d, scanner_location(s));
+        diag_frag(s->d, "malformed ");
+        assert(hex_escape != NULL);
+        diag_frag(s->d, hex_escape);
+        diag_frag(s->d, " character escape");
+        diag_end(s->d);
+        codepoint = 0xfffc;
+        goto append_codepoint;
       }
       next_char(s);
       codepoint <<= 4;

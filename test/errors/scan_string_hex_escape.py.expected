@@ -1,0 +1,5 @@
+test/errors/scan_string_hex_escape.py:1 error: malformed \x character escape
+test/errors/scan_string_hex_escape.py:2 error: malformed \x character escape
+test/errors/scan_string_hex_escape.py:3 error: malformed \u character escape
+test/errors/scan_string_hex_escape.py:4 error: malformed \u character escape
+test/errors/scan_string_hex_escape.py:5 error: malformed \U character escape

@@ -538,9 +538,6 @@ void emit_make_function_begin(struct cg_state               *s,
 {
   unsigned num_parameters = parameter_shape->num_parameters;
   memset(state, 0, sizeof(*state));
-  if (unreachable(s)) {
-    unimplemented("unreachable def");
-  }
 
   emit_parameter_defaults(s, state, parameter_shape, parameters);
   emit_function_annotations(s, state, parameter_shape, parameters,

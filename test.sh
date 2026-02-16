@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 
+# Run this script with `uv run ./test.sh` so `python3` resolves to Python 3.8.
+
 PARSER_TEST="${PARSER_TEST:-build/pycomparse}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 total_tests=0
 failed_tests=0
+
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 8) else 1)'; then
+    echo "error: test.sh requires Python 3.8 (found: $(python3 --version 2>&1))" >&2
+    echo "hint: run with 'uv run ./test.sh'" >&2
+    exit 2
+fi
 
 tmp_base="$(mktemp -d "${TMPDIR%/}/pycomparse-test.XXXXXX")"
 trap 'rm -rf "$tmp_base"' EXIT

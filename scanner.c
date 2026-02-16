@@ -161,6 +161,11 @@ struct scan_decimal_integer_result {
   bool leading_zero_nonzero;
 };
 
+/* Refill the read buffer from the input file.  The buffer is a fixed
+ * allocation (s->read_buffer) that is reused across refills, so pointers
+ * into it remain valid after a refill -- only the data changes.  This
+ * property is relied upon by lookahead/rollback code (scan_starts_exponent_
+ * part, pushback_char) that restores s->p via pointer arithmetic. */
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
@@ -878,6 +883,8 @@ static bool scan_starts_exponent_part(struct scanner_state *s)
 
   bool starts_exponent = ('0' <= s->c && s->c <= '9');
 
+  /* Roll back consumed lookahead chars.  This is safe because s->p points
+   * into s->read_buffer, a fixed allocation that persists across refills. */
   if (consumed > 0) {
     s->p -= consumed;
   }

@@ -105,7 +105,13 @@ int main(int argc, char **argv)
       had_errors = true;
     } else {
       write_module(out, code);
-      fclose(out);
+      bool write_failed = ferror(out);
+      write_failed |= fclose(out) != 0;
+      if (write_failed) {
+        fprintf(stderr, "Failed to write '%s': %s\n", out_filename,
+                strerror(errno));
+        had_errors = true;
+      }
     }
   }
 

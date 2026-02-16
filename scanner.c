@@ -582,7 +582,7 @@ static bool end_number_literal(struct scanner_state *s, uint64_t value,
       diag_frag(s->d, "invalid digit for ");
       diag_frag(s->d, literal_kind);
       diag_frag(s->d, " literal: ");
-      diag_quoted_char(s->d, s->c);
+      diag_quoted_char(s->d, (char)s->c);
       diag_end(s->d);
       *had_error = true;
     }
@@ -830,7 +830,7 @@ scan_decimal_integer(struct scanner_state *s, struct arena *arena, char first)
         if (!result.had_error) {
           diag_begin_error(s->d, scanner_location(s));
           diag_frag(s->d, "invalid digit for decimal literal: ");
-          diag_quoted_char(s->d, s->c);
+          diag_quoted_char(s->d, (char)s->c);
           diag_end(s->d);
           result.had_error = true;
         }
@@ -2447,7 +2447,7 @@ begin_new_line:
       if (s->token.kind != T_INVALID) {
         diag_begin_error(s->d, scanner_location(s));
         diag_frag(s->d, "Unexpected input char ");
-        diag_quoted_char(s->d, invalid_c);
+        diag_quoted_char(s->d, (char)invalid_c);
         diag_end(s->d);
       }
       s->token.kind = T_INVALID;

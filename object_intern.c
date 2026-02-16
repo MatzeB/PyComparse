@@ -71,7 +71,6 @@ static void object_intern_resize_strings(struct object_intern *s,
 void object_intern_init(struct object_intern *s)
 {
   memset(s, 0, sizeof(*s));
-  s->objects = object_new_list(&s->arena);
 
   unsigned num_string_buckets = 4096;
   hash_set_init(&s->string_set, num_string_buckets);
@@ -91,6 +90,7 @@ void object_intern_init(struct object_intern *s)
 
 void object_intern_free(struct object_intern *s)
 {
+  object_array_free(&s->objects);
   free(s->string_buckets);
   arena_free(&s->arena);
 }
@@ -153,7 +153,7 @@ union object *object_intern_string(struct object_intern *s,
   }
 
   union object *string = object_new_string(&s->arena, type, length, chars);
-  object_list_append(s->objects, string);
+  object_array_append(&s->objects, string);
   object_intern_insert_string_bucket(s, string, hash);
   return string;
 }
@@ -169,8 +169,8 @@ union object *object_intern_cstring(struct object_intern *s,
 union object *object_intern_float(struct object_intern *s, double value)
 {
   // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *object = object_array_at(&s->objects, i);
     if (object_type(object) != OBJECT_FLOAT) continue;
     double object_value = object_float_value(object);
     if (memcmp(&object_value, &value, sizeof(value)) == 0) {
@@ -179,7 +179,7 @@ union object *object_intern_float(struct object_intern *s, double value)
   }
 
   union object *result = object_new_float(&s->arena, value);
-  object_list_append(s->objects, result);
+  object_array_append(&s->objects, result);
   return result;
 }
 
@@ -187,8 +187,8 @@ union object *object_intern_complex(struct object_intern *s, double real,
                                     double imag)
 {
   // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *object = object_array_at(&s->objects, i);
     if (object_type(object) != OBJECT_COMPLEX) continue;
     double object_real = object_complex_real(object);
     double object_imag = object_complex_imag(object);
@@ -199,7 +199,7 @@ union object *object_intern_complex(struct object_intern *s, double real,
   }
 
   union object *result = object_new_complex(&s->arena, real, imag);
-  object_list_append(s->objects, result);
+  object_array_append(&s->objects, result);
   return result;
 }
 
@@ -207,8 +207,8 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
 {
   assert(value != INT64_MIN);
   // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *object = object_array_at(&s->objects, i);
     if (object_type(object) == OBJECT_INT
         && object_int_value(object) == value) {
       return object;
@@ -216,7 +216,7 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
   }
 
   union object *result = object_new_int(&s->arena, value);
-  object_list_append(s->objects, result);
+  object_array_append(&s->objects, result);
   return result;
 }
 
@@ -233,8 +233,8 @@ union object *object_intern_big_int(struct object_intern   *s,
   }
 
   // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *object = object_array_at(&s->objects, i);
     if (object_type(object) != OBJECT_BIG_INT) continue;
     if (object->big_int.num_pydigits != num_pydigits) continue;
     if (memcmp(object->big_int.pydigits, pydigits,
@@ -245,7 +245,7 @@ union object *object_intern_big_int(struct object_intern   *s,
   }
 
   union object *result = object_new_big_int(&s->arena, num_pydigits, pydigits);
-  object_list_append(s->objects, result);
+  object_array_append(&s->objects, result);
   return result;
 }
 
@@ -262,8 +262,8 @@ union object *object_intern_tuple_end(struct object_intern *s,
   union object *tuple_obj = object_new_tuple_end(tuple);
 
   // TODO: hashmap
-  for (uint32_t i = 0, l = object_list_length(s->objects); i < l; i++) {
-    union object *object = object_list_at(s->objects, i);
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *object = object_array_at(&s->objects, i);
     if (object_type(object) != OBJECT_TUPLE) continue;
     uint32_t length = object_tuple_length(tuple_obj);
     if (object_tuple_length(object) != length) continue;
@@ -282,6 +282,6 @@ union object *object_intern_tuple_end(struct object_intern *s,
     }
   }
 
-  object_list_append(s->objects, tuple_obj);
+  object_array_append(&s->objects, tuple_obj);
   return tuple_obj;
 }

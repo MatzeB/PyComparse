@@ -23,44 +23,61 @@ static union object *object_allocate_zero_(struct arena *arena, size_t size,
 #define object_allocate_zero(arena, type, type_id)                            \
   object_allocate_zero_((arena), sizeof(type), type_id)
 
-union object *object_new_list(struct arena *arena)
+static void object_array_reserve(struct object_array *array, unsigned size)
 {
-  return object_allocate_zero(arena, struct object_list, OBJECT_LIST);
-}
-
-static void object_list_grow(struct object_list *olist, unsigned size)
-{
-  olist->items = (union object **)dynmemory_grow(
-      olist->items, &olist->capacity, size, sizeof(olist->items[0]));
-  if (olist->items == NULL) {
+  array->items = (union object **)dynmemory_grow(
+      array->items, &array->capacity, size, sizeof(array->items[0]));
+  if (array->items == NULL) {
     internal_error("out of memory");
   }
 }
 
-void object_list_append(union object *list, union object *object)
+void object_array_append(struct object_array *array, union object *object)
 {
-  assert(list->type == OBJECT_LIST);
-  struct object_list *olist = &list->list;
-  unsigned            length = olist->length;
-  unsigned            new_length = length + 1;
-  if (UNLIKELY(new_length >= olist->capacity)) {
-    object_list_grow(olist, new_length);
+  unsigned length = array->length;
+  unsigned new_length = length + 1;
+  if (UNLIKELY(new_length >= array->capacity)) {
+    object_array_reserve(array, new_length);
   }
-  olist->items[length] = object;
-  olist->length = new_length;
+  array->items[length] = object;
+  array->length = new_length;
 }
 
-union object *object_list_at(union object *list, uint32_t index)
+union object *object_array_at(struct object_array *array, uint32_t index)
 {
-  assert(list->type == OBJECT_LIST);
-  struct object_list *olist = &list->list;
-  assert(index < olist->length);
-  return olist->items[index];
+  assert(index < array->length);
+  return array->items[index];
 }
 
-uint32_t object_list_length(union object *list)
+void object_array_set_at(struct object_array *array, uint32_t index,
+                         union object *object)
 {
-  return list->list.length;
+  assert(index < array->length);
+  array->items[index] = object;
+}
+
+uint32_t object_array_length(const struct object_array *array)
+{
+  return array->length;
+}
+
+union object *object_tuple_from_object_array(struct arena        *arena,
+                                             struct object_array *array)
+{
+  uint32_t           length = array->length;
+  struct tuple_prep *prep = object_new_tuple_begin(arena, length);
+  for (uint32_t i = 0; i < length; ++i) {
+    object_new_tuple_set_at(prep, i, array->items[i]);
+  }
+  return object_new_tuple_end(prep);
+}
+
+void object_array_free(struct object_array *array)
+{
+  free(array->items);
+  array->items = NULL;
+  array->length = 0;
+  array->capacity = 0;
 }
 
 union object *object_new_code(struct arena *arena)

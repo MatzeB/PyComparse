@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "adt/dynmemory.h"
 #include "object.h"
 #include "object_types.h"
 #include "opcodes.h"
@@ -75,17 +74,6 @@ static void write_header(struct writer_state *s)
 
 static void write_object(struct writer_state *s, const union object *object);
 
-static void write_list(struct writer_state *s, const struct object_list *list)
-{
-  write_char(s, OBJECT_LIST);
-  write_uint32(s, list->length);
-  uint32_t length = list->length;
-  assert(length < UINT32_MAX);
-  for (uint32_t i = 0; i < length; ++i) {
-    write_object(s, list->items[i]);
-  }
-}
-
 static void write_tuple_(struct writer_state *s, uint32_t length,
                          union object *const *items)
 {
@@ -105,13 +93,6 @@ static void write_tuple(struct writer_state       *s,
                         const struct object_tuple *tuple)
 {
   write_tuple_(s, tuple->length, tuple->items);
-}
-
-static void write_list_as_tuple(struct writer_state *s,
-                                const union object  *list)
-{
-  assert(list->type == OBJECT_LIST);
-  write_tuple_(s, list->list.length, list->list.items);
 }
 
 static bool is_ascii(const char *chars, uint32_t length)
@@ -232,15 +213,11 @@ static void write_code(struct writer_state *s, const struct object_code *code)
   write_uint32(s, code->stacksize);
   write_uint32(s, code->flags);
   write_object(s, code->code);
-  write_list_as_tuple(s, code->consts);
-  write_list_as_tuple(s, code->names);
-  write_list_as_tuple(s, code->varnames);
-  write_list_as_tuple(s, code->freevars);
-  if (code->cellvars->type == OBJECT_LIST) {
-    write_list_as_tuple(s, code->cellvars);
-  } else {
-    write_object(s, code->cellvars);
-  }
+  write_object(s, code->consts);
+  write_object(s, code->names);
+  write_object(s, code->varnames);
+  write_object(s, code->freevars);
+  write_object(s, code->cellvars);
   write_object(s, code->filename);
   write_object(s, code->name);
   write_uint32(s, code->firstlineno);
@@ -259,9 +236,6 @@ static void write_object(struct writer_state *s, const union object *object)
   case OBJECT_FALSE:
   case OBJECT_ELLIPSIS:
     write_char(s, object->type);
-    break;
-  case OBJECT_LIST:
-    write_list(s, &object->list);
     break;
   case OBJECT_TUPLE:
     write_tuple(s, &object->tuple);

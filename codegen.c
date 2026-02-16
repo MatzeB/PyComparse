@@ -323,12 +323,6 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   struct code_state *code = &s->code;
   memset(code, 0, sizeof(*code));
   arena_init(&code->opcodes);
-  struct arena *arena = object_intern_arena(&s->objects);
-  code->consts = object_new_list(arena);
-  code->names = object_new_list(arena);
-  code->varnames = object_new_list(arena);
-  code->freevars = object_new_list(arena);
-  code->cellvars = object_new_list(arena);
   if (s->next_scope_id == UINT32_MAX) {
     internal_error("Ran out of scope identifiers");
   }
@@ -339,8 +333,8 @@ void cg_code_begin(struct cg_state *s, bool in_function)
 
   if (in_function) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
-    object_list_append(code->consts,
-                       object_intern_singleton(&s->objects, OBJECT_NONE));
+    object_array_append(&code->consts,
+                        object_intern_singleton(&s->objects, OBJECT_NONE));
   }
 
   struct basic_block *first = cg_block_allocate(s);
@@ -367,11 +361,11 @@ static void cg_ensure_const_index_cache(struct cg_state *s)
   if (cache->buckets != NULL) {
     return;
   }
-  union object *consts = s->code.consts;
-  uint32_t      length = object_list_length(consts);
+  struct object_array *consts = &s->code.consts;
+  uint32_t             length = object_array_length(consts);
   code_index_cache_init(cache, length * 2u);
   for (uint32_t i = 0; i < length; ++i) {
-    union object *object = object_list_at(consts, i);
+    union object *object = object_array_at(consts, i);
     code_index_cache_insert_raw(cache, object, pointer_hash(object), i);
   }
 }
@@ -382,11 +376,11 @@ static void cg_ensure_name_index_cache(struct cg_state *s)
   if (cache->buckets != NULL) {
     return;
   }
-  union object *names = s->code.names;
-  uint32_t      length = object_list_length(names);
+  struct object_array *names = &s->code.names;
+  uint32_t             length = object_array_length(names);
   code_index_cache_init(cache, length * 2u);
   for (uint32_t i = 0; i < length; ++i) {
-    union object *object = object_list_at(names, i);
+    union object *object = object_array_at(names, i);
     code_index_cache_insert_raw(cache, object, pointer_hash(object), i);
   }
 }
@@ -503,8 +497,8 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   pop_symbol_infos(s);
 
-  if (object_list_length(s->code.freevars) == 0
-      && object_list_length(s->code.cellvars) == 0) {
+  if (object_array_length(&s->code.freevars) == 0
+      && object_array_length(&s->code.cellvars) == 0) {
     s->code.flags |= CO_NOFREE;
   } else {
     s->code.flags &= ~CO_NOFREE;
@@ -727,7 +721,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.argcount = s->code.argcount;
   object->code.posonlyargcount = s->code.positional_only_argcount;
   object->code.kwonlyargcount = s->code.keyword_only_argcount;
-  object->code.nlocals = object_list_length(s->code.varnames);
+  object->code.nlocals = object_array_length(&s->code.varnames);
   unsigned stacksize = s->code.max_stacksize;
   if (code_uses_setup_finally(first_block)) {
     /*
@@ -741,11 +735,19 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   object->code.flags = s->code.flags;
   object->code.firstlineno = first_lineno;
   object->code.code = code;
-  object->code.consts = s->code.consts;
-  object->code.names = s->code.names;
-  object->code.varnames = s->code.varnames;
-  object->code.freevars = s->code.freevars;
-  object->code.cellvars = s->code.cellvars;
+  object->code.consts = object_tuple_from_object_array(arena, &s->code.consts);
+  object->code.names = object_tuple_from_object_array(arena, &s->code.names);
+  object->code.varnames
+      = object_tuple_from_object_array(arena, &s->code.varnames);
+  object->code.freevars
+      = object_tuple_from_object_array(arena, &s->code.freevars);
+  object->code.cellvars
+      = object_tuple_from_object_array(arena, &s->code.cellvars);
+  object_array_free(&s->code.consts);
+  object_array_free(&s->code.names);
+  object_array_free(&s->code.varnames);
+  object_array_free(&s->code.freevars);
+  object_array_free(&s->code.cellvars);
   object->code.filename = filename;
   object->code.name = name_string;
   object->code.lnotab = lnotab;
@@ -797,6 +799,11 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
 void cg_free(struct cg_state *s)
 {
   code_state_free_index_caches(&s->code);
+  object_array_free(&s->code.consts);
+  object_array_free(&s->code.names);
+  object_array_free(&s->code.varnames);
+  object_array_free(&s->code.freevars);
+  object_array_free(&s->code.cellvars);
   arena_free(&s->code.opcodes);
   object_intern_free(&s->objects);
   stack_free(&s->stack);
@@ -809,9 +816,9 @@ bool cg_in_function(struct cg_state *s)
 
 unsigned cg_register_unique_object(struct cg_state *s, union object *object)
 {
-  union object *consts = s->code.consts;
-  object_list_append(consts, object);
-  uint32_t index = object_list_length(consts) - 1;
+  struct object_array *consts = &s->code.consts;
+  object_array_append(consts, object);
+  uint32_t index = object_array_length(consts) - 1;
   if (s->code.const_index_cache.buckets != NULL) {
     code_index_cache_insert(&s->code.const_index_cache, object,
                             pointer_hash(object), index);
@@ -844,16 +851,16 @@ void cg_set_function_docstring(struct cg_state *s, union object *nullable doc)
   if (doc == NULL) {
     doc = object_intern_singleton(&s->objects, OBJECT_NONE);
   }
-  union object *consts = s->code.consts;
-  assert(object_list_length(consts) > 0);
-  consts->list.items[0] = doc;
+  struct object_array *consts = &s->code.consts;
+  assert(object_array_length(consts) > 0);
+  object_array_set_at(consts, 0, doc);
 }
 
 static unsigned cg_append_name(struct cg_state *s, union object *string)
 {
-  union object *names = s->code.names;
-  object_list_append(names, string);
-  uint32_t index = object_list_length(names) - 1;
+  struct object_array *names = &s->code.names;
+  object_array_append(names, string);
+  uint32_t index = object_array_length(names) - 1;
   if (s->code.name_index_cache.buckets != NULL) {
     code_index_cache_insert(&s->code.name_index_cache, string,
                             pointer_hash(string), index);
@@ -881,30 +888,30 @@ unsigned cg_register_name(struct cg_state *s, struct symbol *name)
 
 static unsigned cg_append_varname(struct cg_state *s, struct symbol *name)
 {
-  const char   *cstring = name->string;
-  union object *varnames = s->code.varnames;
-  union object *string = object_intern_cstring(&s->objects, cstring);
-  object_list_append(varnames, string);
-  return object_list_length(varnames) - 1;
+  const char          *cstring = name->string;
+  struct object_array *varnames = &s->code.varnames;
+  union object        *string = object_intern_cstring(&s->objects, cstring);
+  object_array_append(varnames, string);
+  return object_array_length(varnames) - 1;
 }
 
 static unsigned cg_append_freevar(struct cg_state *s, struct symbol *name)
 {
-  const char   *cstring = name->string;
-  union object *freevars = s->code.freevars;
-  union object *string = object_intern_cstring(&s->objects, cstring);
-  object_list_append(freevars, string);
-  return object_list_length(freevars) - 1;
+  const char          *cstring = name->string;
+  struct object_array *freevars = &s->code.freevars;
+  union object        *string = object_intern_cstring(&s->objects, cstring);
+  object_array_append(freevars, string);
+  return object_array_length(freevars) - 1;
 }
 
 unsigned cg_register_freevar(struct cg_state *s, struct symbol *name)
 {
-  const char   *cstring = name->string;
-  size_t        length = strlen(cstring);
-  union object *freevars = s->code.freevars;
-  for (unsigned i = 0, num_freevars = object_list_length(freevars);
+  const char          *cstring = name->string;
+  size_t               length = strlen(cstring);
+  struct object_array *freevars = &s->code.freevars;
+  for (unsigned i = 0, num_freevars = object_array_length(freevars);
        i < num_freevars; ++i) {
-    const union object *object = object_list_at(freevars, i);
+    const union object *object = object_array_at(freevars, i);
     if (object->type != OBJECT_STRING) continue;
     const struct object_string *string = &object->string;
     if (string->length == length
@@ -917,11 +924,11 @@ unsigned cg_register_freevar(struct cg_state *s, struct symbol *name)
 
 static unsigned cg_append_cellvar(struct cg_state *s, struct symbol *name)
 {
-  const char   *cstring = name->string;
-  union object *cellvars = s->code.cellvars;
-  union object *string = object_intern_cstring(&s->objects, cstring);
-  object_list_append(cellvars, string);
-  return object_list_length(cellvars) - 1;
+  const char          *cstring = name->string;
+  struct object_array *cellvars = &s->code.cellvars;
+  union object        *string = object_intern_cstring(&s->objects, cstring);
+  object_array_append(cellvars, string);
+  return object_array_length(cellvars) - 1;
 }
 
 static struct symbol_info *cg_symbol_info(struct cg_state *s,
@@ -1023,23 +1030,23 @@ unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
     case SYMBOL_CELL:
       return info->index;
     case SYMBOL_NONLOCAL:
-      return object_list_length(s->code.cellvars) + info->index;
+      return object_array_length(&s->code.cellvars) + info->index;
     default:
       break;
     }
   }
 
-  union object *freevars = s->code.freevars;
-  const char   *cstring = name->string;
-  size_t        length = strlen(cstring);
-  for (unsigned i = 0, num_freevars = object_list_length(freevars);
+  struct object_array *freevars = &s->code.freevars;
+  const char          *cstring = name->string;
+  size_t               length = strlen(cstring);
+  for (unsigned i = 0, num_freevars = object_array_length(freevars);
        i < num_freevars; ++i) {
-    const union object *object = object_list_at(freevars, i);
+    const union object *object = object_array_at(freevars, i);
     if (object->type != OBJECT_STRING) continue;
     const struct object_string *string = &object->string;
     if (string->length == length
         && memcmp(string->chars, cstring, length) == 0) {
-      return object_list_length(s->code.cellvars) + i;
+      return object_array_length(&s->code.cellvars) + i;
     }
   }
   internal_error("symbol is not a closure variable");
@@ -1064,16 +1071,16 @@ void cg_load(struct cg_state *s, struct symbol *name)
     return;
   case SYMBOL_CELL:
     if (is_class_body_class_symbol(s, name)) {
-      union object *freevars = s->code.freevars;
-      size_t        length = strlen(name->string);
-      for (unsigned i = 0, n = object_list_length(freevars); i < n; ++i) {
-        const union object *object = object_list_at(freevars, i);
+      struct object_array *freevars = &s->code.freevars;
+      size_t               length = strlen(name->string);
+      for (unsigned i = 0, n = object_array_length(freevars); i < n; ++i) {
+        const union object *object = object_array_at(freevars, i);
         if (object->type != OBJECT_STRING) continue;
         const struct object_string *string = &object->string;
         if (string->length == length
             && memcmp(string->chars, name->string, length) == 0) {
           cg_op_push1(s, OPCODE_LOAD_CLASSDEREF,
-                      object_list_length(s->code.cellvars) + i);
+                      object_array_length(&s->code.cellvars) + i);
           return;
         }
       }
@@ -1086,7 +1093,7 @@ void cg_load(struct cg_state *s, struct symbol *name)
   case SYMBOL_NONLOCAL:
     cg_op_push1(
         s, s->code.in_class_body ? OPCODE_LOAD_CLASSDEREF : OPCODE_LOAD_DEREF,
-        object_list_length(s->code.cellvars) + info->index);
+        object_array_length(&s->code.cellvars) + info->index);
     return;
   }
   internal_error("load from invalid symbol type");
@@ -1120,7 +1127,7 @@ void cg_store(struct cg_state *s, struct symbol *name)
     return;
   case SYMBOL_NONLOCAL:
     cg_op_pop1(s, OPCODE_STORE_DEREF,
-               object_list_length(s->code.cellvars) + info->index);
+               object_array_length(&s->code.cellvars) + info->index);
     return;
   }
   internal_error("store to invalid symbol type");
@@ -1154,7 +1161,7 @@ void cg_delete(struct cg_state *s, struct symbol *name)
     return;
   case SYMBOL_NONLOCAL:
     cg_op(s, OPCODE_DELETE_DEREF,
-          object_list_length(s->code.cellvars) + info->index);
+          object_array_length(&s->code.cellvars) + info->index);
     return;
   }
   internal_error("del invalid symbol type");

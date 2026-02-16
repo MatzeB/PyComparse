@@ -18,6 +18,7 @@
 #include "codegen_statement.h"
 #include "diagnostics.h"
 #include "object.h"
+#include "object_intern.h"
 #include "object_types.h"
 #include "scanner.h"
 #include "symbol_table.h"
@@ -705,6 +706,7 @@ static union ast_expression *parse_arguments(struct parser_state  *s,
   expression->call.num_arguments = num_arguments;
   memcpy(expression->call.arguments, idynarray_data(&arguments),
          arguments_size);
+  idynarray_free(&arguments);
   return expression;
 }
 

@@ -72,9 +72,6 @@ static bool object_constant_truth_value(const union object *object,
   case OBJECT_TUPLE:
     *truth = object_tuple_length(object) != 0;
     return true;
-  case OBJECT_LIST:
-    *truth = object_list_length((union object *)object) != 0;
-    return true;
   default:
     return false;
   }

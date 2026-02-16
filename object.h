@@ -8,6 +8,7 @@
 ASSUME_NONNULL_BEGIN
 
 struct arena;
+struct object_array;
 struct tuple_prep; /* deliberately incomplete */
 union object;
 
@@ -48,7 +49,6 @@ enum object_type {
   OBJECT_STRING = 'u',
   OBJECT_CODE = 'c',
   OBJECT_TUPLE = '(',
-  OBJECT_LIST = '[',
   OBJECT_ELLIPSIS = '.',
   OBJECT_INT = 'i',
   OBJECT_BIG_INT = 'I',
@@ -56,7 +56,6 @@ enum object_type {
 
 union object *object_new_singleton(struct arena *arena, enum object_type type);
 union object *object_new_code(struct arena *arena);
-union object *object_new_list(struct arena *arena);
 union object *object_new_string(struct arena *arena, enum object_type type,
                                 uint32_t length, const char *chars);
 union object *object_new_float(struct arena *arena, double value);
@@ -86,9 +85,15 @@ double  object_complex_real(const union object *object);
 double  object_complex_imag(const union object *object);
 int64_t object_int_value(const union object *object);
 
-void          object_list_append(union object *list, union object *object);
-union object *object_list_at(union object *list, uint32_t index);
-uint32_t      object_list_length(union object *list);
+void object_array_append(struct object_array *array, union object *object);
+union object *object_array_at(struct object_array *array, uint32_t index);
+void          object_array_set_at(struct object_array *array, uint32_t index,
+                                  union object *object);
+uint32_t      object_array_length(const struct object_array *array);
+union object      *
+object_tuple_from_object_array(struct arena                *arena,
+                                    struct object_array *nonnull array);
+void object_array_free(struct object_array *array);
 
 uint32_t object_code_argcount(const union object *object);
 uint32_t object_code_posonlyargcount(const union object *object);

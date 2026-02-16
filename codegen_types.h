@@ -55,11 +55,11 @@ struct code_index_cache {
 
 struct code_state {
   struct arena                           opcodes;
-  union object                          *consts;
-  union object                          *names;
-  union object                          *varnames;
-  union object                          *freevars;
-  union object                          *cellvars;
+  struct object_array                    consts;
+  struct object_array                    names;
+  struct object_array                    varnames;
+  struct object_array                    freevars;
+  struct object_array                    cellvars;
   struct code_index_cache                const_index_cache;
   struct code_index_cache                name_index_cache;
   struct basic_block                    *current_block;

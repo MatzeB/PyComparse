@@ -11,6 +11,12 @@ struct object_base {
   char type;
 };
 
+struct object_array {
+  uint32_t                         length;
+  uint32_t                         capacity;
+  union object * nonnull * nonnull items;
+};
+
 struct object_code {
   struct object_base base;
   uint32_t           argcount;
@@ -54,13 +60,6 @@ struct object_big_int {
   const uint16_t *nullable pydigits;
 };
 
-struct object_list {
-  struct object_base               base;
-  uint32_t                         length;
-  uint32_t                         capacity;
-  union object * nonnull * nonnull items;
-};
-
 struct object_string {
   struct object_base base;
   uint32_t           length;
@@ -82,7 +81,6 @@ union object {
   struct object_float   float_obj;
   struct object_int     int_obj;
   struct object_big_int big_int;
-  struct object_list    list;
   struct object_string  string;
   struct object_tuple   tuple;
 };

@@ -2446,7 +2446,7 @@ begin_new_line:
     invalid_char:
       if (s->token.kind != T_INVALID) {
         diag_begin_error(s->d, scanner_location(s));
-        diag_frag(s->d, "Unexpected input char ");
+        diag_frag(s->d, "unexpected input char ");
         diag_quoted_char(s->d, (char)invalid_c);
         diag_end(s->d);
       }

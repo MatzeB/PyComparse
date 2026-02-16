@@ -577,7 +577,6 @@ void emit_make_function_begin(struct cg_state               *s,
     }
     if (parameter->variant == PARAMETER_STAR_STAR) {
       assert(variable_keyword_arguments_name == NULL);
-      s->code.flags |= CO_VARKEYWORDS;
       variable_keyword_arguments_name = name;
       continue;
     }

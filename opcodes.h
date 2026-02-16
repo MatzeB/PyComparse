@@ -158,7 +158,7 @@ enum format_value_arg {
   FORMAT_VALUE_FMT_SPEC = 0x04,
 };
 
-static inline bool is_absjump(uint32_t opcode)
+static inline bool is_absjump(uint8_t opcode)
 {
   switch (opcode) {
   case OPCODE_JUMP_ABSOLUTE:

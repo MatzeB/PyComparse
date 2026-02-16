@@ -754,6 +754,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
 
   code_state_free_index_caches(&s->code);
   free(s->code.lnotab_marks);
+  s->code.lnotab_marks = NULL;
   arena_free(&s->code.opcodes);
   return object;
 }
@@ -799,6 +800,7 @@ void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
 void cg_free(struct cg_state *s)
 {
   code_state_free_index_caches(&s->code);
+  assert(s->code.lnotab_marks == NULL);
   object_array_free(&s->code.consts);
   object_array_free(&s->code.names);
   object_array_free(&s->code.varnames);

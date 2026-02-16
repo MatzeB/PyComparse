@@ -171,6 +171,7 @@ def run_parser_tests(repo_root: Path, compiler: str, tmpdir: str, verbose: bool)
                 report_fail(f"{rel} (expected nonzero exit)")
                 if stderr_out.exists() and stderr_out.stat().st_size > 0:
                     cat_file(stderr_out)
+                continue
 
             expected = Path(f"{rel}.expected")
             diff_text = unified_diff(repo_root / expected, err_out)

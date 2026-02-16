@@ -905,9 +905,7 @@ static void emit_try_end(struct cg_state *s, struct try_state *state)
     if (excepts == NULL) {
       excepts = cg_block_allocate(s);
     }
-    if (footer == NULL) {
-      footer = cg_block_allocate(s);
-    }
+    assert(footer != NULL);
     cg_block_begin(s, excepts);
     cg_op(s, OPCODE_END_FINALLY, 0);
     cg_jump(s, footer);
@@ -1196,7 +1194,6 @@ static bool emit_continue(struct cg_state         *s,
   }
   emit_pending_finally(s, current_function,
                        s->code.loop_state.pending_at_loop);
-  if (unreachable(s)) return true;
   if (!unreachable(s)) {
     cg_jump(s, target);
   }

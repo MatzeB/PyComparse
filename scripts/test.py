@@ -266,7 +266,8 @@ def run_scan_tests(
 
         for test_file in tests:
             rel = maybe_relative(test_file, repo_root)
-            print(f"...{rel}")
+            if verbose:
+                print(f"...{rel}")
 
             with tokens.open("wb") as tokens_file, scanner_err.open(
                 "wb"

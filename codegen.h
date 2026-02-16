@@ -16,7 +16,6 @@ struct symbol;
 struct symbol_table;
 union object;
 
-unsigned cg_register_code(struct cg_state *s, union object *code);
 unsigned cg_register_object(struct cg_state *s, union object *object);
 unsigned cg_register_unique_object(struct cg_state *s, union object *object);
 
@@ -25,7 +24,7 @@ unsigned cg_register_name_from_cstring(struct cg_state *s,
 unsigned cg_register_name(struct cg_state *s, struct symbol *symbol);
 unsigned cg_register_freevar(struct cg_state *s, struct symbol *symbol);
 
-void cg_op(struct cg_state *s, enum opcode opcoode, uint32_t arg);
+void cg_op(struct cg_state *s, enum opcode opcode, uint32_t arg);
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
 void cg_mark_max_stack_extra(struct cg_state *s, unsigned extra);

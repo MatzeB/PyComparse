@@ -34,7 +34,7 @@ enum string_quote {
   QUOTE_APOSTROPHE = 1 << 0,
   QUOTE_QUOTATION_MARK = 1 << 1,
   QUOTE_TRIPLE = 1 << 2,
-  QUOTE_RCRULY = 1 << 3,
+  QUOTE_RCURLY = 1 << 3,
 };
 
 struct fstring_state {

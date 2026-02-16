@@ -2010,12 +2010,12 @@ union ast_expression *parse_expression(struct parser_state *s,
   union ast_expression *result = parse_prefix_expression(s);
 
   for (;;) {
-    enum token_kind postifx_token_kind = peek(s);
-    if (postifx_token_kind
+    enum token_kind postfix_token_kind = peek(s);
+    if (postfix_token_kind
         >= sizeof(postfix_parsers) / sizeof(postfix_parsers[0]))
       break;
     const struct postfix_expression_parser *postfix_parser
-        = &postfix_parsers[postifx_token_kind];
+        = &postfix_parsers[postfix_token_kind];
     if (postfix_parser->func == NULL
         || postfix_parser->precedence < precedence) {
       break;
@@ -3032,6 +3032,8 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     struct idynarray     statements;
     idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
+    /* The scanner guarantees all T_INDENT tokens are matched by T_DEDENT
+     * before T_EOF (see scan_eof / scan_indentation). */
     do {
       parse_statement(s, &statements, /*top_level=*/false);
     } while (!accept(s, T_DEDENT));

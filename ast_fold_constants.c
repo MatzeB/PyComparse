@@ -1,6 +1,7 @@
 #include "ast_fold_constants.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "adt/arena.h"
@@ -10,7 +11,27 @@
 #include "object.h"
 #include "object_intern.h"
 #include "object_types.h"
+#include "opcodes.h"
 #include "util.h"
+
+/* Returns the logically negated comparison op for `not (a OP b) --> a NEG_OP b`.
+ * Only call this for ops that have a logical negation (not COMPARE_OP_EXC_MATCH). */
+static uint8_t get_compare_op_negated(uint8_t op)
+{
+  switch (op) {
+  case COMPARE_OP_LT:     return COMPARE_OP_GE;
+  case COMPARE_OP_LE:     return COMPARE_OP_GT;
+  case COMPARE_OP_EQ:     return COMPARE_OP_NE;
+  case COMPARE_OP_NE:     return COMPARE_OP_EQ;
+  case COMPARE_OP_GT:     return COMPARE_OP_LE;
+  case COMPARE_OP_GE:     return COMPARE_OP_LT;
+  case COMPARE_OP_IN:     return COMPARE_OP_NOT_IN;
+  case COMPARE_OP_NOT_IN: return COMPARE_OP_IN;
+  case COMPARE_OP_IS:     return COMPARE_OP_IS_NOT;
+  case COMPARE_OP_IS_NOT: return COMPARE_OP_IS;
+  default:                abort();
+  }
+}
 
 struct constant_fold_state {
   struct object_intern *intern;
@@ -789,6 +810,18 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
       if (folded != NULL) {
         return new_const_expression(s, folded,
                                     get_expression_location(result));
+      }
+    }
+    if (type == AST_UNEXPR_NOT) {
+      /* not (a OP b)  -->  a NEG_OP b  for negatable single comparisons */
+      union ast_expression *inner = result->unexpr.op;
+      if (ast_expression_type(inner) == AST_COMPARISON
+          && inner->comparison.num_operands == 1) {
+        uint8_t op = inner->comparison.operands[0].op;
+        if (op != COMPARE_OP_EXC_MATCH) {
+          inner->comparison.operands[0].op = get_compare_op_negated(op);
+          return inner;
+        }
       }
     }
     break;

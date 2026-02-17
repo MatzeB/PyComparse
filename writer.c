@@ -95,6 +95,16 @@ static void write_tuple(struct writer_state       *s,
   write_tuple_(s, tuple->length, tuple->items);
 }
 
+static void write_frozenset(struct writer_state       *s,
+                            const struct object_tuple *frozenset)
+{
+  write_char(s, OBJECT_FROZENSET);
+  write_uint32(s, frozenset->length);
+  for (uint32_t i = 0; i < frozenset->length; ++i) {
+    write_object(s, frozenset->items[i]);
+  }
+}
+
 static bool is_ascii(const char *chars, uint32_t length)
 {
   for (uint32_t i = 0; i < length; i++) {
@@ -239,6 +249,9 @@ static void write_object(struct writer_state *s, const union object *object)
     break;
   case OBJECT_TUPLE:
     write_tuple(s, &object->tuple);
+    break;
+  case OBJECT_FROZENSET:
+    write_frozenset(s, &object->tuple);
     break;
   case OBJECT_CODE:
     write_code(s, &object->code);

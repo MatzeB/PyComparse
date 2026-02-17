@@ -285,3 +285,34 @@ union object *object_intern_tuple_end(struct object_intern *s,
   object_array_append(&s->objects, tuple_obj);
   return tuple_obj;
 }
+
+union object *object_intern_tuple_end_as_frozenset(struct object_intern *s,
+                                                   struct tuple_prep    *tuple,
+                                                   bool may_free_arena)
+{
+  union object *obj = object_new_tuple_end(tuple);
+  uint32_t      length = obj->tuple.length;
+
+  for (uint32_t i = 0, l = object_array_length(&s->objects); i < l; i++) {
+    union object *existing = object_array_at(&s->objects, i);
+    if (object_type(existing) != OBJECT_FROZENSET) continue;
+    if (existing->tuple.length != length) continue;
+    bool equal = true;
+    for (uint32_t j = 0; j < length; j++) {
+      if (existing->tuple.items[j] != obj->tuple.items[j]) {
+        equal = false;
+        break;
+      }
+    }
+    if (equal) {
+      if (may_free_arena) {
+        arena_free_to(&s->arena, obj);
+      }
+      return existing;
+    }
+  }
+
+  obj->type = OBJECT_FROZENSET;
+  object_array_append(&s->objects, obj);
+  return obj;
+}

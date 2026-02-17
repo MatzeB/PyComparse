@@ -49,6 +49,7 @@ enum object_type {
   OBJECT_STRING = 'u',
   OBJECT_CODE = 'c',
   OBJECT_TUPLE = '(',
+  OBJECT_FROZENSET = '>',
   OBJECT_ELLIPSIS = '.',
   OBJECT_INT = 'i',
   OBJECT_BIG_INT = 'I',

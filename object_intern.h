@@ -34,6 +34,9 @@ union object      *object_intern_tuple_end(struct object_intern *s,
                                            struct tuple_prep    *tuple,
                                            bool                  may_free_arena);
 union object      *object_intern_empty_tuple(struct object_intern *s);
+union object *object_intern_tuple_end_as_frozenset(struct object_intern *s,
+                                                   struct tuple_prep    *tuple,
+                                                   bool may_free_arena);
 
 struct arena *object_intern_arena(struct object_intern *s);
 

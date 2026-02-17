@@ -14,22 +14,34 @@
 #include "opcodes.h"
 #include "util.h"
 
-/* Returns the logically negated comparison op for `not (a OP b) --> a NEG_OP b`.
- * Only call this for ops that have a logical negation (not COMPARE_OP_EXC_MATCH). */
+/* Returns the logically negated comparison op for `not (a OP b) --> a NEG_OP
+ * b`. Only call this for ops that have a logical negation (not
+ * COMPARE_OP_EXC_MATCH). */
 static uint8_t get_compare_op_negated(uint8_t op)
 {
   switch (op) {
-  case COMPARE_OP_LT:     return COMPARE_OP_GE;
-  case COMPARE_OP_LE:     return COMPARE_OP_GT;
-  case COMPARE_OP_EQ:     return COMPARE_OP_NE;
-  case COMPARE_OP_NE:     return COMPARE_OP_EQ;
-  case COMPARE_OP_GT:     return COMPARE_OP_LE;
-  case COMPARE_OP_GE:     return COMPARE_OP_LT;
-  case COMPARE_OP_IN:     return COMPARE_OP_NOT_IN;
-  case COMPARE_OP_NOT_IN: return COMPARE_OP_IN;
-  case COMPARE_OP_IS:     return COMPARE_OP_IS_NOT;
-  case COMPARE_OP_IS_NOT: return COMPARE_OP_IS;
-  default:                abort();
+  case COMPARE_OP_LT:
+    return COMPARE_OP_GE;
+  case COMPARE_OP_LE:
+    return COMPARE_OP_GT;
+  case COMPARE_OP_EQ:
+    return COMPARE_OP_NE;
+  case COMPARE_OP_NE:
+    return COMPARE_OP_EQ;
+  case COMPARE_OP_GT:
+    return COMPARE_OP_LE;
+  case COMPARE_OP_GE:
+    return COMPARE_OP_LT;
+  case COMPARE_OP_IN:
+    return COMPARE_OP_NOT_IN;
+  case COMPARE_OP_NOT_IN:
+    return COMPARE_OP_IN;
+  case COMPARE_OP_IS:
+    return COMPARE_OP_IS_NOT;
+  case COMPARE_OP_IS_NOT:
+    return COMPARE_OP_IS;
+  default:
+    abort();
   }
 }
 
@@ -91,6 +103,7 @@ static bool object_constant_truth_value(const union object *object,
     *truth = object_string_length(object) != 0;
     return true;
   case OBJECT_TUPLE:
+  case OBJECT_FROZENSET:
     *truth = object_tuple_length(object) != 0;
     return true;
   default:
@@ -717,6 +730,35 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
     for (unsigned i = 0; i < expression->comparison.num_operands; ++i) {
       result->comparison.operands[i].operand
           = fold_expression(s, expression->comparison.operands[i].operand);
+    }
+    /* x in {const, ...}  -->  x in frozenset({const, ...}) */
+    if (result->comparison.num_operands == 1) {
+      uint8_t               op = result->comparison.operands[0].op;
+      union ast_expression *rhs = result->comparison.operands[0].operand;
+      if ((op == COMPARE_OP_IN || op == COMPARE_OP_NOT_IN)
+          && ast_expression_type(rhs) == AST_SET_DISPLAY
+          && !rhs->expression_list.has_star_expression) {
+        struct ast_expression_list *set = &rhs->expression_list;
+        bool                        all_const = true;
+        for (unsigned i = 0; i < set->num_expressions; ++i) {
+          if (ast_expression_as_constant(set->expressions[i]) == NULL) {
+            all_const = false;
+            break;
+          }
+        }
+        if (all_const) {
+          struct tuple_prep *prep
+              = object_intern_tuple_begin(s->intern, set->num_expressions);
+          for (unsigned i = 0; i < set->num_expressions; ++i) {
+            object_new_tuple_set_at(
+                prep, i, ast_expression_as_constant(set->expressions[i]));
+          }
+          union object *frozenset
+              = object_intern_tuple_end_as_frozenset(s->intern, prep, true);
+          result->comparison.operands[0].operand = new_const_expression(
+              s, frozenset, get_expression_location(rhs));
+        }
+      }
     }
     break;
   case AST_CONDITIONAL:

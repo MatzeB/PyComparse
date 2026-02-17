@@ -2318,7 +2318,7 @@ analyze_generator_bindings_inner(struct cg_state                 *s,
                                  struct ast_generator_expression *generator,
                                  struct binding_scope *nullable   parent);
 
-static void analyze_children_bindings(struct cg_state    *s,
+static void analyze_children_bindings(struct cg_state      *s,
                                       struct binding_scope *scope)
 {
   struct ast_class **class_children = idynarray_data(&scope->class_children);
@@ -2352,10 +2352,11 @@ static void analyze_children_bindings(struct cg_state    *s,
 }
 
 static void resolve_nonlocals(struct cg_state *s, struct binding_scope *scope,
-                               struct location *nullable error_location)
+                              struct location *nullable error_location)
 {
   struct symbol **nonlocals = idynarray_data(&scope->nonlocals);
-  unsigned num_nonlocals = idynarray_length(&scope->nonlocals, struct symbol *);
+  unsigned        num_nonlocals
+      = idynarray_length(&scope->nonlocals, struct symbol *);
   for (unsigned i = 0; i < num_nonlocals; ++i) {
     struct symbol *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope->parent, name)) {

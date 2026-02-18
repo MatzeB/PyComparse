@@ -1084,14 +1084,12 @@ static void fold_statement_list(struct constant_fold_state *s,
   }
 }
 
-struct ast_statement_list *
-ast_fold_constants(struct object_intern *intern, struct arena *ast_arena,
-                   struct ast_statement_list *module)
+void ast_fold_constants(struct object_intern *intern, struct arena *ast_arena,
+                        struct ast_module *module)
 {
   struct constant_fold_state s = {
     .intern = intern,
     .ast_arena = ast_arena,
   };
-  fold_statement_list(&s, module);
-  return module;
+  fold_statement_list(&s, module->body);
 }

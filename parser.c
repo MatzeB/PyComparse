@@ -3152,15 +3152,17 @@ union object *parse(struct parser_state *s, const char *filename)
   }
 #endif
 
-  struct ast_statement_list *module = ast_statement_list_from_array(
+  struct ast_statement_list *body = ast_statement_list_from_array(
       s, idynarray_data(&statements),
       idynarray_length(&statements, union ast_statement *));
   idynarray_free(&statements);
-  module = ast_fold_constants(&s->cg.objects, &s->ast, module);
 
-  emit_module_begin(&s->cg);
-  emit_statement_list(&s->cg, module);
-  return emit_module_end(&s->cg);
+  struct ast_module *module = arena_allocate(&s->ast, sizeof(struct ast_module),
+                                             alignof(struct ast_module));
+  module->body = body;
+  ast_fold_constants(&s->cg.objects, &s->ast, module);
+
+  return emit_module(&s->cg, module);
 }
 
 bool parser_had_errors(struct parser_state *s)

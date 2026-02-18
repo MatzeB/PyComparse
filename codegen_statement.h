@@ -13,6 +13,7 @@ struct ast_call;
 struct ast_comparison;
 struct ast_generator_expression;
 struct ast_lambda;
+struct ast_module;
 struct ast_statement_list;
 struct basic_block;
 struct cg_state;
@@ -67,8 +68,7 @@ struct with_state {
   bool                async_with;
 };
 
-void          emit_module_begin(struct cg_state *s);
-union object *emit_module_end(struct cg_state *s);
+union object *emit_module(struct cg_state *s, struct ast_module *module);
 
 void emit_code_end(struct cg_state *s);
 
@@ -97,8 +97,5 @@ void emit_make_function_end(struct cg_state            *s,
 void analyze_lambda_bindings(struct cg_state *s, struct ast_lambda *lambda);
 void analyze_generator_bindings(struct cg_state                 *s,
                                 struct ast_generator_expression *generator);
-
-void emit_statement_list(struct cg_state           *s,
-                         struct ast_statement_list *statement_list);
 
 ASSUME_NONNULL_END

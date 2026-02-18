@@ -223,15 +223,25 @@ void emit_code_end(struct cg_state *s)
   cg_block_end(s);
 }
 
-void emit_module_begin(struct cg_state *s)
+static void emit_module_begin(struct cg_state *s)
 {
   cg_code_begin(s, /*in_function=*/false);
 }
 
-union object *emit_module_end(struct cg_state *s)
+static union object *emit_module_end(struct cg_state *s)
 {
   emit_code_end(s);
   return cg_code_end(s, "<module>");
+}
+
+static void emit_statement_list(struct cg_state           *s,
+                                struct ast_statement_list *statement_list);
+
+union object *emit_module(struct cg_state *s, struct ast_module *module)
+{
+  emit_module_begin(s);
+  emit_statement_list(s, module->body);
+  return emit_module_end(s);
 }
 
 static void emit_annotation(struct cg_state *s, union ast_expression *target,
@@ -2704,8 +2714,8 @@ static void handle_future_import(struct cg_state *s, struct location location,
   }
 }
 
-void emit_statement_list(struct cg_state           *s,
-                         struct ast_statement_list *statement_list)
+static void emit_statement_list(struct cg_state           *s,
+                                struct ast_statement_list *statement_list)
 {
   unsigned      first_statement = 0;
   union object *doc = statement_list_leading_docstring(statement_list);

@@ -236,4 +236,8 @@ union ast_statement {
   struct ast_yield                yield;
 };
 
+struct ast_module {
+  struct ast_statement_list *body;
+};
+
 ASSUME_NONNULL_END

@@ -2392,7 +2392,7 @@ begin_new_line:
         scan_string_literal(s, flags);
         return;
       }
-      /* fallthrough */
+      PYCOMPARSE_FALLTHROUGH;
     case ')':
     case ']':
       if (s->paren_level > 0) {

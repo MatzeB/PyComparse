@@ -25,7 +25,7 @@ if (PYCOMPARSE_ENABLE_LTO)
   endif()
 endif()
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wcomma -Wall -Wextra -Wmissing-prototypes -pedantic -Wno-gnu-folding-constant -Wimplicit-fallthrough")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-nullability-extension -Wnullability-completeness")
 # nullable-to-nonnull-conversion warning is annoying as it is not
 # flow-sensitive. Rather use clang-static-analyzer to check...

@@ -2630,7 +2630,6 @@ statement_list_leading_docstring(struct ast_statement_list *statement_list)
   return statement_leading_docstring(statement_list->statements[0]);
 }
 
-
 static void emit_statement_list(struct cg_state           *s,
                                 struct ast_statement_list *statement_list)
 {

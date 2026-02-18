@@ -1,4 +1,9 @@
 #include "adt/arena.h"
+#include "ast_fold_constants.h"
+#include "ast_types.h"
+#include "codegen.h"
+#include "codegen_statement.h"
+#include "codegen_types.h"
 #include "diagnostics.h"
 #include "diagnostics_types.h"
 #include "parser.h"
@@ -87,15 +92,25 @@ int main(int argc, char **argv)
   struct diagnostics_state diagnostics;
   diag_init(&diagnostics, stderr, input_filename);
 
-  struct parser_state parser;
-  parser_init(&parser, &diagnostics);
-  scanner_init(&parser.scanner, input, input_filename, &symbol_table,
-               &parser.cg.objects, &strings, &diagnostics);
+  struct cg_state cg;
+  cg_init(&cg, &symbol_table, input_filename, &diagnostics);
 
-  union object *code = parse(&parser, input_filename);
-  bool          had_errors = parser_had_errors(&parser);
+  struct parser_state parser;
+  parser_init(&parser, &cg.objects, &diagnostics);
+  scanner_init(&parser.scanner, input, input_filename, &symbol_table,
+               &cg.objects, &strings, &diagnostics);
+
+  struct ast_module *module = parse(&parser);
+  bool               had_errors = parser_had_errors(&parser);
 
   fclose(input);
+
+  union object *code = NULL;
+  if (!had_errors) {
+    ast_fold_constants(&cg.objects, &parser.ast, module);
+    code = emit_module(&cg, module);
+    had_errors = diagnostics.had_error;
+  }
 
   if (!had_errors) {
     FILE *out = fopen(out_filename, "wb");
@@ -117,6 +132,7 @@ int main(int argc, char **argv)
 
   scanner_free(&parser.scanner);
   parser_free(&parser);
+  cg_free(&cg);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
   return had_errors ? 1 : 0;

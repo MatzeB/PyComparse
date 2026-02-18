@@ -10,16 +10,13 @@
 #include "adt/idynarray.h"
 #include "ast.h"
 #include "ast_expression_types.h"
-#include "ast_fold_constants.h"
 #include "ast_statement_types.h"
 #include "ast_types.h"
-#include "codegen.h"
-#include "codegen_expression.h"
-#include "codegen_statement.h"
 #include "diagnostics.h"
 #include "object.h"
 #include "object_intern.h"
 #include "object_types.h"
+#include "opcodes.h"
 #include "scanner.h"
 #include "symbol_table.h"
 #include "symbol_types.h"
@@ -369,8 +366,7 @@ static union ast_expression *invalid_expression(struct parser_state *s)
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
   expression->cnst.base.location = location;
-  expression->cnst.object
-      = object_intern_singleton(&s->cg.objects, OBJECT_NONE);
+  expression->cnst.object = object_intern_singleton(s->objects, OBJECT_NONE);
   return expression;
 }
 
@@ -537,8 +533,8 @@ static union ast_expression *parse_star_expressions(struct parser_state *s,
         s, AST_EXPRESSION_LIST, expression, precedence, /*allow_slices=*/false,
         /*allow_starred=*/true);
     assert(ast_expression_type(expression) == AST_EXPRESSION_LIST);
-    expression->expression_list.as_constant = ast_tuple_compute_constant(
-        &s->cg.objects, &expression->expression_list);
+    expression->expression_list.as_constant
+        = ast_tuple_compute_constant(s->objects, &expression->expression_list);
   }
   return expression;
 }
@@ -886,7 +882,7 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 {
   struct location location = scanner_location(&s->scanner);
   next_token(s);
-  union object *object = object_intern_singleton(&s->cg.objects, type);
+  union object *object = object_intern_singleton(s->objects, type);
   return ast_const_new(s, object, location);
 }
 
@@ -1073,8 +1069,8 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
         s, struct ast_expression_list, AST_EXPRESSION_LIST);
     expression->expression_list.base.location = location;
     expression->expression_list.num_expressions = 0;
-    expression->expression_list.as_constant = ast_tuple_compute_constant(
-        &s->cg.objects, &expression->expression_list);
+    expression->expression_list.as_constant
+        = ast_tuple_compute_constant(s->objects, &expression->expression_list);
     return expression;
   }
 
@@ -1207,7 +1203,7 @@ static union object *concat_strings(struct parser_state *s,
   assert(dest - combined == (ptrdiff_t)combined_length);
 
   union object *object
-      = object_intern_string(&s->cg.objects, type, combined_length, combined);
+      = object_intern_string(s->objects, type, combined_length, combined);
   if (object->string.chars != combined) {
     arena_free_to(s->scanner.strings, combined);
   }
@@ -1389,7 +1385,7 @@ static union ast_expression *parse_string(struct parser_state *s)
     struct fstring_element *element
         = idynarray_append(&elements, struct fstring_element);
     memset(element, 0, sizeof(*element));
-    element->u.string = object_intern_cstring(&s->cg.objects, "");
+    element->u.string = object_intern_cstring(s->objects, "");
     element->is_expression = false;
     num_elements = 1;
     element_arr = idynarray_data(&elements);
@@ -1400,7 +1396,7 @@ static union ast_expression *parse_string(struct parser_state *s)
     if (num_elements == 1) {
       object = element_arr[0].u.string;
     } else {
-      object = object_intern_cstring(&s->cg.objects, "");
+      object = object_intern_cstring(s->objects, "");
     }
     idynarray_free(&elements);
     return ast_const_new(s, object, location);
@@ -2566,9 +2562,9 @@ static bool statement_is_future_import(union ast_statement *statement)
 static bool is_known_future_feature(const char *name)
 {
   static const char *const features[] = {
-    "nested_scopes", "generators",     "division",          "absolute_import",
-    "with_statement", "print_function", "unicode_literals",  "barry_as_FLUFL",
-    "generator_stop", "annotations",   "braces",
+    "nested_scopes",  "generators",     "division",         "absolute_import",
+    "with_statement", "print_function", "unicode_literals", "barry_as_FLUFL",
+    "generator_stop", "annotations",    "braces",
   };
   for (unsigned i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
     if (strcmp(features[i], name) == 0) return true;
@@ -3183,10 +3179,8 @@ static void parse_statement(struct parser_state *s,
   remove_anchor(s, T_NEWLINE);
 }
 
-union object *parse(struct parser_state *s, const char *filename)
+struct ast_module *parse(struct parser_state *s)
 {
-  cg_init(&s->cg, s->scanner.symbol_table, filename, s->d);
-
   next_token(s);
 
   union ast_statement *inline_storage[32];
@@ -3214,13 +3208,12 @@ union object *parse(struct parser_state *s, const char *filename)
       idynarray_length(&statements, union ast_statement *));
   idynarray_free(&statements);
 
-  struct ast_module *module = arena_allocate(&s->ast, sizeof(struct ast_module),
-                                             alignof(struct ast_module));
-  module->body                 = body;
-  module->future_flags         = s->future_flags;
-  ast_fold_constants(&s->cg.objects, &s->ast, module);
+  struct ast_module *module = arena_allocate(
+      &s->ast, sizeof(struct ast_module), alignof(struct ast_module));
+  module->body = body;
+  module->future_flags = s->future_flags;
 
-  return emit_module(&s->cg, module);
+  return module;
 }
 
 bool parser_had_errors(struct parser_state *s)
@@ -3228,10 +3221,12 @@ bool parser_had_errors(struct parser_state *s)
   return s->d->had_error;
 }
 
-void parser_init(struct parser_state *s, struct diagnostics_state *diagnostics)
+void parser_init(struct parser_state *s, struct object_intern *objects,
+                 struct diagnostics_state *diagnostics)
 {
   memset(s, 0, sizeof(*s));
   arena_init(&s->ast);
+  s->objects = objects;
   s->d = diagnostics;
   s->top_level_future_imports_allowed = true;
   memset(s->anchor_set, 0, sizeof(s->anchor_set));
@@ -3239,6 +3234,5 @@ void parser_init(struct parser_state *s, struct diagnostics_state *diagnostics)
 
 void parser_free(struct parser_state *s)
 {
-  cg_free(&s->cg);
   arena_free(&s->ast);
 }

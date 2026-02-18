@@ -240,6 +240,7 @@ static void emit_statement_list(struct cg_state           *s,
 union object *emit_module(struct cg_state *s, struct ast_module *module)
 {
   emit_module_begin(s);
+  s->code.flags |= module->future_flags;
   emit_statement_list(s, module->body);
   return emit_module_end(s);
 }
@@ -2629,90 +2630,6 @@ statement_list_leading_docstring(struct ast_statement_list *statement_list)
   return statement_leading_docstring(statement_list->statements[0]);
 }
 
-struct future_feature {
-  const char *name;
-  uint32_t    flag;
-};
-
-static bool is_future_module(struct ast_from_import *from_import)
-{
-  struct dotted_name *module = from_import->module;
-  return from_import->num_prefix_dots == 0 && module != NULL
-         && module->num_symbols == 1
-         && strcmp(module->symbols[0]->string, "__future__") == 0;
-}
-
-static const struct future_feature *lookup_future_feature(const char *name)
-{
-  static const struct future_feature features[] = {
-    { "nested_scopes", 0 },    { "generators", 0 },
-    { "division", 0 },         { "absolute_import", 0 },
-    { "with_statement", 0 },   { "print_function", 0 },
-    { "unicode_literals", 0 }, { "barry_as_FLUFL", CO_FUTURE_BARRY_AS_BDFL },
-    { "generator_stop", 0 },   { "annotations", CO_FUTURE_ANNOTATIONS },
-    { "braces", 0 },
-  };
-  for (unsigned i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
-    const struct future_feature *feature = &features[i];
-    if (strcmp(feature->name, name) == 0) return feature;
-  }
-  return NULL;
-}
-
-static void report_future_not_defined(struct cg_state *s,
-                                      struct location  location,
-                                      const char      *feature_name)
-{
-  diag_begin_error(s->d, location);
-  diag_frag(s->d, "future feature ");
-  diag_frag(s->d, feature_name);
-  diag_frag(s->d, " is not defined");
-  diag_end(s->d);
-}
-
-static void report_future_not_a_chance(struct cg_state *s,
-                                       struct location  location)
-{
-  diag_begin_error(s->d, location);
-  diag_frag(s->d, "not a chance");
-  diag_end(s->d);
-}
-
-static void handle_future_import(struct cg_state *s, struct location location,
-                                 struct ast_from_import *from_import,
-                                 bool module_context, bool allow_future)
-{
-  if (!module_context || !allow_future) {
-    diag_begin_error(s->d, location);
-    diag_frag(
-        s->d,
-        "from __future__ imports must occur at the beginning of the file");
-    diag_end(s->d);
-    return;
-  }
-
-  if (from_import->import_star) {
-    report_future_not_defined(s, location, "*");
-    return;
-  }
-
-  for (unsigned i = 0; i < from_import->num_items; ++i) {
-    struct from_import_item     *item = &from_import->items[i];
-    const struct future_feature *feature
-        = lookup_future_feature(item->name->string);
-    if (feature == NULL) {
-      report_future_not_defined(s, location, item->name->string);
-      continue;
-    }
-    if (strcmp(feature->name, "braces") == 0) {
-      report_future_not_a_chance(s, location);
-      continue;
-    }
-    if (feature->flag != 0) {
-      s->code.flags |= feature->flag;
-    }
-  }
-}
 
 static void emit_statement_list(struct cg_state           *s,
                                 struct ast_statement_list *statement_list)
@@ -2744,20 +2661,8 @@ static void emit_statement_list_with_function_from(
     struct cg_state *s, struct ast_statement_list *statement_list,
     struct ast_def *nullable current_function, unsigned first_statement)
 {
-  bool module_context = current_function == NULL && !cg_in_function(s)
-                        && !s->code.in_class_body;
-  bool allow_future = module_context;
   for (unsigned i = first_statement; i < statement_list->num_statements; ++i) {
-    union ast_statement *statement = statement_list->statements[i];
-    if (ast_statement_type(statement) == AST_STATEMENT_FROM_IMPORT
-        && is_future_module(&statement->from_import)) {
-      handle_future_import(s, statement->base.location,
-                           &statement->from_import, module_context,
-                           allow_future);
-    } else if (module_context) {
-      allow_future = false;
-    }
-    emit_statement(s, statement, current_function);
+    emit_statement(s, statement_list->statements[i], current_function);
   }
 }
 

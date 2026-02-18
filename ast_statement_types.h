@@ -238,6 +238,7 @@ union ast_statement {
 
 struct ast_module {
   struct ast_statement_list *body;
+  uint32_t                   future_flags;
 };
 
 ASSUME_NONNULL_END

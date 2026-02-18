@@ -2563,6 +2563,45 @@ static bool statement_is_future_import(union ast_statement *statement)
          && strcmp(module->symbols[0]->string, "__future__") == 0;
 }
 
+static bool is_known_future_feature(const char *name)
+{
+  static const char *const features[] = {
+    "nested_scopes", "generators",     "division",          "absolute_import",
+    "with_statement", "print_function", "unicode_literals",  "barry_as_FLUFL",
+    "generator_stop", "annotations",   "braces",
+  };
+  for (unsigned i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
+    if (strcmp(features[i], name) == 0) return true;
+  }
+  return false;
+}
+
+static void validate_future_import(struct parser_state    *s,
+                                   struct location         location,
+                                   struct ast_from_import *from_import)
+{
+  if (from_import->import_star) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "future feature * is not defined");
+    diag_end(s->d);
+    return;
+  }
+  for (unsigned i = 0; i < from_import->num_items; ++i) {
+    const char *name = from_import->items[i].name->string;
+    if (strcmp(name, "braces") == 0) {
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "not a chance");
+      diag_end(s->d);
+    } else if (!is_known_future_feature(name)) {
+      diag_begin_error(s->d, location);
+      diag_frag(s->d, "future feature ");
+      diag_frag(s->d, name);
+      diag_frag(s->d, " is not defined");
+      diag_end(s->d);
+    }
+  }
+}
+
 static bool statement_is_docstring(union ast_statement *statement)
 {
   if (ast_statement_type(statement) != AST_STATEMENT_EXPRESSION) return false;
@@ -2575,21 +2614,33 @@ static void
 parser_handle_top_level_future_statement(struct parser_state *s,
                                          union ast_statement *statement)
 {
-  if (!s->top_level_future_imports_allowed) {
-    s->top_level_seen_any_statement = true;
-    return;
-  }
-
   if (statement_is_future_import(statement)) {
     struct ast_from_import *from_import = &statement->from_import;
+    if (!s->top_level_future_imports_allowed) {
+      diag_begin_error(s->d, statement->base.location);
+      diag_frag(
+          s->d,
+          "from __future__ imports must occur at the beginning of the file");
+      diag_end(s->d);
+      s->top_level_seen_any_statement = true;
+      return;
+    }
+    validate_future_import(s, statement->base.location, from_import);
     if (!from_import->import_star) {
       for (unsigned i = 0; i < from_import->num_items; ++i) {
         struct from_import_item *item = &from_import->items[i];
         if (strcmp(item->name->string, "barry_as_FLUFL") == 0) {
           s->future_flags |= CO_FUTURE_BARRY_AS_BDFL;
+        } else if (strcmp(item->name->string, "annotations") == 0) {
+          s->future_flags |= CO_FUTURE_ANNOTATIONS;
         }
       }
     }
+    s->top_level_seen_any_statement = true;
+    return;
+  }
+
+  if (!s->top_level_future_imports_allowed) {
     s->top_level_seen_any_statement = true;
     return;
   }
@@ -2606,6 +2657,12 @@ static void append_statement(struct parser_state *s,
 {
   if (top_level) {
     parser_handle_top_level_future_statement(s, statement);
+  } else if (statement_is_future_import(statement)) {
+    diag_begin_error(s->d, statement->base.location);
+    diag_frag(
+        s->d,
+        "from __future__ imports must occur at the beginning of the file");
+    diag_end(s->d);
   }
   *idynarray_append(statements, union ast_statement *) = statement;
 }
@@ -3159,7 +3216,8 @@ union object *parse(struct parser_state *s, const char *filename)
 
   struct ast_module *module = arena_allocate(&s->ast, sizeof(struct ast_module),
                                              alignof(struct ast_module));
-  module->body = body;
+  module->body                 = body;
+  module->future_flags         = s->future_flags;
   ast_fold_constants(&s->cg.objects, &s->ast, module);
 
   return emit_module(&s->cg, module);

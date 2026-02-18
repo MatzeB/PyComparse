@@ -230,6 +230,12 @@ uint32_t object_string_length(const union object *object)
   return object->string.length;
 }
 
+const char *object_string_chars(const union object *object)
+{
+  assert(object_type_is_string(object->type));
+  return object->string.chars;
+}
+
 uint32_t object_tuple_length(const union object *object)
 {
   assert(object->type == OBJECT_TUPLE);
@@ -239,6 +245,19 @@ uint32_t object_tuple_length(const union object *object)
 union object *object_tuple_at(union object *object, uint32_t index)
 {
   assert(object->type == OBJECT_TUPLE);
+  assert(index < object->tuple.length);
+  return object->tuple.items[index];
+}
+
+uint32_t object_frozenset_length(const union object *object)
+{
+  assert(object->type == OBJECT_FROZENSET);
+  return object->tuple.length;
+}
+
+union object *object_frozenset_at(union object *object, uint32_t index)
+{
+  assert(object->type == OBJECT_FROZENSET);
   assert(index < object->tuple.length);
   return object->tuple.items[index];
 }
@@ -265,6 +284,18 @@ int64_t object_int_value(const union object *object)
 {
   assert(object->type == OBJECT_INT);
   return object->int_obj.value;
+}
+
+uint32_t object_big_int_num_pydigits(const union object *object)
+{
+  assert(object->type == OBJECT_BIG_INT);
+  return object->big_int.num_pydigits;
+}
+
+const uint16_t *object_big_int_pydigits(const union object *object)
+{
+  assert(object->type == OBJECT_BIG_INT);
+  return object->big_int.pydigits;
 }
 
 uint32_t object_code_argcount(const union object *object)

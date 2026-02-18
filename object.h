@@ -74,27 +74,24 @@ union object *object_new_tuple_end(struct tuple_prep *tuple_prep);
 
 enum object_type object_type(const union object *object);
 
-bool     object_string_equals(const union object *object, uint32_t length,
-                              const char *nullable chars);
-uint32_t object_string_length(const union object *object);
+bool        object_string_equals(const union object *object, uint32_t length,
+                                 const char *nullable chars);
+uint32_t    object_string_length(const union object *object);
+const char *object_string_chars(const union object *object);
 
 uint32_t      object_tuple_length(const union object *object);
 union object *object_tuple_at(union object *object, uint32_t index);
+
+uint32_t      object_frozenset_length(const union object *object);
+union object *object_frozenset_at(union object *object, uint32_t index);
 
 double  object_float_value(const union object *object);
 double  object_complex_real(const union object *object);
 double  object_complex_imag(const union object *object);
 int64_t object_int_value(const union object *object);
 
-void object_array_append(struct object_array *array, union object *object);
-union object *object_array_at(struct object_array *array, uint32_t index);
-void          object_array_set_at(struct object_array *array, uint32_t index,
-                                  union object *object);
-uint32_t      object_array_length(const struct object_array *array);
-union object      *
-object_tuple_from_object_array(struct arena                *arena,
-                                    struct object_array *nonnull array);
-void object_array_free(struct object_array *array);
+uint32_t        object_big_int_num_pydigits(const union object *object);
+const uint16_t *object_big_int_pydigits(const union object *object);
 
 uint32_t object_code_argcount(const union object *object);
 uint32_t object_code_posonlyargcount(const union object *object);
@@ -131,5 +128,16 @@ void object_code_set_cellvars(union object *object, union object *value);
 void object_code_set_filename(union object *object, union object *value);
 void object_code_set_name(union object *object, union object *value);
 void object_code_set_lnotab(union object *object, union object *value);
+
+/* object_array is a mutable helper, not a Python object type */
+void object_array_append(struct object_array *array, union object *object);
+union object *object_array_at(struct object_array *array, uint32_t index);
+void          object_array_set_at(struct object_array *array, uint32_t index,
+                                  union object *object);
+uint32_t      object_array_length(const struct object_array *array);
+union object      *
+object_tuple_from_object_array(struct arena                *arena,
+                                    struct object_array *nonnull array);
+void object_array_free(struct object_array *array);
 
 ASSUME_NONNULL_END

@@ -13,6 +13,7 @@ Those are handled by code in unicode_name_lookup.c.
 
 from __future__ import annotations
 
+import subprocess
 import unicodedata
 from pathlib import Path
 
@@ -220,6 +221,12 @@ extern const uint8_t unicode_name_block_data[{block_data_bytes}];
         f"block_data_offsets={len(block_data_offsets) * 4} "
         f"block_data={block_data_bytes} "
         f"total={total_size} bytes"
+    )
+
+
+    subprocess.run(
+        ["clang-format", "-i", str(OUT_C), str(OUT_H)],
+        check=True,
     )
 
 

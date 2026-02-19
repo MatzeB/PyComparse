@@ -15,6 +15,7 @@ nfkc_normalize() function implementing the full NFKC algorithm:
 Uses Python 3.8's unicodedata module (Unicode 12.1.0) to match CPython 3.8.
 """
 
+import subprocess
 import sys
 import unicodedata
 
@@ -497,6 +498,17 @@ static inline int nfkc_normalize(uint8_t *buf, int len, int buf_capacity)
 #endif
 """
         )
+
+
+    subprocess.run(
+        [
+            "clang-format",
+            "-i",
+            "src/unicode_nfkc_table.c",
+            "include/pycomparse/unicode_nfkc_table.h",
+        ],
+        check=True,
+    )
 
 
 if __name__ == "__main__":

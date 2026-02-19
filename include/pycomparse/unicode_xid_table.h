@@ -8,7 +8,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 #define XID_SHIFT      7
 #define XID_BLOCK_MASK 0x7f
 

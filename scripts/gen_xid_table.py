@@ -13,6 +13,7 @@ Encoding: 2 bits per codepoint
   (value 1 never occurs — XID_Start is a subset of XID_Continue)
 """
 
+import subprocess
 import sys
 
 SHIFT = 7  # 128 codepoints per block
@@ -166,6 +167,17 @@ static inline int is_xid_start(uint32_t cp)
 #endif
 """
         )
+
+
+    subprocess.run(
+        [
+            "clang-format",
+            "-i",
+            "src/unicode_xid_table.c",
+            "include/pycomparse/unicode_xid_table.h",
+        ],
+        check=True,
+    )
 
 
 if __name__ == "__main__":

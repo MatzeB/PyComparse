@@ -114,40 +114,40 @@ build/pycomparse --out /tmp/test.pyc /tmp/test.py && uv run scripts/decode.py /t
 
 ### Core Components
 
-1. **Scanner** (`scanner.c/h`) - Lexical analysis
+1. **Scanner** (`src/scanner.c`, `include/pycomparse/scanner.h`) - Lexical analysis
    - Tokenizes Python source code
    - Handles Python-specific tokens (keywords, operators, literals)
    - Manages symbol table for identifiers
 
-2. **Parser** (`parser.c/h`) - Syntax analysis and AST generation
+2. **Parser** (`src/parser.c`, `include/pycomparse/parser.h`) - Syntax analysis and AST generation
    - Builds Abstract Syntax Tree from tokens
    - Handles Python grammar rules
    - Supports expressions, statements, and control flow
 
-3. **AST** (`ast.c/h`) - Abstract Syntax Tree representation
-   - Defines all AST node types in `ast_types.h`
+3. **AST** (`src/ast.c`, `include/pycomparse/ast.h`) - Abstract Syntax Tree representation
+   - Defines all AST node types in `include/pycomparse/ast_types.h`
    - Handles expression types (binary ops, calls, comprehensions, etc.)
    - Statement types (assignments, control flow, function/class definitions)
 
-4. **Code Generator** (`codegen*.c/h`) - Bytecode emission
+4. **Code Generator** (`src/codegen*.c`, `include/pycomparse/codegen*.h`) - Bytecode emission
    - Converts AST to Python bytecode
    - Manages bytecode optimization and stack tracking
    - Handles different code contexts (module, function, class)
 
-5. **Object System** (`object*.c/h`) - Python object representation
+5. **Object System** (`src/object*.c`, `include/pycomparse/object*.h`) - Python object representation
    - Implements Python object model in C
    - Handles strings, numbers, code objects, etc.
    - Object interning for performance
 
-6. **Symbol Tables** (`symbol_table.c/h`) - Name resolution
+6. **Symbol Tables** (`src/symbol_table.c`, `include/pycomparse/symbol_table.h`) - Name resolution
    - Tracks variable scopes and bindings
    - Manages local vs global variable resolution
 
 ### Data Structures
 
-- **ADT Library** (`adt/`) - Core data structures (arena allocator, dynamic arrays, hash sets, stacks)
+- **ADT Library** (`include/pycomparse/adt/`) - Core data structures (arena allocator, dynamic arrays, hash sets, stacks)
 - **Arena Memory Management** - Custom allocator for efficient memory management
-- **Token System** (`tokens.h`, `token_kinds.h`) - Token definitions and utilities
+- **Token System** (`include/pycomparse/tokens.h`, `include/pycomparse/token_kinds.h`) - Token definitions and utilities
 
 ## Key Implementation Details
 

@@ -1,2 +1,2 @@
 #!/bin/sh
-clang-format -i *.[ch] adt/*.[ch]
+clang-format -i src/*.[ch] include/pycomparse/*.[ch] include/pycomparse/adt/*.[ch]

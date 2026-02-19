@@ -91,98 +91,99 @@ if (NOT PYCOMPARSE_ICONV_FOUND)
 endif()
 
 add_executable(arena_test
-  arena_test.c
-  adt/arena.h
+  src/arena_test.c
+  include/pycomparse/adt/arena.h
 )
+target_include_directories(arena_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
 add_executable(scanner_test
-  ast.c
-  ast.h
-  ast_types.h
-  diagnostics.c
-  diagnostics.h
-  diagnostics_types.h
-  encoding.c
-  encoding.h
-  object.c
-  object.h
-  object_intern.c
-  object_intern.h
-  scanner.c
-  scanner.h
-  scanner_test.c
-  scanner_types.h
-  unicode_name_lookup.c
-  unicode_name_lookup.h
-  unicode_name_table.c
-  unicode_name_table.h
-  symbol_table.c
-  symbol_table.h
-  symbol_table_types.h
-  symbol_types.h
-  unicode_nfkc_table.c
-  unicode_xid_table.c
-  util.c
-  util.h
+  src/ast.c
+  include/pycomparse/ast.h
+  include/pycomparse/ast_types.h
+  src/diagnostics.c
+  include/pycomparse/diagnostics.h
+  include/pycomparse/diagnostics_types.h
+  src/encoding.c
+  include/pycomparse/encoding.h
+  src/object.c
+  include/pycomparse/object.h
+  src/object_intern.c
+  include/pycomparse/object_intern.h
+  src/scanner.c
+  include/pycomparse/scanner.h
+  src/scanner_test.c
+  include/pycomparse/scanner_types.h
+  src/unicode_name_lookup.c
+  include/pycomparse/unicode_name_lookup.h
+  src/unicode_name_table.c
+  include/pycomparse/unicode_name_table.h
+  src/symbol_table.c
+  include/pycomparse/symbol_table.h
+  include/pycomparse/symbol_table_types.h
+  include/pycomparse/symbol_types.h
+  src/unicode_nfkc_table.c
+  src/unicode_xid_table.c
+  src/util.c
+  include/pycomparse/util.h
 )
-target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
 target_link_libraries(scanner_test PRIVATE ${PYCOMPARSE_ICONV_TARGET}
                                            ${PYCOMPARSE_ICONV_LIBRARIES})
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET scanner_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 add_executable(pycomparse
-  adt/arena.h
-  adt/dynmemory.h
-  adt/stack.h
-  ast.c
-  ast.h
-  ast_fold_constants.c
-  ast_fold_constants.h
-  ast_unparse.c
-  ast_unparse.h
-  ast_types.h
-  codegen.c
-  codegen.h
-  codegen_expression.c
-  codegen_expression.h
-  codegen_statement.c
-  codegen_statement.h
-  codegen_types.h
-  diagnostics.h
-  diagnostics.c
-  diagnostics_types.h
-  encoding.c
-  encoding.h
-  object.c
-  object.h
-  object_intern.c
-  object_intern.h
-  object_intern_types.h
-  object_types.h
-  parser.c
-  parser.h
-  pycomparse.c
-  parser_types.h
-  scanner.c
-  scanner.h
-  scanner_types.h
-  unicode_name_lookup.c
-  unicode_name_lookup.h
-  unicode_name_table.c
-  unicode_name_table.h
-  symbol_info_types.h
-  symbol_table.c
-  symbol_table.h
-  symbol_table_types.h
-  symbol_types.h
-  unicode_nfkc_table.c
-  unicode_xid_table.c
-  util.c
-  util.h
-  writer.c
-  writer.h
+  include/pycomparse/adt/arena.h
+  include/pycomparse/adt/dynmemory.h
+  include/pycomparse/adt/stack.h
+  src/ast.c
+  include/pycomparse/ast.h
+  src/ast_fold_constants.c
+  include/pycomparse/ast_fold_constants.h
+  src/ast_unparse.c
+  include/pycomparse/ast_unparse.h
+  include/pycomparse/ast_types.h
+  src/codegen.c
+  include/pycomparse/codegen.h
+  src/codegen_expression.c
+  include/pycomparse/codegen_expression.h
+  src/codegen_statement.c
+  include/pycomparse/codegen_statement.h
+  include/pycomparse/codegen_types.h
+  include/pycomparse/diagnostics.h
+  src/diagnostics.c
+  include/pycomparse/diagnostics_types.h
+  src/encoding.c
+  include/pycomparse/encoding.h
+  src/object.c
+  include/pycomparse/object.h
+  src/object_intern.c
+  include/pycomparse/object_intern.h
+  include/pycomparse/object_intern_types.h
+  include/pycomparse/object_types.h
+  src/parser.c
+  include/pycomparse/parser.h
+  src/pycomparse.c
+  include/pycomparse/parser_types.h
+  src/scanner.c
+  include/pycomparse/scanner.h
+  include/pycomparse/scanner_types.h
+  src/unicode_name_lookup.c
+  include/pycomparse/unicode_name_lookup.h
+  src/unicode_name_table.c
+  include/pycomparse/unicode_name_table.h
+  include/pycomparse/symbol_info_types.h
+  src/symbol_table.c
+  include/pycomparse/symbol_table.h
+  include/pycomparse/symbol_table_types.h
+  include/pycomparse/symbol_types.h
+  src/unicode_nfkc_table.c
+  src/unicode_xid_table.c
+  src/util.c
+  include/pycomparse/util.h
+  src/writer.c
+  include/pycomparse/writer.h
 )
-target_include_directories(pycomparse PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(pycomparse PRIVATE "${CMAKE_SOURCE_DIR}/include")
 target_link_libraries(pycomparse PRIVATE ${PYCOMPARSE_ICONV_TARGET}
                                           ${PYCOMPARSE_ICONV_LIBRARIES})
 if (PYCOMPARSE_ENABLE_LTO)

@@ -83,9 +83,9 @@ uv run scripts/test.py scan
 ```
 ### Project Layout
 
-- `scanner.c`, `scanner.h`: tokenization
-- `parser.c`, `parser.h`: parsing to AST
-- `codegen*.c`, `writer.c`: bytecode emission
+- `src/`: C source files
+- `include/pycomparse/`: public headers
+- `include/pycomparse/adt/`: ADT/utility headers (arena, dynarray, hashset, stack)
 - `test/`: runtime/error/compile-only tests
 - `scripts/`: helper scripts
 

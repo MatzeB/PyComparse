@@ -105,40 +105,67 @@ if (NOT PYCOMPARSE_ICONV_FOUND)
   add_compile_definitions(PYCOMPARSE_NO_ICONV)
 endif()
 
+set(PYCOMPARSE_SOURCES
+  include/pycomparse/adt/arena.h
+  include/pycomparse/adt/dynmemory.h
+  include/pycomparse/adt/stack.h
+  include/pycomparse/ast.h
+  include/pycomparse/ast_fold_constants.h
+  include/pycomparse/ast_types.h
+  include/pycomparse/ast_unparse.h
+  include/pycomparse/codegen.h
+  include/pycomparse/codegen_expression.h
+  include/pycomparse/codegen_statement.h
+  include/pycomparse/codegen_types.h
+  include/pycomparse/diagnostics.h
+  include/pycomparse/diagnostics_types.h
+  include/pycomparse/encoding.h
+  include/pycomparse/object.h
+  include/pycomparse/object_intern.h
+  include/pycomparse/object_intern_types.h
+  include/pycomparse/object_types.h
+  include/pycomparse/parser.h
+  include/pycomparse/parser_types.h
+  include/pycomparse/scanner.h
+  include/pycomparse/scanner_types.h
+  include/pycomparse/symbol_info_types.h
+  include/pycomparse/symbol_table.h
+  include/pycomparse/symbol_table_types.h
+  include/pycomparse/symbol_types.h
+  include/pycomparse/unicode_name_lookup.h
+  include/pycomparse/unicode_name_table.h
+  include/pycomparse/util.h
+  include/pycomparse/writer.h
+  src/ast.c
+  src/ast_fold_constants.c
+  src/ast_unparse.c
+  src/codegen.c
+  src/codegen_expression.c
+  src/codegen_statement.c
+  src/diagnostics.c
+  src/encoding.c
+  src/object.c
+  src/object_intern.c
+  src/parser.c
+  src/scanner.c
+  src/symbol_table.c
+  src/unicode_name_lookup.c
+  src/unicode_name_table.c
+  src/unicode_nfkc_table.c
+  src/unicode_xid_table.c
+  src/util.c
+  src/writer.c
+)
+
 add_executable(arena_test
   src/arena_test.c
   include/pycomparse/adt/arena.h
 )
 target_include_directories(arena_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
+
 add_executable(scanner_test
-  src/ast.c
-  include/pycomparse/ast.h
-  include/pycomparse/ast_types.h
-  src/diagnostics.c
-  include/pycomparse/diagnostics.h
-  include/pycomparse/diagnostics_types.h
-  src/encoding.c
-  include/pycomparse/encoding.h
-  src/object.c
-  include/pycomparse/object.h
-  src/object_intern.c
-  include/pycomparse/object_intern.h
-  src/scanner.c
-  include/pycomparse/scanner.h
+  ${PYCOMPARSE_SOURCES}
   src/scanner_test.c
-  include/pycomparse/scanner_types.h
-  src/unicode_name_lookup.c
-  include/pycomparse/unicode_name_lookup.h
-  src/unicode_name_table.c
-  include/pycomparse/unicode_name_table.h
-  src/symbol_table.c
-  include/pycomparse/symbol_table.h
-  include/pycomparse/symbol_table_types.h
-  include/pycomparse/symbol_types.h
-  src/unicode_nfkc_table.c
-  src/unicode_xid_table.c
-  src/util.c
-  include/pycomparse/util.h
 )
 target_include_directories(scanner_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
 target_link_libraries(scanner_test PRIVATE ${PYCOMPARSE_ICONV_TARGET}
@@ -146,64 +173,34 @@ target_link_libraries(scanner_test PRIVATE ${PYCOMPARSE_ICONV_TARGET}
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET scanner_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
+
 add_executable(pycomparse
-  include/pycomparse/adt/arena.h
-  include/pycomparse/adt/dynmemory.h
-  include/pycomparse/adt/stack.h
-  src/ast.c
-  include/pycomparse/ast.h
-  src/ast_fold_constants.c
-  include/pycomparse/ast_fold_constants.h
-  src/ast_unparse.c
-  include/pycomparse/ast_unparse.h
-  include/pycomparse/ast_types.h
-  src/codegen.c
-  include/pycomparse/codegen.h
-  src/codegen_expression.c
-  include/pycomparse/codegen_expression.h
-  src/codegen_statement.c
-  include/pycomparse/codegen_statement.h
-  include/pycomparse/codegen_types.h
-  include/pycomparse/diagnostics.h
-  src/diagnostics.c
-  include/pycomparse/diagnostics_types.h
-  src/encoding.c
-  include/pycomparse/encoding.h
-  src/object.c
-  include/pycomparse/object.h
-  src/object_intern.c
-  include/pycomparse/object_intern.h
-  include/pycomparse/object_intern_types.h
-  include/pycomparse/object_types.h
-  src/parser.c
-  include/pycomparse/parser.h
+  ${PYCOMPARSE_SOURCES}
   src/pycomparse.c
-  include/pycomparse/parser_types.h
-  src/scanner.c
-  include/pycomparse/scanner.h
-  include/pycomparse/scanner_types.h
-  src/unicode_name_lookup.c
-  include/pycomparse/unicode_name_lookup.h
-  src/unicode_name_table.c
-  include/pycomparse/unicode_name_table.h
-  include/pycomparse/symbol_info_types.h
-  src/symbol_table.c
-  include/pycomparse/symbol_table.h
-  include/pycomparse/symbol_table_types.h
-  include/pycomparse/symbol_types.h
-  src/unicode_nfkc_table.c
-  src/unicode_xid_table.c
-  src/util.c
-  include/pycomparse/util.h
-  src/writer.c
-  include/pycomparse/writer.h
 )
 target_include_directories(pycomparse PRIVATE "${CMAKE_SOURCE_DIR}/include")
 target_link_libraries(pycomparse PRIVATE ${PYCOMPARSE_ICONV_TARGET}
-                                          ${PYCOMPARSE_ICONV_LIBRARIES})
+                                         ${PYCOMPARSE_ICONV_LIBRARIES})
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET pycomparse PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET arena_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
+option(PYCOMPARSE_ENABLE_FUZZER
+       "Build libFuzzer harness fuzz_compile (requires Clang)" OFF)
+
+if (PYCOMPARSE_ENABLE_FUZZER)
+  add_executable(fuzz_compile
+    ${PYCOMPARSE_SOURCES}
+    src/fuzz_compile.c
+  )
+  target_include_directories(fuzz_compile PRIVATE "${CMAKE_SOURCE_DIR}/include")
+  target_compile_options(fuzz_compile PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  target_link_options(fuzz_compile PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  target_link_libraries(fuzz_compile PRIVATE
+    ${PYCOMPARSE_ICONV_TARGET} ${PYCOMPARSE_ICONV_LIBRARIES})
 endif()

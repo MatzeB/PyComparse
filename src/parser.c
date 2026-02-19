@@ -3216,11 +3216,6 @@ struct ast_module *parse(struct parser_state *s)
   return module;
 }
 
-bool parser_had_errors(struct parser_state *s)
-{
-  return s->d->had_error;
-}
-
 void parser_init(struct parser_state *s, struct object_intern *objects,
                  struct diagnostics_state *diagnostics)
 {

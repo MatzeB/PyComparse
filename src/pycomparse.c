@@ -10,6 +10,8 @@
 #include "pycomparse/codegen_types.h"
 #include "pycomparse/diagnostics.h"
 #include "pycomparse/diagnostics_types.h"
+#include "pycomparse/object_intern.h"
+#include "pycomparse/object_intern_types.h"
 #include "pycomparse/parser.h"
 #include "pycomparse/parser_types.h"
 #include "pycomparse/scanner.h"
@@ -92,32 +94,34 @@ int main(int argc, char **argv)
   struct diagnostics_state diagnostics;
   diag_init(&diagnostics, stderr, input_filename);
 
+  struct object_intern objects;
+  object_intern_init(&objects);
+
   struct cg_state cg;
-  cg_init(&cg, &symbol_table, input_filename, &diagnostics);
+  cg_init(&cg, &objects, &symbol_table, input_filename, &diagnostics);
 
   struct parser_state parser;
-  parser_init(&parser, &cg.objects, &diagnostics);
-  scanner_init(&parser.scanner, input, input_filename, &symbol_table,
-               &cg.objects, &strings, &diagnostics);
+  parser_init(&parser, &objects, &diagnostics);
+  scanner_init(&parser.scanner, input, input_filename, &symbol_table, &objects,
+               &strings, &diagnostics);
 
   struct ast_module *module = parse(&parser);
-  bool               had_errors = parser_had_errors(&parser);
 
   fclose(input);
 
   union object *code = NULL;
-  if (!had_errors) {
-    ast_fold_constants(&cg.objects, &parser.ast, module);
+  if (!diag_had_errors(&diagnostics)) {
+    ast_fold_constants(&objects, &parser.ast, module);
     code = emit_module(&cg, module);
-    had_errors = diagnostics.had_error;
   }
 
-  if (!had_errors) {
+  bool io_error = false;
+  if (!diag_had_errors(&diagnostics)) {
     FILE *out = fopen(out_filename, "wb");
     if (out == NULL) {
       fprintf(stderr, "Failed to open '%s': %s\n", out_filename,
               strerror(errno));
-      had_errors = true;
+      io_error = true;
     } else {
       write_module(out, code);
       bool write_failed = ferror(out);
@@ -125,7 +129,7 @@ int main(int argc, char **argv)
       if (write_failed) {
         fprintf(stderr, "Failed to write '%s': %s\n", out_filename,
                 strerror(errno));
-        had_errors = true;
+        io_error = true;
       }
     }
   }
@@ -133,7 +137,8 @@ int main(int argc, char **argv)
   scanner_free(&parser.scanner);
   parser_free(&parser);
   cg_free(&cg);
+  object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
-  return had_errors ? 1 : 0;
+  return (diag_had_errors(&diagnostics) || io_error) ? 1 : 0;
 }

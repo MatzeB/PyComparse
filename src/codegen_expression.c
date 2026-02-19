@@ -88,7 +88,7 @@ emit_generator_helper(struct cg_state                 *s,
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
     size_t        qlen = strlen(qualname);
-    struct arena *arena = object_intern_arena(&s->objects);
+    struct arena *arena = object_intern_arena(s->objects);
     char         *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
     memcpy(prefix, qualname, qlen);
     memcpy(prefix + qlen, ".<locals>.", 11);
@@ -119,7 +119,7 @@ emit_generator_helper(struct cg_state                 *s,
                    /*push=*/1);
   }
   cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, qualname));
+  cg_load_const(s, object_intern_cstring(s->objects, qualname));
   uint32_t flags = has_closure ? MAKE_FUNCTION_CLOSURE : 0;
   unsigned operands = has_closure ? 3 : 2;
   cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
@@ -139,7 +139,7 @@ emit_generator_helper(struct cg_state                 *s,
     cg_push(s, 4);
     cg_pop(s, 4);
     cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
   }
 }
@@ -186,13 +186,13 @@ static void emit_expression_list_helper(
                      /*pop=*/tuple_length, /*push=*/1);
     } else {
       struct tuple_prep *tuple_prep
-          = object_intern_tuple_begin(&s->objects, tuple_length);
+          = object_intern_tuple_begin(s->objects, tuple_length);
       for (unsigned i = 0; i < tuple_length; i++) {
         union ast_expression *expression = expressions[non_star_begin + i];
         union object *as_const = ast_expression_as_constant(expression);
         object_new_tuple_set_at(tuple_prep, i, as_const);
       }
-      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+      union object *tuple = object_intern_tuple_end(s->objects, tuple_prep,
                                                     /*may_free_arena=*/true);
       cg_load_const(s, tuple);
     }
@@ -436,7 +436,7 @@ static void emit_dictionary_display(struct cg_state           *s,
     }
     if (all_const_keys) {
       struct tuple_prep *keys_prep
-          = object_intern_tuple_begin(&s->objects, num_build_map_items);
+          = object_intern_tuple_begin(s->objects, num_build_map_items);
       for (unsigned i = idx; i < non_star_star_end; i++) {
         item = &items[i];
         union object *key = ast_expression_as_constant(item->key);
@@ -444,7 +444,7 @@ static void emit_dictionary_display(struct cg_state           *s,
         object_new_tuple_set_at(keys_prep, i - idx, key);
         emit_expression(s, item->value);
       }
-      union object *keys = object_intern_tuple_end(&s->objects, keys_prep,
+      union object *keys = object_intern_tuple_end(s->objects, keys_prep,
                                                    /*may_free_arena=*/false);
       cg_load_const(s, keys);
       cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_build_map_items,
@@ -543,7 +543,7 @@ static void emit_set_display(struct cg_state            *s,
 
 static void emit_none(struct cg_state *s)
 {
-  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
 }
 
 static void emit_invalid(struct cg_state *s, struct ast_const *expression)
@@ -674,14 +674,14 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
                      /*pop=*/tuple_length, /*push=*/1);
     } else {
       struct tuple_prep *tuple_prep
-          = object_intern_tuple_begin(&s->objects, tuple_length);
+          = object_intern_tuple_begin(s->objects, tuple_length);
       for (unsigned i = 0; i < tuple_length; i++) {
         struct argument      *argument = &arguments[tuple_begin_idx + i];
         union ast_expression *expression = argument->expression;
         union object         *object = ast_expression_as_constant(expression);
         object_new_tuple_set_at(tuple_prep, i, object);
       }
-      union object *tuple = object_intern_tuple_end(&s->objects, tuple_prep,
+      union object *tuple = object_intern_tuple_end(s->objects, tuple_prep,
                                                     /*may_free_arena=*/true);
       cg_load_const(s, tuple);
     }
@@ -723,21 +723,21 @@ static void emit_call_ex_helper(struct cg_state *s, struct ast_call *call,
     if (kw_length == 1) {
       struct argument *argument = &arguments[kw_begin_idx];
       union object    *name
-          = object_intern_cstring(&s->objects, argument->name->string);
+          = object_intern_cstring(s->objects, argument->name->string);
       cg_load_const(s, name);
       emit_expression(s, argument->expression);
       cg_op_pop_push(s, OPCODE_BUILD_MAP, 1, /*pop=*/2, /*push=*/1);
     } else {
       struct tuple_prep *names_prep
-          = object_intern_tuple_begin(&s->objects, kw_length);
+          = object_intern_tuple_begin(s->objects, kw_length);
       for (unsigned a = 0; a < kw_length; a++) {
         struct argument *argument = &arguments[kw_begin_idx + a];
         union object    *name
-            = object_intern_cstring(&s->objects, argument->name->string);
+            = object_intern_cstring(s->objects, argument->name->string);
         object_new_tuple_set_at(names_prep, a, name);
         emit_expression(s, argument->expression);
       }
-      union object *names = object_intern_tuple_end(&s->objects, names_prep,
+      union object *names = object_intern_tuple_end(s->objects, names_prep,
                                                     /*may_free_arena=*/false);
       cg_load_const(s, names);
       cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, kw_length,
@@ -776,15 +776,15 @@ static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,
 
   unsigned           num_kw_arguments = num_arguments - kw_idx;
   struct tuple_prep *names_prep
-      = object_intern_tuple_begin(&s->objects, num_kw_arguments);
+      = object_intern_tuple_begin(s->objects, num_kw_arguments);
   for (unsigned i = 0; i < num_kw_arguments; i++) {
     struct argument *argument = &arguments[kw_idx + i];
     emit_expression(s, argument->expression);
     union object *name
-        = object_intern_cstring(&s->objects, argument->name->string);
+        = object_intern_cstring(s->objects, argument->name->string);
     object_new_tuple_set_at(names_prep, i, name);
   }
-  union object *names = object_intern_tuple_end(&s->objects, names_prep,
+  union object *names = object_intern_tuple_end(s->objects, names_prep,
                                                 /*may_free_arena=*/false);
   cg_load_const(s, names);
 
@@ -880,7 +880,7 @@ static void emit_fstring(struct cg_state *s, struct ast_fstring *fstring)
   struct fstring_element *elements = fstring->elements;
   unsigned                num_elements = fstring->num_elements;
   if (num_elements == 0) {
-    cg_load_const(s, object_intern_cstring(&s->objects, ""));
+    cg_load_const(s, object_intern_cstring(s->objects, ""));
     return;
   }
   for (unsigned i = 0; i < num_elements; i++) {
@@ -955,7 +955,7 @@ void emit_yield_from(struct cg_state *s, union ast_expression *nullable value,
     emit_none(s);
   }
   cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
-  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
 }
 

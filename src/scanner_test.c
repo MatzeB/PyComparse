@@ -55,5 +55,5 @@ int main(int argc, char **argv)
   object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
-  return 0;
+  return diag_had_errors(&diagnostics) ? 1 : 0;
 }

@@ -218,7 +218,7 @@ static void ensure_dead_block_for_unreachable_finally(struct cg_state *s)
 void emit_code_end(struct cg_state *s)
 {
   if (unreachable(s)) return;
-  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
 }
@@ -264,7 +264,7 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
     bool future_annotations = (s->code.flags & CO_FUTURE_ANNOTATIONS) != 0;
     if (future_annotations) {
       union object *annotation_string
-          = ast_unparse_expression(&s->objects, annotation);
+          = ast_unparse_expression(s->objects, annotation);
       cg_load_const(s, annotation_string);
     } else {
       emit_expression(s, annotation);
@@ -272,8 +272,8 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
     unsigned annotations_idx = cg_register_name(
         s, symbol_table_get_or_insert(s->symbol_table, "__annotations__"));
     cg_op_push1(s, OPCODE_LOAD_NAME, annotations_idx);
-    union object *name = object_intern_cstring(
-        &s->objects, target->identifier.symbol->string);
+    union object *name
+        = object_intern_cstring(s->objects, target->identifier.symbol->string);
     cg_load_const(s, name);
     cg_op_pop_push(s, OPCODE_STORE_SUBSCR, 0, /*pop=*/3, /*push=*/0);
     return;
@@ -338,7 +338,7 @@ static unsigned register_dotted_name(struct cg_state    *s,
   for (unsigned i = 0; i < num_symbols; i++) {
     length += strlen(name->symbols[i]->string);
   }
-  struct arena *arena = object_intern_arena(&s->objects);
+  struct arena *arena = object_intern_arena(s->objects);
   char         *chars = (char *)arena_allocate(arena, length, 1);
   char         *c = chars;
   for (unsigned i = 0; i < num_symbols; i++) {
@@ -366,23 +366,23 @@ static void emit_from_import(struct cg_state *s, unsigned num_prefix_dots,
 
   struct tuple_prep *name_tuple_prep;
   if (import_star) {
-    union object *name = object_intern_cstring(&s->objects, "*");
-    name_tuple_prep = object_intern_tuple_begin(&s->objects, 1);
+    union object *name = object_intern_cstring(s->objects, "*");
+    name_tuple_prep = object_intern_tuple_begin(s->objects, 1);
     object_new_tuple_set_at(name_tuple_prep, 0, name);
   } else {
-    name_tuple_prep = object_intern_tuple_begin(&s->objects, num_pairs);
+    name_tuple_prep = object_intern_tuple_begin(s->objects, num_pairs);
     for (unsigned i = 0; i < num_pairs; i++) {
       struct from_import_item *item = &items[i];
       union object            *name
-          = object_intern_cstring(&s->objects, item->name->string);
+          = object_intern_cstring(s->objects, item->name->string);
       object_new_tuple_set_at(name_tuple_prep, i, name);
     }
   }
   union object *name_tuple
-      = object_intern_tuple_end(&s->objects, name_tuple_prep,
+      = object_intern_tuple_end(s->objects, name_tuple_prep,
                                 /*may_free_arena=*/false);
 
-  cg_load_const(s, object_intern_int(&s->objects, num_prefix_dots));
+  cg_load_const(s, object_intern_int(s->objects, num_prefix_dots));
   cg_load_const(s, name_tuple);
   cg_op_pop_push(s, OPCODE_IMPORT_NAME, module_name, /*pop=*/2, /*push=*/1);
   if (import_star) {
@@ -404,9 +404,9 @@ static void emit_import(struct cg_state *s, struct dotted_name *module,
 {
   if (unreachable(s)) return;
   unsigned      module_name = register_dotted_name(s, module);
-  union object *object = object_intern_int(&s->objects, 0);
+  union object *object = object_intern_int(s->objects, 0);
   cg_load_const(s, object);
-  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   cg_op_pop_push(s, OPCODE_IMPORT_NAME, module_name, /*pop=*/2, /*push=*/1);
 
   if (as == NULL) {
@@ -466,7 +466,7 @@ emit_parameter_defaults(struct cg_state *s, struct make_function_state *state,
   }
   if (num_keyword_defaults > 0) {
     struct tuple_prep *names_prep
-        = object_intern_tuple_begin(&s->objects, num_keyword_defaults);
+        = object_intern_tuple_begin(s->objects, num_keyword_defaults);
     unsigned name_idx = 0;
     for (unsigned i = keyword_parameters_begin; i < num_parameters; i++) {
       struct parameter     *parameter = &parameters[i];
@@ -474,11 +474,11 @@ emit_parameter_defaults(struct cg_state *s, struct make_function_state *state,
       if (initializer == NULL) continue;
       emit_expression(s, initializer);
       union object *name
-          = object_intern_cstring(&s->objects, parameter->name->string);
+          = object_intern_cstring(s->objects, parameter->name->string);
       object_new_tuple_set_at(names_prep, name_idx++, name);
     }
     assert(name_idx == num_keyword_defaults);
-    union object *names = object_intern_tuple_end(&s->objects, names_prep,
+    union object *names = object_intern_tuple_end(s->objects, names_prep,
                                                   /*may_free_arena=*/false);
     cg_load_const(s, names);
     cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_keyword_defaults,
@@ -506,7 +506,7 @@ static void emit_function_annotations(
   state->annotations = true;
   bool future_annotations = (s->code.flags & CO_FUTURE_ANNOTATIONS) != 0;
   struct tuple_prep *names_prep
-      = object_intern_tuple_begin(&s->objects, num_annotation_items);
+      = object_intern_tuple_begin(s->objects, num_annotation_items);
   unsigned names_idx = 0;
 
   for (unsigned i = 0; i < num_parameters; ++i) {
@@ -514,25 +514,25 @@ static void emit_function_annotations(
     union ast_expression *type = parameter->type;
     if (type == NULL) continue;
     if (future_annotations) {
-      cg_load_const(s, ast_unparse_expression(&s->objects, type));
+      cg_load_const(s, ast_unparse_expression(s->objects, type));
     } else {
       emit_expression(s, type);
     }
     union object *name
-        = object_intern_cstring(&s->objects, parameter->name->string);
+        = object_intern_cstring(s->objects, parameter->name->string);
     object_new_tuple_set_at(names_prep, names_idx++, name);
   }
   if (return_type != NULL) {
     if (future_annotations) {
-      cg_load_const(s, ast_unparse_expression(&s->objects, return_type));
+      cg_load_const(s, ast_unparse_expression(s->objects, return_type));
     } else {
       emit_expression(s, return_type);
     }
-    union object *name = object_intern_cstring(&s->objects, "return");
+    union object *name = object_intern_cstring(s->objects, "return");
     object_new_tuple_set_at(names_prep, names_idx++, name);
   }
 
-  union object *names = object_intern_tuple_end(&s->objects, names_prep,
+  union object *names = object_intern_tuple_end(s->objects, names_prep,
                                                 /*may_free_arena=*/false);
   cg_load_const(s, names);
   cg_op_pop_push(s, OPCODE_BUILD_CONST_KEY_MAP, num_annotation_items,
@@ -564,7 +564,7 @@ void emit_make_function_begin(struct cg_state               *s,
   /* Set child's qualname prefix for nested scopes: qualname + ".<locals>." */
   {
     size_t        qlen = strlen(qualname);
-    struct arena *arena = object_intern_arena(&s->objects);
+    struct arena *arena = object_intern_arena(s->objects);
     char         *prefix = arena_allocate(arena, qlen + 10 + 1, 1);
     memcpy(prefix, qualname, qlen);
     memcpy(prefix + qlen, ".<locals>.", 11);
@@ -628,7 +628,7 @@ void emit_make_function_end(struct cg_state            *s,
   }
 
   cg_load_const(s, code);
-  cg_load_const(s, object_intern_cstring(&s->objects, state->qualname));
+  cg_load_const(s, object_intern_cstring(s->objects, state->qualname));
   uint32_t flags = 0;
   unsigned operands = 2;
   if (state->annotations) {
@@ -766,7 +766,7 @@ static void emit_try_except_end(struct cg_state *s, struct try_state *state,
     }
 
     cg_block_begin(s, except_unassign_as);
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_store(s, as);
     cg_delete(s, as);
     cg_op(s, OPCODE_END_FINALLY, 0);
@@ -832,7 +832,7 @@ static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
   struct basic_block *setup_finally = state->setup_finally;
   cg_block_begin_delayed(s, setup_finally);
   if (state->finally_needs_placeholder) {
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   }
   cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_body,
               /*fallthrough=*/setup_finally->next);
@@ -1105,7 +1105,7 @@ static void emit_for_begin_async(struct cg_state        *s,
 
   cg_block_begin(s, body);
   cg_op(s, OPCODE_GET_ANEXT, 0);
-  cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+  cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
   cg_op(s, OPCODE_POP_BLOCK, 0);
   emit_assignment(s, targets);
@@ -1416,7 +1416,7 @@ void emit_generator_expression_code(
 
     cg_block_begin(s, body);
     cg_op(s, OPCODE_GET_ANEXT, 0);
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
     cg_op(s, OPCODE_POP_BLOCK, 0);
     emit_assignment(s, part->targets);
@@ -1480,7 +1480,7 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
   if (async) {
     cg_op(s, OPCODE_BEFORE_ASYNC_WITH, 0);
     cg_op(s, OPCODE_GET_AWAITABLE, 0);
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
     cg_condjump(s, OPCODE_SETUP_ASYNC_WITH, cleanup, body);
   } else {
@@ -1512,7 +1512,7 @@ static void emit_with_end(struct cg_state *s, struct with_state *state)
   cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
   if (state->async_with) {
     cg_op(s, OPCODE_GET_AWAITABLE, 0);
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
   }
   cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
@@ -1628,7 +1628,7 @@ static void emit_pending_finally(struct cg_state         *s,
       break;
     case CLEANUP_EXCEPT_AS:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+      cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
       cg_store(s, state->as_symbol);
       cg_delete(s, state->as_symbol);
       break;
@@ -1638,7 +1638,7 @@ static void emit_pending_finally(struct cg_state         *s,
       cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
       if (state->async_with) {
         cg_op(s, OPCODE_GET_AWAITABLE, 0);
-        cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+        cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
         cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
       }
       cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
@@ -1689,7 +1689,7 @@ static struct symbol **nullable symbol_array_copy(struct cg_state  *s,
   unsigned num_symbols = idynarray_length(array, struct symbol *);
   if (num_symbols == 0) return NULL;
   size_t          size = num_symbols * sizeof(struct symbol *);
-  struct symbol **result = arena_allocate(object_intern_arena(&s->objects),
+  struct symbol **result = arena_allocate(object_intern_arena(s->objects),
                                           size, alignof(struct symbol *));
   memcpy(result, idynarray_data(array), size);
   return result;
@@ -1698,7 +1698,7 @@ static struct symbol **nullable symbol_array_copy(struct cg_state  *s,
 static struct ast_scope_bindings *scope_bindings_alloc(struct cg_state *s)
 {
   struct ast_scope_bindings *bindings
-      = arena_allocate(object_intern_arena(&s->objects), sizeof(*bindings),
+      = arena_allocate(object_intern_arena(s->objects), sizeof(*bindings),
                        alignof(struct ast_scope_bindings));
   memset(bindings, 0, sizeof(*bindings));
   return bindings;
@@ -2733,7 +2733,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   /* Set class body's qualname prefix: class_qualname + "." */
   {
     size_t        qlen = strlen(class_qualname);
-    struct arena *arena = object_intern_arena(&s->objects);
+    struct arena *arena = object_intern_arena(s->objects);
     char         *prefix = arena_allocate(arena, qlen + 2, 1);
     memcpy(prefix, class_qualname, qlen);
     prefix[qlen] = '.';
@@ -2743,7 +2743,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
 
   cg_load(s, symbol_table_get_or_insert(s->symbol_table, "__name__"));
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__module__"));
-  cg_load_const(s, object_intern_cstring(&s->objects, class_qualname));
+  cg_load_const(s, object_intern_cstring(s->objects, class_qualname));
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 
   apply_class_bindings(s, class_stmt);
@@ -2794,7 +2794,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
 
   cg_load_const(s, code);
   union object *name_const
-      = object_intern_cstring(&s->objects, class_stmt->name->string);
+      = object_intern_cstring(s->objects, class_stmt->name->string);
   cg_load_const(s, name_const);
   cg_op_pop_push(s, OPCODE_MAKE_FUNCTION, flags, /*pop=*/operands,
                  /*push=*/1);
@@ -3356,7 +3356,7 @@ static void emit_return(struct cg_state *s, struct location location,
       }
     }
     if (!has_value) {
-      cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_NONE));
+      cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     }
     cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
     cg_block_end(s);

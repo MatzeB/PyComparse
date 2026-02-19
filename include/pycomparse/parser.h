@@ -20,7 +20,6 @@ void parser_init(struct parser_state *s, struct object_intern *objects,
 void parser_free(struct parser_state *s);
 
 struct ast_module *parse(struct parser_state *s);
-bool               parser_had_errors(struct parser_state *s);
 
 ASSUME_NONNULL_END
 

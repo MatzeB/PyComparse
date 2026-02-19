@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "pycomparse/scanner_location.h"
@@ -30,6 +31,7 @@ void diag_end(struct diagnostics_state *s);
 
 void diag_init(struct diagnostics_state *s, FILE *out,
                const char *default_filename);
+bool diag_had_errors(const struct diagnostics_state *s);
 
 ASSUME_NONNULL_END
 

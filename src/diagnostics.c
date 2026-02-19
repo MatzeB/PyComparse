@@ -100,3 +100,8 @@ void diag_init(struct diagnostics_state *s, FILE *out,
   s->out = out;
   s->default_filename = default_filename;
 }
+
+bool diag_had_errors(const struct diagnostics_state *s)
+{
+  return s->had_error;
+}

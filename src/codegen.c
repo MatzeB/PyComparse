@@ -239,7 +239,7 @@ void cg_set_lineno(struct cg_state *s, unsigned lineno)
 
 struct basic_block *cg_block_allocate(struct cg_state *s)
 {
-  struct arena       *arena = object_intern_arena(&s->objects);
+  struct arena       *arena = object_intern_arena(s->objects);
   struct basic_block *block = arena_allocate_type(arena, struct basic_block);
   memset(block, 0, sizeof(*block));
   block->offset = INVALID_BLOCK_OFFSET;
@@ -334,7 +334,7 @@ void cg_code_begin(struct cg_state *s, bool in_function)
   if (in_function) {
     code->flags |= CO_NEWLOCALS | CO_OPTIMIZED;
     object_array_append(&code->consts,
-                        object_intern_singleton(&s->objects, OBJECT_NONE));
+                        object_intern_singleton(s->objects, OBJECT_NONE));
   }
 
   struct basic_block *first = cg_block_allocate(s);
@@ -586,7 +586,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   } while (changed);
 
   // Emit code.
-  struct arena *arena = object_intern_arena(&s->objects);
+  struct arena *arena = object_intern_arena(s->objects);
   arena_grow_begin(arena, /*alignment=*/1);
   if (s->code.setup_annotations) {
     cg_op_with_arena(arena, OPCODE_SETUP_ANNOTATIONS, 0);
@@ -653,7 +653,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   unsigned code_length = arena_grow_current_size(arena);
   char    *code_bytes = arena_grow_finish(arena);
 
-  union object *code = object_intern_string(&s->objects, OBJECT_BYTES,
+  union object *code = object_intern_string(s->objects, OBJECT_BYTES,
                                             code_length, code_bytes);
 
   /* Build lnotab from marks. */
@@ -712,10 +712,10 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   unsigned lnotab_length = arena_grow_current_size(arena);
   char    *lnotab_bytes = arena_grow_finish(arena);
 
-  union object *lnotab = object_intern_string(&s->objects, OBJECT_BYTES,
+  union object *lnotab = object_intern_string(s->objects, OBJECT_BYTES,
                                               lnotab_length, lnotab_bytes);
-  union object *filename = object_intern_cstring(&s->objects, s->filename);
-  union object *name_string = object_intern_cstring(&s->objects, name);
+  union object *filename = object_intern_cstring(s->objects, s->filename);
+  union object *name_string = object_intern_cstring(s->objects, name);
 
   union object *object = object_new_code(arena);
   object->code.argcount = s->code.argcount;
@@ -779,18 +779,19 @@ const char *cg_build_qualname(struct cg_state *s, const char *name)
   if (prefix == NULL) return name;
   size_t        plen = strlen(prefix);
   size_t        nlen = strlen(name);
-  struct arena *arena = object_intern_arena(&s->objects);
+  struct arena *arena = object_intern_arena(s->objects);
   char         *buf = arena_allocate(arena, plen + nlen + 1, 1);
   memcpy(buf, prefix, plen);
   memcpy(buf + plen, name, nlen + 1);
   return buf;
 }
 
-void cg_init(struct cg_state *s, struct symbol_table *symbol_table,
-             const char *filename, struct diagnostics_state *diagnostics)
+void cg_init(struct cg_state *s, struct object_intern *objects,
+             struct symbol_table *symbol_table, const char *filename,
+             struct diagnostics_state *diagnostics)
 {
   memset(s, 0, sizeof(*s));
-  object_intern_init(&s->objects);
+  s->objects = objects;
   s->symbol_table = symbol_table;
   s->next_scope_id = 1;
   s->filename = filename;
@@ -807,7 +808,7 @@ void cg_free(struct cg_state *s)
   object_array_free(&s->code.freevars);
   object_array_free(&s->code.cellvars);
   arena_free(&s->code.opcodes);
-  object_intern_free(&s->objects);
+  /* objects is not owned by cg_state; caller frees it. */
   stack_free(&s->stack);
 }
 
@@ -851,7 +852,7 @@ void cg_set_function_docstring(struct cg_state *s, union object *nullable doc)
 {
   assert(s->code.in_function);
   if (doc == NULL) {
-    doc = object_intern_singleton(&s->objects, OBJECT_NONE);
+    doc = object_intern_singleton(s->objects, OBJECT_NONE);
   }
   struct object_array *consts = &s->code.consts;
   assert(object_array_length(consts) > 0);
@@ -872,7 +873,7 @@ static unsigned cg_append_name(struct cg_state *s, union object *string)
 
 unsigned cg_register_name_from_cstring(struct cg_state *s, const char *cstring)
 {
-  union object *string = object_intern_cstring(&s->objects, cstring);
+  union object *string = object_intern_cstring(s->objects, cstring);
   cg_ensure_name_index_cache(s);
   uint32_t index;
   unsigned hash = pointer_hash(string);
@@ -892,7 +893,7 @@ static unsigned cg_append_varname(struct cg_state *s, struct symbol *name)
 {
   const char          *cstring = name->string;
   struct object_array *varnames = &s->code.varnames;
-  union object        *string = object_intern_cstring(&s->objects, cstring);
+  union object        *string = object_intern_cstring(s->objects, cstring);
   object_array_append(varnames, string);
   return object_array_length(varnames) - 1;
 }
@@ -901,7 +902,7 @@ static unsigned cg_append_freevar(struct cg_state *s, struct symbol *name)
 {
   const char          *cstring = name->string;
   struct object_array *freevars = &s->code.freevars;
-  union object        *string = object_intern_cstring(&s->objects, cstring);
+  union object        *string = object_intern_cstring(s->objects, cstring);
   object_array_append(freevars, string);
   return object_array_length(freevars) - 1;
 }
@@ -928,7 +929,7 @@ static unsigned cg_append_cellvar(struct cg_state *s, struct symbol *name)
 {
   const char          *cstring = name->string;
   struct object_array *cellvars = &s->code.cellvars;
-  union object        *string = object_intern_cstring(&s->objects, cstring);
+  union object        *string = object_intern_cstring(s->objects, cstring);
   object_array_append(cellvars, string);
   return object_array_length(cellvars) - 1;
 }
@@ -1057,7 +1058,7 @@ unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
 void cg_load(struct cg_state *s, struct symbol *name)
 {
   if (is_dunder_debug(name)) {
-    cg_load_const(s, object_intern_singleton(&s->objects, OBJECT_TRUE));
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_TRUE));
     return;
   }
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/false);

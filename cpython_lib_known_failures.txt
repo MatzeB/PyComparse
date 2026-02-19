@@ -1,0 +1,39 @@
+# Known failures when running pycomparse-compiled .pyc files against the CPython test suite
+# (scripts/check_cpython_lib.py --mode runtime)
+#
+# These are not pycomparse bugs -- the same failure occurs with CPython's own py_compile,
+# or the failure is an inherent artifact of the runtime testing approach.
+
+# --- __file__ mismatch (testing artifact) ---
+# When a .pyc is run directly, Python sets __file__ to the .pyc path, while co_filename
+# (and thus warnings.warn filename etc.) stays as the source .py path.  Tests that assert
+# warns.filename == __file__ or similar comparisons will always fail in this mode.
+# Also affects __loader__ / __spec__ which differ when running .pyc directly,
+# causing linecache to use a different code path. Reproducible with CPython py_compile.
+
+test/test_re.py          # test_inline_flags: warns.warnings[0].filename vs __file__
+test/test_linecache.py   # test_lazycache_already_cached: getlines() via __loader__ behaves differently
+test/test_traceback.py   # test_print_stack etc.: traceback text contains __file__ (.pyc vs .py)
+
+# --- heap address / ASLR noise (testing artifact) ---
+# repr() of objects contains heap addresses (0x...) that differ between runs.
+# The runtime checker runs source and compiled in separate processes with different layouts.
+
+test/test_format.py      # test_bytes_and_bytearray_format: FakeBytes/memoryview repr differs
+
+# --- missing _testcapi C extension (environment noise) ---
+# _testcapi is a CPython internal test extension not available in the uv-managed Python.
+# Affects both source and compiled runs equally; only causes a mismatch when combined
+# with other per-run differences (e.g. __file__) that change the overall output/exit code.
+
+test/test_traceback.py   # CExcReportingTests, TracebackFormatTests: import _testcapi fails
+test/test_format.py      # test_precision_c_limits: import _testcapi fails
+
+# --- peephole optimizer not implemented (known pycomparse limitation) ---
+# CPython's peephole optimizer performs transformations that pycomparse does not:
+#   - Deduplication of identical code objects (assertIs on two identical lambdas fails)
+#   - {0} set literal in annotations converted to frozenset({0}) constant
+#   - not (a is b)  -->  a is not b  (UNARY_NOT elimination after COMPARE_OP)
+
+test/test_compile.py          # test_merge_constants, test_dont_merge_constants
+test/test_positional_only_arg.py  # test_annotations_constant_fold

@@ -2231,6 +2231,10 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
         value = parse_yield_expression(s);
       } else {
         value = parse_star_expressions(s, PREC_EXPRESSION);
+        if (ast_expression_type(value) == AST_UNEXPR_STAR) {
+          value = error_starred_expression_not_allowed(
+              s, scanner_location(&s->scanner));
+        }
       }
     }
 

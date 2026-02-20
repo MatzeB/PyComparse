@@ -1580,6 +1580,17 @@ static bool symbol_array_contains(struct idynarray *array,
   return false;
 }
 
+static void symbol_array_remove_at_swap(struct idynarray *array,
+                                        unsigned          index)
+{
+  unsigned        num_symbols = idynarray_length(array, struct symbol *);
+  struct symbol **symbols = idynarray_data(array);
+  assert(index < num_symbols);
+  symbols[index] = symbols[num_symbols - 1];
+  array->size -= sizeof(struct symbol *);
+  idynarray_refresh_poisoning_(array);
+}
+
 static bool is_dunder_class(struct symbol *symbol)
 {
   return strcmp(symbol->string, "__class__") == 0;
@@ -2365,16 +2376,16 @@ static void analyze_children_bindings(struct cg_state      *s,
 static void resolve_nonlocals(struct cg_state *s, struct binding_scope *scope,
                               struct location *nullable error_location)
 {
-  struct symbol **nonlocals = idynarray_data(&scope->nonlocals);
-  unsigned        num_nonlocals
-      = idynarray_length(&scope->nonlocals, struct symbol *);
-  for (unsigned i = 0; i < num_nonlocals; ++i) {
-    struct symbol *name = nonlocals[i];
+  unsigned i = 0;
+  while (i < idynarray_length(&scope->nonlocals, struct symbol *)) {
+    struct symbol **nonlocals = idynarray_data(&scope->nonlocals);
+    struct symbol  *name = nonlocals[i];
     if (!resolve_from_parent_scope(scope->parent, name)) {
       if (is_dunder_class(name) && scope->parent != NULL
           && scope->parent->is_class) {
         symbol_array_append_unique(&scope->freevars, name);
         scope->parent->class_needs_class_cell = true;
+        ++i;
         continue;
       }
       if (error_location != NULL) {
@@ -2384,8 +2395,12 @@ static void resolve_nonlocals(struct cg_state *s, struct binding_scope *scope,
         diag_frag(s->d, " found");
         diag_end(s->d);
       }
+      /* Keep unresolved names out of nonlocal scope metadata so nested
+       * closures don't try to capture missing cells. */
+      symbol_array_remove_at_swap(&scope->nonlocals, i);
     } else {
       symbol_array_append_unique(&scope->freevars, name);
+      ++i;
     }
   }
 }

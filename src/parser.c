@@ -1032,6 +1032,13 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
                                   /*item_value_has_await=*/false);
   } else {
     key = first;
+    if (ast_expression_type(key) == AST_UNEXPR_STAR) {
+      struct location key_location = get_expression_location(key);
+      diag_begin_error(s->d, key_location);
+      diag_frag(s->d, "starred expression not allowed here");
+      diag_end(s->d);
+      key = invalid_expression(s);
+    }
     expect(s, ':'); /* TODO: say that we expected `,`, `:` or `}` on error? */
     bool await_saved = await_tracking_begin(s);
     value = parse_expression(s, PREC_NAMED);

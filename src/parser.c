@@ -713,6 +713,13 @@ static struct argument *parse_argument(struct parser_state *s,
 
   if (peek(s) == T_for || peek(s) == T_async) {
     union ast_expression *item = expression;
+    if (ast_expression_type(item) == AST_UNEXPR_STAR) {
+      struct location item_location = get_expression_location(item);
+      diag_begin_error(s->d, item_location);
+      diag_frag(s->d, "starred expression not allowed here");
+      diag_end(s->d);
+      item = invalid_expression(s);
+    }
     expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
     set_generator_expression_item(expression, item, expression_has_await,
                                   /*item_value=*/NULL,

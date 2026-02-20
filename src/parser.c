@@ -553,6 +553,8 @@ static union ast_expression *check_assignment_target(
         = expression->expression_list.expressions;
     for (unsigned i = 0; i < num_expressions; i++) {
       if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
+        expressions[i]->unexpr.op = check_assignment_target(
+            s, expressions[i]->unexpr.op, location, is_del, show_equal_hint);
         continue;
       }
       expressions[i] = check_assignment_target(s, expressions[i], location,

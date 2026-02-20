@@ -1475,6 +1475,26 @@ error_starred_expression_not_allowed(struct parser_state *s,
   return invalid_expression(s);
 }
 
+static inline union ast_expression *
+check_annotation_target(struct parser_state *s, union ast_expression *target,
+                        struct location location)
+{
+  enum ast_expression_type type = ast_expression_type(target);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR) {
+    return target;
+  }
+  if (type == AST_INVALID) {
+    return target;
+  }
+
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, "cannot assign to ");
+  diag_expression(s->d, target);
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
 static union ast_expression *parse_prefix_expression(struct parser_state *s)
 {
   switch (peek(s)) {
@@ -2138,9 +2158,7 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
   bool                  starts_with_lparen = (peek(s) == '(');
   union ast_expression *expression = parse_star_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
-    /* TODO Check: check that expression is either:
-     *  NAME |  ( single_target ) | single_subscript_attribute_target
-     */
+    expression = check_annotation_target(s, expression, location);
     union ast_expression *annotation = parse_expression(s, PREC_EXPRESSION);
     union ast_expression *value = NULL;
     if (accept(s, '=')) {

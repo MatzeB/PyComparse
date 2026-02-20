@@ -762,11 +762,18 @@ static void emit_call_kw_helper(struct cg_state *s, struct ast_call *call,
   unsigned         num_arguments = call->num_arguments;
   struct argument *arguments = call->arguments;
   assert(num_arguments >= 1);
-  unsigned kw_idx = num_arguments - 1;
-  while (kw_idx > 0) {
-    struct argument *argument = &arguments[kw_idx - 1];
-    if (argument->name == NULL) break;
-    --kw_idx;
+  unsigned kw_idx = 0;
+  while (kw_idx < num_arguments && arguments[kw_idx].name == NULL) {
+    ++kw_idx;
+  }
+  /* Malformed argument order from parser recovery (e.g. positional after
+   * keyword): fall back to EX helper to avoid null keyword-name dereference.
+   */
+  for (unsigned i = kw_idx; i < num_arguments; i++) {
+    if (arguments[i].name == NULL) {
+      emit_call_ex_helper(s, call, num_extra_args);
+      return;
+    }
   }
 
   for (unsigned i = 0; i < kw_idx; i++) {

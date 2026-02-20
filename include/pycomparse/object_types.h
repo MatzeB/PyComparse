@@ -16,9 +16,9 @@ struct object_base {
 };
 
 struct object_array {
-  uint32_t                         length;
-  uint32_t                         capacity;
-  union object * nonnull * nonnull items;
+  uint32_t                          length;
+  uint32_t                          capacity;
+  union object * nonnull * nullable items;
 };
 
 struct object_code {

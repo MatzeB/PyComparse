@@ -2998,12 +2998,25 @@ static union ast_statement *parse_try(struct parser_state *s)
   struct ast_try_except inline_storage[4];
   struct idynarray      excepts;
   idynarray_init(&excepts, inline_storage, sizeof(inline_storage));
+  bool saw_bare_except = false;
 
   while (peek(s) == T_except) {
     struct location except_location = scanner_location(&s->scanner);
     eat(s, T_except);
+    bool extra_except_after_bare = saw_bare_except;
+    if (extra_except_after_bare) {
+      diag_begin_error(s->d, except_location);
+      diag_frag(s->d, "default ");
+      diag_token_kind(s->d, T_except);
+      diag_frag(s->d, " must be last");
+      diag_end(s->d);
+    }
+
+    struct ast_try_except  ignored_except;
     struct ast_try_except *except_stmt
-        = idynarray_append(&excepts, struct ast_try_except);
+        = extra_except_after_bare
+              ? &ignored_except
+              : idynarray_append(&excepts, struct ast_try_except);
     except_stmt->location = except_location;
     except_stmt->match = NULL;
     except_stmt->as = NULL;
@@ -3016,6 +3029,9 @@ static union ast_statement *parse_try(struct parser_state *s)
     }
     expect(s, ':');
     except_stmt->body = parse_suite(s);
+    if (except_stmt->match == NULL) {
+      saw_bare_except = true;
+    }
   }
 
   bool had_except = idynarray_length(&excepts, struct ast_try_except) > 0;
@@ -3123,9 +3139,10 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
       item->as_location = scanner_location(&s->scanner);
       eat(s, T_as);
       item->targets = parse_expression(s, PREC_NAMED);
-      item->targets = check_assignment_target(s, item->targets, item->as_location,
-                                              /*is_del=*/false,
-                                              /*show_equal_hint=*/false);
+      item->targets
+          = check_assignment_target(s, item->targets, item->as_location,
+                                    /*is_del=*/false,
+                                    /*show_equal_hint=*/false);
     }
   } while (accept(s, ','));
   expect(s, ':');

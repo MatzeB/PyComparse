@@ -1,0 +1,1 @@
+test/errors/stmt_try_bare_except_last.py:5 error: default `except` must be last

@@ -1587,7 +1587,12 @@ parse_assignment_rhs(struct parser_state *s)
   if (peek(s) == T_yield) {
     return parse_yield_expression(s);
   }
-  return parse_star_expressions(s, PREC_EXPRESSION);
+  union ast_expression *rhs = parse_star_expressions(s, PREC_EXPRESSION);
+  if (ast_expression_type(rhs) == AST_UNEXPR_STAR) {
+    rhs = error_starred_expression_not_allowed(s,
+                                               scanner_location(&s->scanner));
+  }
+  return rhs;
 }
 
 static inline union ast_expression *parse_augassign_rhs(struct parser_state *s)

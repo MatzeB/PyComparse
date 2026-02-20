@@ -3089,12 +3089,17 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     struct idynarray     statements;
     idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
-    /* The scanner guarantees all T_INDENT tokens are matched by T_DEDENT
-     * before T_EOF (see scan_eof / scan_indentation). */
+    /* Add T_DEDENT as an anchor so that error recovery inside statements
+     * cannot consume the T_DEDENT that ends this suite.  Without this,
+     * eat_until_anchor() can eat the closing T_DEDENT (e.g. when recovering
+     * from an error on a line like "lass C:"), leaving this loop spinning at
+     * T_EOF with no T_DEDENT ever to find. */
+    add_anchor(s, T_DEDENT);
     do {
       parse_statement(s, &statements, /*top_level=*/false,
                       /*print_expr=*/false);
     } while (!accept(s, T_DEDENT));
+    remove_anchor(s, T_DEDENT);
 
     struct ast_statement_list *result = ast_statement_list_from_array(
         s, idynarray_data(&statements),

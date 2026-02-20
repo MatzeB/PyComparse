@@ -1,0 +1,1 @@
+test/errors/stmt_async_with_invalid_as_target.py:2 error: cannot assign to expression

@@ -3112,7 +3112,9 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
       item->as_location = scanner_location(&s->scanner);
       eat(s, T_as);
       item->targets = parse_expression(s, PREC_NAMED);
-      /* TODO: check_assignment_target */
+      item->targets = check_assignment_target(s, item->targets, item->as_location,
+                                              /*is_del=*/false,
+                                              /*show_equal_hint=*/false);
     }
   } while (accept(s, ','));
   expect(s, ':');

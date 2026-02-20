@@ -539,6 +539,46 @@ static union ast_expression *parse_star_expressions(struct parser_state *s,
   return expression;
 }
 
+static union ast_expression *check_assignment_target(
+    struct parser_state *s, union ast_expression *expression,
+    struct location location, bool is_del, bool show_equal_hint)
+{
+  enum ast_expression_type type = ast_expression_type(expression);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR)
+    return expression;
+  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
+    unsigned num_expressions = expression->expression_list.num_expressions;
+    union ast_expression **expressions
+        = expression->expression_list.expressions;
+    for (unsigned i = 0; i < num_expressions; i++) {
+      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
+        continue;
+      }
+      expressions[i] = check_assignment_target(s, expressions[i], location,
+                                               is_del, show_equal_hint);
+    }
+    return expression;
+  }
+  if (type == AST_INVALID) {
+    return expression;
+  }
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
+  diag_expression(s->d, expression);
+  if (show_equal_hint) {
+    diag_frag(s->d, ". Maybe you meant ");
+    diag_token_kind(s->d, T_EQUALS_EQUALS);
+    diag_frag(s->d, ", or ");
+    diag_token_kind(s->d, T_COLON_EQUALS);
+    diag_frag(s->d, " instead of ");
+    diag_token_kind(s->d, '=');
+    diag_frag(s->d, "?");
+  }
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
 static union ast_expression *
 parse_generator_expression(struct parser_state     *s,
                            enum ast_expression_type type)
@@ -557,6 +597,9 @@ parse_generator_expression(struct parser_state     *s,
     if (peek(s) == T_for) {
       eat(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
+      targets = check_assignment_target(s, targets, location,
+                                        /*is_del=*/false,
+                                        /*show_equal_hint=*/false);
       expect(s, T_in);
       bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
@@ -570,6 +613,9 @@ parse_generator_expression(struct parser_state     *s,
       eat(s, T_async);
       expect(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
+      targets = check_assignment_target(s, targets, location,
+                                        /*is_del=*/false,
+                                        /*show_equal_hint=*/false);
       expect(s, T_in);
       bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
@@ -2075,48 +2121,6 @@ union ast_expression *parse_expression(struct parser_state *s,
     result = postfix_parser->func(s, result);
   }
   return result;
-}
-
-static union ast_expression *check_assignment_target(
-    struct parser_state *s, union ast_expression *expression,
-    struct location location, bool is_del, bool show_equal_hint)
-{
-  enum ast_expression_type type = ast_expression_type(expression);
-  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
-      || type == AST_ATTR)
-    return expression;
-  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
-    unsigned num_expressions = expression->expression_list.num_expressions;
-    union ast_expression **expressions
-        = expression->expression_list.expressions;
-    for (unsigned i = 0; i < num_expressions; i++) {
-      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
-        continue;
-      }
-      expressions[i] = check_assignment_target(s, expressions[i], location,
-                                               is_del, show_equal_hint);
-    }
-    return expression;
-  }
-  if (type == AST_INVALID) {
-    return expression;
-  }
-  diag_begin_error(s->d, location);
-  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
-  diag_expression(s->d, expression);
-  if (show_equal_hint) {
-    /* TODO: only show ':=' suggestion where it makes sense (like cpython)...
-     */
-    diag_frag(s->d, ". Maybe you meant ");
-    diag_token_kind(s->d, T_EQUALS_EQUALS);
-    diag_frag(s->d, ", or ");
-    diag_token_kind(s->d, T_COLON_EQUALS);
-    diag_frag(s->d, " instead of ");
-    diag_token_kind(s->d, '=');
-    diag_frag(s->d, "?");
-  }
-  diag_end(s->d);
-  return invalid_expression(s);
 }
 
 static union ast_statement *parse_assignment(struct parser_state  *s,

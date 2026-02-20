@@ -1,0 +1,1 @@
+test/errors/expr_dictcomp_invalid_target.py:1 error: cannot assign to expression

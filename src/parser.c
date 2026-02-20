@@ -2522,6 +2522,10 @@ static union ast_statement *parse_return(struct parser_state *s)
   union ast_expression *expression;
   if (is_expression_start(peek(s))) {
     expression = parse_star_expressions(s, PREC_EXPRESSION);
+    if (ast_expression_type(expression) == AST_UNEXPR_STAR) {
+      expression = error_starred_expression_not_allowed(
+          s, get_expression_location(expression));
+    }
   } else {
     expression = NULL;
   }

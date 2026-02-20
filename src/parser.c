@@ -985,7 +985,13 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
 
   union ast_expression *expression;
   if (peek(s) == T_for || peek(s) == T_async) {
-    /* TODO: disallow star-expression */
+    if (ast_expression_type(first) == AST_UNEXPR_STAR) {
+      struct location first_location = get_expression_location(first);
+      diag_begin_error(s->d, first_location);
+      diag_frag(s->d, "starred expression not allowed here");
+      diag_end(s->d);
+      first = invalid_expression(s);
+    }
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
     expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,
@@ -1041,6 +1047,13 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
     remove_anchor(s, ',');
   } else if (peek(s) == T_for || peek(s) == T_async) {
     /* set comprehension */
+    if (ast_expression_type(first) == AST_UNEXPR_STAR) {
+      struct location first_location = get_expression_location(first);
+      diag_begin_error(s->d, first_location);
+      diag_frag(s->d, "starred expression not allowed here");
+      diag_end(s->d);
+      first = invalid_expression(s);
+    }
     expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
     expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,

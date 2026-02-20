@@ -1147,7 +1147,13 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
     bool                  first_has_await = await_tracking_end(s, await_saved);
     if (peek(s) == T_for || peek(s) == T_async) {
-      /* TODO: disallow star-expression */
+      if (ast_expression_type(first) == AST_UNEXPR_STAR) {
+        struct location first_location = get_expression_location(first);
+        diag_begin_error(s->d, first_location);
+        diag_frag(s->d, "starred expression not allowed here");
+        diag_end(s->d);
+        first = invalid_expression(s);
+      }
       expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
       expression->generator_expression.base.location = location;
       set_generator_expression_item(expression, first, first_has_await,
@@ -1158,6 +1164,13 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
           s, AST_EXPRESSION_LIST, first, PREC_NAMED, /*allow_slices=*/false,
           /*allow_starred=*/true);
     } else {
+      if (ast_expression_type(first) == AST_UNEXPR_STAR) {
+        struct location first_location = get_expression_location(first);
+        diag_begin_error(s->d, first_location);
+        diag_frag(s->d, "starred expression not allowed here");
+        diag_end(s->d);
+        first = invalid_expression(s);
+      }
       expression = first;
     }
   }
@@ -1370,6 +1383,16 @@ static union ast_expression *parse_string(struct parser_state *s)
 
         union ast_expression *expression
             = parse_star_expressions(s, PREC_EXPRESSION);
+        if (ast_expression_type(expression) == AST_UNEXPR_STAR
+            || (ast_expression_type(expression) == AST_EXPRESSION_LIST
+                && expression->expression_list.has_star_expression)) {
+          struct location expression_location
+              = get_expression_location(expression);
+          diag_begin_error(s->d, expression_location);
+          diag_frag(s->d, "starred expression not allowed here");
+          diag_end(s->d);
+          expression = invalid_expression(s);
+        }
         bool          debug_expression = accept(s, '=');
         union object *debug_prefix = NULL;
         if (debug_expression) {

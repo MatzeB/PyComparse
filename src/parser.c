@@ -1465,6 +1465,16 @@ static bool is_expression_start(enum token_kind token_kind)
   }
 }
 
+static inline union ast_expression *
+error_starred_expression_not_allowed(struct parser_state *s,
+                                     struct location      location)
+{
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, "starred expression not allowed here");
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
 static union ast_expression *parse_prefix_expression(struct parser_state *s)
 {
   switch (peek(s)) {
@@ -1511,10 +1521,7 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
       enum ast_expression_type type
           = peek(s) == '*' ? AST_UNEXPR_STAR : AST_UNEXPR_STAR_STAR;
       parse_unexpr(s, PREC_OR, type);
-      diag_begin_error(s->d, location);
-      diag_frag(s->d, "starred expression not allowed here");
-      diag_end(s->d);
-      return invalid_expression(s);
+      return error_starred_expression_not_allowed(s, location);
     }
     error_expected(s, "expression");
     return invalid_expression(s);
@@ -1563,13 +1570,30 @@ parse_assignment_rhs(struct parser_state *s)
   return parse_star_expressions(s, PREC_EXPRESSION);
 }
 
+static inline union ast_expression *parse_augassign_rhs(struct parser_state *s)
+{
+  if (peek(s) == T_yield) {
+    return parse_yield_expression(s);
+  }
+  union ast_expression *rhs = parse_expression(s, PREC_EXPRESSION);
+  if (peek(s) == ',') {
+    rhs = parse_expression_list_helper(s, AST_EXPRESSION_LIST, rhs,
+                                       PREC_EXPRESSION, /*allow_slices=*/false,
+                                       /*allow_starred=*/false);
+    assert(ast_expression_type(rhs) == AST_EXPRESSION_LIST);
+    rhs->expression_list.as_constant
+        = ast_tuple_compute_constant(s->objects, &rhs->expression_list);
+  }
+  return rhs;
+}
+
 static inline union ast_expression *
 parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
                      union ast_expression *left)
 {
   struct location location = scanner_location(&s->scanner);
   next_token(s);
-  union ast_expression *right = parse_assignment_rhs(s);
+  union ast_expression *right = parse_augassign_rhs(s);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_binexpr, type);
   expression->binexpr.left = left;
@@ -2159,6 +2183,12 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
 
   if (peek(s) == '=') {
     return parse_assignment(s, expression, location);
+  }
+
+  if (ast_expression_type(expression) == AST_UNEXPR_STAR
+      || (ast_expression_type(expression) == AST_EXPRESSION_LIST
+          && expression->expression_list.has_star_expression)) {
+    expression = error_starred_expression_not_allowed(s, location);
   }
 
   union ast_statement *statement = ast_allocate_statement(

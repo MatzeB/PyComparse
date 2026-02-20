@@ -1,0 +1,1 @@
+test/errors/nonlocal_missing_binding_walrus.py:2 error: no binding for nonlocal `x` found

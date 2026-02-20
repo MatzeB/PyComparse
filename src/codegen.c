@@ -1052,6 +1052,9 @@ unsigned cg_closure_index(struct cg_state *s, struct symbol *name)
       return object_array_length(&s->code.cellvars) + i;
     }
   }
+  if (diag_had_errors(s->d)) {
+    return 0;
+  }
   internal_error("symbol is not a closure variable");
 }
 

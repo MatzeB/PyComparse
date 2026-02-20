@@ -51,15 +51,15 @@ struct if_state {
 };
 
 struct try_state {
-  struct basic_block *setup_finally;
-  struct basic_block *setup_except;
-  struct basic_block *body_exit;
-  struct basic_block *excepts;
-  struct basic_block *except_unassign_as;
-  struct basic_block *else_block;
-  struct basic_block *enter_finally;
-  struct basic_block *finally_body;
-  struct basic_block *footer;
+  struct basic_block *nullable setup_finally;
+  struct basic_block *nullable setup_except;
+  struct basic_block *nullable body_exit;
+  struct basic_block *nullable excepts;
+  struct basic_block *nullable except_unassign_as;
+  struct basic_block *nullable else_block;
+  struct basic_block *nullable enter_finally;
+  struct basic_block *nullable finally_body;
+  struct basic_block *nullable footer;
   bool                try_reachable;
   bool                had_except;
   bool                had_else;

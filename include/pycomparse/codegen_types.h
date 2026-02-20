@@ -66,9 +66,9 @@ struct code_state {
   struct object_array                    cellvars;
   struct code_index_cache                const_index_cache;
   struct code_index_cache                name_index_cache;
-  struct basic_block                    *current_block;
-  struct basic_block                    *first_block;
-  struct basic_block                    *last_block;
+  struct basic_block *nullable           current_block;
+  struct basic_block *nullable           first_block;
+  struct basic_block *nullable           last_block;
   struct loop_state                      loop_state;
   unsigned                               cg_stack_begin;
   uint32_t                               outer_scope_id;

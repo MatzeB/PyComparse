@@ -52,6 +52,8 @@ uv python /tmp/test.pyc
 CMake options currently available:
 
 - `-DPYCOMPARSE_ENABLE_LTO=ON` to enable LTO/IPO (if supported by toolchain)
+- `-DPYCOMPARSE_ENABLE_SANITIZERS=ON` to enable AddressSanitizer, UBSan, and
+  nullability checks (requires Clang)
 - `-DPYCOMPARSE_PGO_MODE=off|generate|use`
 - `-DPYCOMPARSE_PGO_DATA=/path/to/profile-data` when `PYCOMPARSE_PGO_MODE=use`
 - `-DCMAKE_DISABLE_FIND_PACKAGE_Iconv=TRUE` builds without iconv
@@ -60,6 +62,15 @@ For a full PGO+LTO build flow:
 
 ```sh
 scripts/build_pgo_lto.sh
+```
+
+For a sanitizer build:
+
+```sh
+cmake -S . -B build-asan -G Ninja -DCMAKE_C_COMPILER=clang \
+  -DPYCOMPARSE_ENABLE_SANITIZERS=ON
+ninja --quiet -C build-asan
+uv run scripts/test.py parser --compiler build-asan/pycomparse
 ```
 
 ### Testing

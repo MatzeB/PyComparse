@@ -6,6 +6,8 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(PYCOMPARSE_ENABLE_LTO "Enable link-time optimization (IPO/LTO)" OFF)
+option(PYCOMPARSE_ENABLE_SANITIZERS
+       "Enable AddressSanitizer, UBSan, and nullability sanitizer (requires Clang)" OFF)
 set(PYCOMPARSE_PGO_MODE "off" CACHE STRING "PGO mode: off, generate, use")
 set_property(CACHE PYCOMPARSE_PGO_MODE PROPERTY STRINGS off generate use)
 set(PYCOMPARSE_PGO_DATA "" CACHE FILEPATH "Path to PGO profile data for use-mode")
@@ -69,6 +71,19 @@ endif()
 if (NOT PYCOMPARSE_PGO_COMPILE_FLAGS STREQUAL "")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${PYCOMPARSE_PGO_COMPILE_FLAGS}")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${PYCOMPARSE_PGO_LINK_FLAGS}")
+endif()
+
+if (PYCOMPARSE_ENABLE_SANITIZERS)
+  if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR
+      "PYCOMPARSE_ENABLE_SANITIZERS requires Clang; the nullability sanitizer "
+      "is Clang-only. Current compiler: ${CMAKE_C_COMPILER_ID}")
+  endif()
+  set(PYCOMPARSE_SANITIZER_FLAGS
+      "-fsanitize=address,undefined,nullability -fno-omit-frame-pointer")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${PYCOMPARSE_SANITIZER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} ${PYCOMPARSE_SANITIZER_FLAGS}")
 endif()
 
 set(PYCOMPARSE_ICONV_FOUND OFF)

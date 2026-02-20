@@ -169,6 +169,9 @@ struct scan_decimal_integer_result {
 static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 {
   assert(s->c != C_EOF && "not allowed to advance past EOF");
+  if (s->input == NULL) {
+    return C_EOF;
+  }
   if (s->fstring_debug.depth > 0) {
     assert(s->fstring_debug.tail_start != NULL);
     assert(s->fstring_debug.tail_start <= s->buffer_end);
@@ -207,7 +210,7 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
       return C_EOF;
     }
   }
-  char *start = s->read_buffer;
+  const char *start = s->read_buffer;
   s->p = start + 1;
   s->buffer_end = start + read_size;
   if (s->fstring_debug.depth > 0) {
@@ -233,22 +236,26 @@ static void pushback_char(struct scanner_state *s, int c)
 {
   assert(c != C_EOF);
   assert(s->c == c);
-  assert(s->read_buffer != NULL);
   assert(s->p != NULL);
   assert(s->buffer_end != NULL);
-  assert(s->p > s->read_buffer && s->p <= s->buffer_end);
+  assert(s->input == NULL
+         || (s->read_buffer != NULL && s->p > s->read_buffer));
+  assert(s->p <= s->buffer_end);
   assert((unsigned char)s->p[-1] == (unsigned char)c);
   --s->p;
   s->c = c;
 }
 
-static inline char *nullable scanner_current_char_ptr(struct scanner_state *s)
+static inline const char *nullable
+scanner_current_char_ptr(struct scanner_state *s)
 {
-  if (s->c == C_EOF || s->read_buffer == NULL || s->p == NULL
-      || s->buffer_end == NULL) {
+  if (s->c == C_EOF || s->p == NULL || s->buffer_end == NULL) {
     return NULL;
   }
-  if (s->p > s->read_buffer && s->p[-1] == (char)s->c) {
+  if (s->input != NULL && s->read_buffer == NULL) {
+    return NULL;
+  }
+  if ((s->input == NULL || s->p > s->read_buffer) && s->p[-1] == (char)s->c) {
     return s->p - 1;
   }
   if (s->p < s->buffer_end && s->p[0] == (char)s->c) {
@@ -258,7 +265,7 @@ static inline char *nullable scanner_current_char_ptr(struct scanner_state *s)
 }
 
 static inline void scanner_set_current_char_ptr(struct scanner_state *s,
-                                                char                 *p)
+                                                const char           *p)
 {
   assert(p < s->buffer_end);
   s->c = (unsigned char)*p;
@@ -330,7 +337,7 @@ static void scan_skip_inline_spaces(struct scanner_state *s)
       return;
     }
 
-    char *p = scanner_current_char_ptr(s);
+    const char *p = scanner_current_char_ptr(s);
     if (p == NULL) {
       next_char(s);
       continue;
@@ -355,13 +362,13 @@ static void scan_indentation_spaces(struct scanner_state *s, unsigned *column)
       return;
     }
 
-    char *p = scanner_current_char_ptr(s);
+    const char *p = scanner_current_char_ptr(s);
     if (p == NULL) {
       next_char(s);
       ++*column;
       continue;
     }
-    char *begin = p;
+    const char *begin = p;
     while (p < s->buffer_end && *p == ' ') {
       ++p;
     }
@@ -1374,8 +1381,9 @@ static void fstring_pop(struct scanner_state *s)
   s->fstring = s->fstring_stack[--s->fstring_stack_top];
 }
 
-static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
-                                                                  char *end)
+static const char *
+scan_string_plain_span_find_stop_scalar_nofmt_double(const char *cursor,
+                                                     const char *end)
 {
   while (cursor < end) {
     unsigned char c = *cursor;
@@ -1387,8 +1395,9 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_double(char *cursor,
   return cursor;
 }
 
-static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
-                                                                  char *end)
+static const char *
+scan_string_plain_span_find_stop_scalar_nofmt_single(const char *cursor,
+                                                     const char *end)
 {
   while (cursor < end) {
     unsigned char c = *cursor;
@@ -1400,8 +1409,9 @@ static char *scan_string_plain_span_find_stop_scalar_nofmt_single(char *cursor,
   return cursor;
 }
 
-static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
-                                                                char *end)
+static const char *
+scan_string_plain_span_find_stop_scalar_fmt_double(const char *cursor,
+                                                   const char *end)
 {
   while (cursor < end) {
     unsigned char c = *cursor;
@@ -1414,8 +1424,9 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_double(char *cursor,
   return cursor;
 }
 
-static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
-                                                                char *end)
+static const char *
+scan_string_plain_span_find_stop_scalar_fmt_single(const char *cursor,
+                                                   const char *end)
 {
   while (cursor < end) {
     unsigned char c = *cursor;
@@ -1430,8 +1441,9 @@ static char *scan_string_plain_span_find_stop_scalar_fmt_single(char *cursor,
 
 #if PYCOMPARSE_HAVE_X86_AVX2 && PYCOMPARSE_HAVE_GNU_IFUNC
 
-__attribute__((target("avx2"))) static char *
-scan_string_plain_span_find_stop_avx2_nofmt_double(char *cursor, char *end)
+__attribute__((target("avx2"))) static const char *
+scan_string_plain_span_find_stop_avx2_nofmt_double(const char *cursor,
+                                                   const char *end)
 {
   const __m256i quote = _mm256_set1_epi8('"');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1462,8 +1474,9 @@ scan_string_plain_span_find_stop_avx2_nofmt_double(char *cursor, char *end)
   return cursor;
 }
 
-__attribute__((target("avx2"))) static char *
-scan_string_plain_span_find_stop_avx2_nofmt_single(char *cursor, char *end)
+__attribute__((target("avx2"))) static const char *
+scan_string_plain_span_find_stop_avx2_nofmt_single(const char *cursor,
+                                                   const char *end)
 {
   const __m256i quote = _mm256_set1_epi8('\'');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1494,8 +1507,9 @@ scan_string_plain_span_find_stop_avx2_nofmt_single(char *cursor, char *end)
   return cursor;
 }
 
-__attribute__((target("avx2"))) static char *
-scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor, char *end)
+__attribute__((target("avx2"))) static const char *
+scan_string_plain_span_find_stop_avx2_fmt_double(const char *cursor,
+                                                 const char *end)
 {
   const __m256i quote = _mm256_set1_epi8('"');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1532,8 +1546,9 @@ scan_string_plain_span_find_stop_avx2_fmt_double(char *cursor, char *end)
   return cursor;
 }
 
-__attribute__((target("avx2"))) static char *
-scan_string_plain_span_find_stop_avx2_fmt_single(char *cursor, char *end)
+__attribute__((target("avx2"))) static const char *
+scan_string_plain_span_find_stop_avx2_fmt_single(const char *cursor,
+                                                 const char *end)
 {
   const __m256i quote = _mm256_set1_epi8('\'');
   const __m256i backslash = _mm256_set1_epi8('\\');
@@ -1608,43 +1623,51 @@ static void *resolve_scan_string_plain_span_find_stop_fmt_single(void)
   return (void *)scan_string_plain_span_find_stop_scalar_fmt_single;
 }
 
-static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
-                                                           char *end)
+static const char *
+scan_string_plain_span_find_stop_nofmt_double(const char *cursor,
+                                              const char *end)
     __attribute__((
         ifunc("resolve_scan_string_plain_span_find_stop_nofmt_double")));
-static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
-                                                           char *end)
+static const char *
+scan_string_plain_span_find_stop_nofmt_single(const char *cursor,
+                                              const char *end)
     __attribute__((
         ifunc("resolve_scan_string_plain_span_find_stop_nofmt_single")));
-static char *scan_string_plain_span_find_stop_fmt_double(char *cursor,
-                                                         char *end)
+static const char *
+scan_string_plain_span_find_stop_fmt_double(const char *cursor,
+                                            const char *end)
     __attribute__((
         ifunc("resolve_scan_string_plain_span_find_stop_fmt_double")));
-static char *scan_string_plain_span_find_stop_fmt_single(char *cursor,
-                                                         char *end)
+static const char *
+scan_string_plain_span_find_stop_fmt_single(const char *cursor,
+                                            const char *end)
     __attribute__((
         ifunc("resolve_scan_string_plain_span_find_stop_fmt_single")));
 #else
-static char *scan_string_plain_span_find_stop_nofmt_double(char *cursor,
-                                                           char *end)
+static const char *
+scan_string_plain_span_find_stop_nofmt_double(const char *cursor,
+                                              const char *end)
 {
   return scan_string_plain_span_find_stop_scalar_nofmt_double(cursor, end);
 }
 
-static char *scan_string_plain_span_find_stop_nofmt_single(char *cursor,
-                                                           char *end)
+static const char *
+scan_string_plain_span_find_stop_nofmt_single(const char *cursor,
+                                              const char *end)
 {
   return scan_string_plain_span_find_stop_scalar_nofmt_single(cursor, end);
 }
 
-static char *scan_string_plain_span_find_stop_fmt_double(char *cursor,
-                                                         char *end)
+static const char *
+scan_string_plain_span_find_stop_fmt_double(const char *cursor,
+                                            const char *end)
 {
   return scan_string_plain_span_find_stop_scalar_fmt_double(cursor, end);
 }
 
-static char *scan_string_plain_span_find_stop_fmt_single(char *cursor,
-                                                         char *end)
+static const char *
+scan_string_plain_span_find_stop_fmt_single(const char *cursor,
+                                            const char *end)
 {
   return scan_string_plain_span_find_stop_scalar_fmt_single(cursor, end);
 }
@@ -1654,13 +1677,13 @@ static bool scan_string_plain_span(struct scanner_state *s,
                                    struct arena *strings, char quote_char,
                                    bool format)
 {
-  char *start = scanner_current_char_ptr(s);
+  const char *start = scanner_current_char_ptr(s);
   if (start == NULL) {
     return false;
   }
 
-  char *end = s->buffer_end;
-  char *cursor = NULL;
+  const char *end = s->buffer_end;
+  const char *cursor = NULL;
   if (quote_char == '"') {
     cursor = format
                  ? scan_string_plain_span_find_stop_fmt_double(start, end)
@@ -2539,12 +2562,79 @@ void scanner_free(struct scanner_state *s)
   free(s->read_buffer);
 }
 
+void scanner_init_from_string(struct scanner_state *s, const char *buf,
+                              const char               *filename,
+                              struct symbol_table      *symbol_table,
+                              struct object_intern     *objects,
+                              struct arena             *strings,
+                              struct diagnostics_state *diagnostics)
+{
+  memset(s, 0, sizeof(*s));
+  s->filename = filename;
+  s->line = 1;
+  s->symbol_table = symbol_table;
+  s->objects = objects;
+  s->strings = strings;
+  s->d = diagnostics;
+  s->at_begin_of_line = true;
+
+  const char *effective_buf = buf;
+  size_t      len = strlen(buf);
+#ifndef PYCOMPARSE_NO_ICONV
+  char                 *transcoded = NULL;
+  size_t                transcoded_len = 0;
+  struct encoding_error encoding_error
+      = encoding_maybe_transcode_to_utf8_from_string(buf, len, &transcoded,
+                                                     &transcoded_len);
+  if (encoding_error.kind != ENCODING_ERROR_NONE) {
+    diag_begin_error(s->d, scanner_location(s));
+    switch (encoding_error.kind) {
+    case ENCODING_ERROR_UNKNOWN_ENCODING:
+      diag_frag(s->d, "unknown encoding: ");
+      diag_frag(s->d, encoding_error.encoding);
+      break;
+    case ENCODING_ERROR_BOM_COOKIE_MISMATCH:
+      diag_frag(s->d, "encoding problem: ");
+      diag_frag(s->d, encoding_error.encoding);
+      diag_frag(s->d, " with BOM");
+      break;
+    case ENCODING_ERROR_DECODE_FAILED:
+      diag_frag(s->d, "failed to decode source with encoding: ");
+      diag_frag(s->d, encoding_error.encoding);
+      break;
+    case ENCODING_ERROR_NONE:
+      break;
+    }
+    diag_end(s->d);
+  }
+  if (transcoded != NULL) {
+    s->transcoded_source = transcoded;
+    effective_buf = transcoded;
+    len = transcoded_len;
+  }
+#endif
+  if (len == 0) {
+    s->c = C_EOF;
+  } else {
+    s->c = (unsigned char)effective_buf[0];
+    s->p = effective_buf + 1;
+    s->buffer_end = effective_buf + len;
+    /* Skip UTF-8 BOM (0xEF 0xBB 0xBF) if present. */
+    if (s->c == 0xEF && s->p + 1 < s->buffer_end
+        && (unsigned char)s->p[0] == 0xBB && (unsigned char)s->p[1] == 0xBF) {
+      next_char(s);
+      next_char(s);
+      next_char(s);
+    }
+  }
+}
+
 static unsigned
 scanner_fstring_debug_capture_current_size_(struct scanner_state *s)
 {
   assert(s->fstring_debug.tail_start != NULL);
-  unsigned size = s->fstring_debug.spilled_size;
-  char    *current = scanner_current_char_ptr(s);
+  unsigned    size = s->fstring_debug.spilled_size;
+  const char *current = scanner_current_char_ptr(s);
   if (current != NULL) {
     assert(s->fstring_debug.tail_start != NULL);
     assert(s->fstring_debug.tail_start <= current);

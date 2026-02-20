@@ -672,6 +672,7 @@ static union ast_expression *parse_arguments(struct parser_state  *s,
   idynarray_init(&arguments, inline_storage, sizeof(inline_storage));
   bool has_star_argument = false;
   bool has_kw_argument = false;
+  bool had_named_argument = false;
 
   if (peek(s) != ')') {
     do {
@@ -685,6 +686,12 @@ static union ast_expression *parse_arguments(struct parser_state  *s,
       }
       if (argument->name != NULL) {
         has_kw_argument = true;
+        had_named_argument = true;
+      } else if (had_named_argument && type != AST_UNEXPR_STAR
+                 && type != AST_UNEXPR_STAR_STAR && type != AST_INVALID) {
+        diag_begin_error(s->d, get_expression_location(argument->expression));
+        diag_frag(s->d, "positional argument follows keyword argument");
+        diag_end(s->d);
       }
     } while (accept(s, ',') && peek(s) != ')');
   }

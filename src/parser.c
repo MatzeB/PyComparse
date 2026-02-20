@@ -544,6 +544,13 @@ static union ast_expression *check_assignment_target(
     struct location location, bool is_del, bool show_equal_hint)
 {
   enum ast_expression_type type = ast_expression_type(expression);
+  if (is_del && type == AST_UNEXPR_STAR) {
+    struct location expression_location = get_expression_location(expression);
+    diag_begin_error(s->d, expression_location);
+    diag_frag(s->d, "starred expression not allowed here");
+    diag_end(s->d);
+    return invalid_expression(s);
+  }
   if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
       || type == AST_ATTR)
     return expression;
@@ -553,6 +560,15 @@ static union ast_expression *check_assignment_target(
         = expression->expression_list.expressions;
     for (unsigned i = 0; i < num_expressions; i++) {
       if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
+        if (is_del) {
+          struct location expression_location
+              = get_expression_location(expressions[i]);
+          diag_begin_error(s->d, expression_location);
+          diag_frag(s->d, "starred expression not allowed here");
+          diag_end(s->d);
+          expressions[i] = invalid_expression(s);
+          continue;
+        }
         expressions[i]->unexpr.op = check_assignment_target(
             s, expressions[i]->unexpr.op, location, is_del, show_equal_hint);
         continue;

@@ -3299,7 +3299,7 @@ static void emit_expression_statement(struct cg_state                 *s,
 {
   if (!unreachable(s)) {
     emit_expression(s, expr->expression);
-    cg_op_pop1(s, OPCODE_POP_TOP, 0);
+    cg_op_pop1(s, expr->print ? OPCODE_PRINT_EXPR : OPCODE_POP_TOP, 0);
   }
 }
 

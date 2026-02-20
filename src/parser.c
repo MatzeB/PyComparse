@@ -2108,7 +2108,8 @@ static union ast_statement *parse_assignment(struct parser_state  *s,
   return statement;
 }
 
-static union ast_statement *parse_expression_statement(struct parser_state *s)
+static union ast_statement *parse_expression_statement(struct parser_state *s,
+                                                       bool print_expr)
 {
   struct location       location = scanner_location(&s->scanner);
   bool                  starts_with_lparen = (peek(s) == '(');
@@ -2161,9 +2162,11 @@ static union ast_statement *parse_expression_statement(struct parser_state *s)
     return parse_assignment(s, expression, location);
   }
 
-  union ast_statement *statement = ast_allocate_statement(
-      s, struct ast_expression_statement, AST_STATEMENT_EXPRESSION, location);
+  union ast_statement *statement;
+  statement = ast_allocate_statement(s, struct ast_expression_statement,
+                                     AST_STATEMENT_EXPRESSION, location);
   statement->expression.expression = expression;
+  statement->expression.print = print_expr;
   return statement;
 }
 
@@ -2485,11 +2488,11 @@ static union ast_statement *parse_yield_statement(struct parser_state *s)
 }
 
 static union ast_statement *nullable
-parse_simple_statement(struct parser_state *s)
+parse_simple_statement(struct parser_state *s, bool print_expr)
 {
   switch (peek(s)) {
   case EXPRESSION_START_CASES:
-    return parse_expression_statement(s);
+    return parse_expression_statement(s, print_expr);
   case T_assert:
     return parse_assert(s);
   case T_break:
@@ -2522,7 +2525,7 @@ parse_simple_statement(struct parser_state *s)
 }
 
 static struct ast_statement_list *
-parse_simple_statements(struct parser_state *s)
+parse_simple_statements(struct parser_state *s, bool print_expr)
 {
   union ast_statement *inline_storage[8];
   struct idynarray     statements;
@@ -2530,7 +2533,7 @@ parse_simple_statements(struct parser_state *s)
 
   add_anchor(s, T_NEWLINE);
   do {
-    union ast_statement *statement = parse_simple_statement(s);
+    union ast_statement *statement = parse_simple_statement(s, print_expr);
     if (statement != NULL) {
       *idynarray_append(&statements, union ast_statement *) = statement;
     }
@@ -2547,7 +2550,9 @@ parse_simple_statements(struct parser_state *s)
 
 static struct ast_statement_list *parse_suite(struct parser_state *s);
 static void                       parse_statement(struct parser_state *s,
-                                                  struct idynarray *statements, bool top_level);
+                                                  struct idynarray *statements,
+                                                  bool top_level,
+                                                  bool print_expr);
 
 static bool statement_is_future_import(union ast_statement *statement)
 {
@@ -3088,7 +3093,8 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     /* The scanner guarantees all T_INDENT tokens are matched by T_DEDENT
      * before T_EOF (see scan_eof / scan_indentation). */
     do {
-      parse_statement(s, &statements, /*top_level=*/false);
+      parse_statement(s, &statements, /*top_level=*/false,
+                      /*print_expr=*/false);
     } while (!accept(s, T_DEDENT));
 
     struct ast_statement_list *result = ast_statement_list_from_array(
@@ -3098,11 +3104,12 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     return result;
   }
 
-  return parse_simple_statements(s);
+  return parse_simple_statements(s, /*print_expr=*/false);
 }
 
 static void parse_statement(struct parser_state *s,
-                            struct idynarray *statements, bool top_level)
+                            struct idynarray *statements, bool top_level,
+                            bool print_expr)
 {
   add_anchor(s, T_NEWLINE);
   switch (peek(s)) {
@@ -3171,7 +3178,8 @@ static void parse_statement(struct parser_state *s,
   case T_EOF:
     break;
   default: {
-    struct ast_statement_list *simple = parse_simple_statements(s);
+    struct ast_statement_list *simple
+        = parse_simple_statements(s, print_expr);
     append_statement_list(s, statements, simple, top_level);
     break;
   }
@@ -3179,7 +3187,7 @@ static void parse_statement(struct parser_state *s,
   remove_anchor(s, T_NEWLINE);
 }
 
-struct ast_module *parse(struct parser_state *s)
+struct ast_module *parse_module(struct parser_state *s)
 {
   next_token(s);
 
@@ -3190,7 +3198,8 @@ struct ast_module *parse(struct parser_state *s)
   add_anchor(s, T_EOF);
   while (peek(s) != T_EOF) {
     if (accept(s, T_NEWLINE)) continue;
-    parse_statement(s, &statements, /*top_level=*/true);
+    parse_statement(s, &statements, /*top_level=*/true,
+                    /*print_expr=*/false);
   }
 
 #ifndef NDEBUG
@@ -3216,6 +3225,94 @@ struct ast_module *parse(struct parser_state *s)
   return module;
 }
 
+static struct ast_module *module_from_statement_array(
+    struct parser_state *s, union ast_statement **statements,
+    unsigned num_statements)
+{
+  struct ast_statement_list *body
+      = ast_statement_list_from_array(s, statements, num_statements);
+  struct ast_module *module = arena_allocate(
+      &s->ast, sizeof(struct ast_module), alignof(struct ast_module));
+  module->body = body;
+  module->future_flags = s->future_flags;
+  return module;
+}
+
+static void finish_single_input(struct parser_state *s)
+{
+  while (accept(s, T_NEWLINE)) {
+  }
+  if (peek(s) != T_EOF) {
+    error_expected_tok1(s, T_EOF);
+    eat_until_anchor(s);
+  }
+  remove_anchor(s, T_EOF);
+}
+
+static union ast_statement *
+make_return_statement(struct parser_state *s, struct location location,
+                      union ast_expression *expression)
+{
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_return, AST_STATEMENT_RETURN, location);
+  statement->return_.expression = expression;
+  return statement;
+}
+
+struct ast_module *parse_single_statement(struct parser_state *s)
+{
+  next_token(s);
+  add_anchor(s, T_EOF);
+  while (accept(s, T_NEWLINE)) {
+  }
+
+  union ast_statement *inline_storage[8];
+  struct idynarray     statements;
+  idynarray_init(&statements, inline_storage, sizeof(inline_storage));
+
+  if (peek(s) != T_EOF) {
+    parse_statement(s, &statements, /*top_level=*/true,
+                    /*print_expr=*/true);
+  }
+  finish_single_input(s);
+
+  struct location location = scanner_location(&s->scanner);
+  union ast_expression *none_expr = ast_const_new(
+      s, object_intern_singleton(s->objects, OBJECT_NONE), location);
+  union ast_statement *ret_stmt
+      = make_return_statement(s, location, none_expr);
+  *idynarray_append(&statements, union ast_statement *) = ret_stmt;
+  struct ast_module *module = module_from_statement_array(
+      s, idynarray_data(&statements),
+      idynarray_length(&statements, union ast_statement *));
+  idynarray_free(&statements);
+  return module;
+}
+
+struct ast_module *parse_single_expression(struct parser_state *s)
+{
+  next_token(s);
+  add_anchor(s, T_EOF);
+
+  union ast_expression *expression = parse_star_expressions(s, PREC_NAMED);
+  if (ast_expression_type(expression) == AST_UNEXPR_STAR
+      || (ast_expression_type(expression) == AST_EXPRESSION_LIST
+          && expression->expression_list.has_star_expression)) {
+    struct location result_location = get_expression_location(expression);
+    diag_begin_error(s->d, result_location);
+    diag_frag(s->d, "starred expression not allowed here");
+    diag_end(s->d);
+    expression = invalid_expression(s);
+  }
+  finish_single_input(s);
+
+  struct location location = get_expression_location(expression);
+  union ast_statement *ret_stmt
+      = make_return_statement(s, location, expression);
+  union ast_statement *module_statements[] = { ret_stmt };
+  return module_from_statement_array(s, module_statements, 1);
+}
+
 void parser_init(struct parser_state *s, struct object_intern *objects,
                  struct diagnostics_state *diagnostics)
 {
@@ -3225,6 +3322,11 @@ void parser_init(struct parser_state *s, struct object_intern *objects,
   s->d = diagnostics;
   s->top_level_future_imports_allowed = true;
   memset(s->anchor_set, 0, sizeof(s->anchor_set));
+}
+
+void parser_set_flags(struct parser_state *s, uint32_t flags)
+{
+  s->future_flags = flags & PyCF_MASK;
 }
 
 void parser_free(struct parser_state *s)

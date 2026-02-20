@@ -96,6 +96,7 @@ struct ast_del {
 
 struct ast_expression_statement {
   struct ast_statement_base base;
+  bool                      print;
   union ast_expression     *expression;
 };
 

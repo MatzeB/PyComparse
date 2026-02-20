@@ -46,15 +46,33 @@ def show_hex(label, h, indent):
         for i in range(0, len(h), 60):
             print(f"{indent}   {h[i:i+60]}")
 
-def _main():
-    if len(sys.argv) == 1:
-        show_pyc_file(sys.stdin.buffer)
+def _main() -> None:
+    argv = sys.argv
+    mode: str | None = None
+    if "--exec" in argv:
+        mode = "exec"
+        argv.remove("--exec")
+    if "--single" in argv:
+        mode = "single"
+        argv.remove("--single")
+    if "--eval" in argv:
+        mode = "eval"
+        argv.remove("--eval")
+
+    if len(argv) == 1:
+        if mode is not None:
+            code = compile(sys.stdin.read(), "<stdin>", mode, dont_inherit=True, optimize=-1)
+            show_code(code)
+        else:
+            show_pyc_file(sys.stdin.buffer)
     else:
         filename = sys.argv[1]
         if filename.endswith(".py"):
             with open(filename, "rb") as fp:
                 data = fp.read()
-            code = compile(data, filename, "exec", dont_inherit=True, optimize=-1)
+            if mode is None:
+                mode = "exec"
+            code = compile(data, filename, mode, dont_inherit=True, optimize=-1)
             show_code(code)
         else:
             with open(filename, "rb") as fp:

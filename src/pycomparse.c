@@ -105,7 +105,7 @@ int main(int argc, char **argv)
   scanner_init(&parser.scanner, input, input_filename, &symbol_table, &objects,
                &strings, &diagnostics);
 
-  struct ast_module *module = parse(&parser);
+  struct ast_module *module = parse_module(&parser);
 
   fclose(input);
 

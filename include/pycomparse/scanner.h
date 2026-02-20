@@ -27,6 +27,14 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct object_intern *objects, struct arena *strings,
                   struct diagnostics_state *diagnostics);
 
+void scanner_init_from_string(struct scanner_state *s, const char *buf,
+                              const char               *filename,
+                              struct symbol_table      *symbol_table,
+                              struct object_intern     *objects,
+                              struct arena             *strings,
+                              struct diagnostics_state *diagnostics,
+                              bool                      is_utf8);
+
 void scanner_free(struct scanner_state *s);
 
 void scanner_next_token(struct scanner_state *s);

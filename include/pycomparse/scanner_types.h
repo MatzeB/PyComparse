@@ -49,28 +49,28 @@ struct fstring_state {
 
 struct fstring_debug_capture {
   /* Bytes captured from previous read buffers after refill. */
-  char *nullable spilled_prefix;
-  unsigned       spilled_size;
-  unsigned       spilled_capacity;
-  uint8_t        depth;
-  unsigned       starts[MAX_FSTRING_NESTING];
-  char *nullable tail_start;
+  char *nullable       spilled_prefix;
+  unsigned             spilled_size;
+  unsigned             spilled_capacity;
+  uint8_t              depth;
+  unsigned             starts[MAX_FSTRING_NESTING];
+  const char *nullable tail_start;
 };
 
 struct scanner_state {
-  int            c;
-  char *nullable p;
+  int                  c;
+  const char *nullable p;
 
   struct token token;
 
-  char *nullable buffer_end;
-  char *nullable read_buffer;
-  size_t         read_buffer_size;
+  const char *nullable buffer_end;
+  char *nullable       read_buffer;
+  size_t               read_buffer_size;
 
-  FILE       *input;
-  const char *filename;
-  unsigned    line;
-  unsigned    paren_level;
+  FILE *nullable input;
+  const char    *filename;
+  unsigned       line;
+  unsigned       paren_level;
 
   struct symbol_table  *symbol_table;
   struct object_intern *objects;

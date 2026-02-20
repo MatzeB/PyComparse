@@ -324,4 +324,74 @@ struct encoding_error encoding_maybe_transcode_to_utf8(FILE **input_io,
   *owned_source_out = out;
   return no_error;
 }
+
+struct encoding_error
+encoding_maybe_transcode_to_utf8_from_string(const char *buf, size_t len,
+                                             char **owned_out, size_t *out_len)
+{
+  struct encoding_error no_error = { ENCODING_ERROR_NONE, { 0 } };
+  *owned_out = NULL;
+  *out_len = 0;
+
+  struct source_encoding_info source_encoding;
+  detect_source_encoding((const unsigned char *)buf, len, &source_encoding);
+  if (source_encoding.has_utf8_bom && source_encoding.has_encoding_cookie
+      && !encoding_is_bom_compatible_utf8(source_encoding.encoding)) {
+    return make_encoding_error(ENCODING_ERROR_BOM_COOKIE_MISMATCH,
+                               source_encoding.encoding);
+  }
+  if (encoding_is_utf8(source_encoding.encoding)) {
+    return no_error;
+  }
+
+  iconv_t converter = open_utf8_converter(source_encoding.encoding);
+  if (converter == (iconv_t)-1) {
+    return make_encoding_error(ENCODING_ERROR_UNKNOWN_ENCODING,
+                               source_encoding.encoding);
+  }
+
+  size_t out_capacity = len * 4 + 16;
+  char  *out = malloc(out_capacity + 1); /* +1 for NUL terminator */
+  if (out == NULL) {
+    iconv_close(converter);
+    return no_error;
+  }
+
+  char  *in_ptr = (char *)buf; /* iconv takes non-const; cast is safe */
+  size_t in_left = len;
+  char  *out_ptr = out;
+  size_t out_left = out_capacity;
+  while (in_left > 0) {
+    size_t rc = iconv(converter, &in_ptr, &in_left, &out_ptr, &out_left);
+    if (rc != (size_t)-1) {
+      continue;
+    }
+    if (errno == E2BIG) {
+      size_t used = out_capacity - out_left;
+      size_t new_capacity = out_capacity * 2;
+      char  *new_out = realloc(out, new_capacity + 1);
+      if (new_out == NULL) {
+        iconv_close(converter);
+        free(out);
+        return no_error;
+      }
+      out = new_out;
+      out_capacity = new_capacity;
+      out_ptr = out + used;
+      out_left = out_capacity - used;
+      continue;
+    }
+    iconv_close(converter);
+    free(out);
+    return make_encoding_error(ENCODING_ERROR_DECODE_FAILED,
+                               source_encoding.encoding);
+  }
+  iconv_close(converter);
+
+  size_t result_len = out_capacity - out_left;
+  out[result_len] = '\0';
+  *owned_out = out;
+  *out_len = result_len;
+  return no_error;
+}
 #endif

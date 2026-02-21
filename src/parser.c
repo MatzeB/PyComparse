@@ -2550,8 +2550,7 @@ parse_simple_statements(struct parser_state *s, bool print_expr)
 
 static struct ast_statement_list *parse_suite(struct parser_state *s);
 static void                       parse_statement(struct parser_state *s,
-                                                  struct idynarray *statements,
-                                                  bool top_level,
+                                                  struct idynarray *statements, bool top_level,
                                                   bool print_expr);
 
 static bool statement_is_future_import(union ast_statement *statement)
@@ -3178,8 +3177,7 @@ static void parse_statement(struct parser_state *s,
   case T_EOF:
     break;
   default: {
-    struct ast_statement_list *simple
-        = parse_simple_statements(s, print_expr);
+    struct ast_statement_list *simple = parse_simple_statements(s, print_expr);
     append_statement_list(s, statements, simple, top_level);
     break;
   }
@@ -3225,9 +3223,10 @@ struct ast_module *parse_module(struct parser_state *s)
   return module;
 }
 
-static struct ast_module *module_from_statement_array(
-    struct parser_state *s, union ast_statement **statements,
-    unsigned num_statements)
+static struct ast_module *
+module_from_statement_array(struct parser_state  *s,
+                            union ast_statement **statements,
+                            unsigned              num_statements)
 {
   struct ast_statement_list *body
       = ast_statement_list_from_array(s, statements, num_statements);
@@ -3276,7 +3275,7 @@ struct ast_module *parse_single_statement(struct parser_state *s)
   }
   finish_single_input(s);
 
-  struct location location = scanner_location(&s->scanner);
+  struct location       location = scanner_location(&s->scanner);
   union ast_expression *none_expr = ast_const_new(
       s, object_intern_singleton(s->objects, OBJECT_NONE), location);
   union ast_statement *ret_stmt
@@ -3306,7 +3305,7 @@ struct ast_module *parse_single_expression(struct parser_state *s)
   }
   finish_single_input(s);
 
-  struct location location = get_expression_location(expression);
+  struct location      location = get_expression_location(expression);
   union ast_statement *ret_stmt
       = make_return_statement(s, location, expression);
   union ast_statement *module_statements[] = { ret_stmt };

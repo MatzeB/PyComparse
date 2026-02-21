@@ -12,7 +12,7 @@
 #include "pycomparse/symbol_table_types.h"
 #include "pycomparse/token_kinds.h"
 
-static char *read_file_into_string(FILE *input)
+static char *read_file_into_string(FILE *input, size_t *out_len)
 {
   char  *buf = NULL;
   size_t buf_size = 0;
@@ -21,8 +21,8 @@ static char *read_file_into_string(FILE *input)
   size_t n;
 
   while ((n = fread(tmp, 1, sizeof(tmp), input)) > 0) {
-    if (buf_len + n + 1 > buf_size) {
-      buf_size = (buf_len + n + 1) * 2;
+    if (buf_len + n > buf_size) {
+      buf_size = (buf_len + n) * 2;
       char *newbuf = realloc(buf, buf_size);
       if (newbuf == NULL) {
         free(buf);
@@ -38,7 +38,7 @@ static char *read_file_into_string(FILE *input)
     buf = malloc(1);
     if (buf == NULL) return NULL;
   }
-  buf[buf_len] = '\0';
+  *out_len = buf_len;
   return buf;
 }
 
@@ -74,16 +74,17 @@ int main(int argc, char **argv)
   struct object_intern objects;
   object_intern_init(&objects);
 
-  char *buf = NULL;
+  char  *buf = NULL;
+  size_t buf_len = 0;
   if (from_string) {
-    buf = read_file_into_string(input);
+    buf = read_file_into_string(input, &buf_len);
     if (input != stdin) fclose(input);
     if (buf == NULL) {
       fprintf(stderr, "Failed to read '%s': out of memory\n", filename);
       return 1;
     }
-    scanner_init_from_string(&s, buf, filename, &symbol_table, &objects,
-                             &strings, &diagnostics,
+    scanner_init_from_buffer(&s, buf, buf_len, filename, &symbol_table,
+                             &objects, &strings, &diagnostics,
                              /*is_utf8=*/false);
   } else {
     scanner_init(&s, input, filename, &symbol_table, &objects, &strings,

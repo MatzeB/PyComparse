@@ -60,11 +60,11 @@ struct try_state {
   struct basic_block *nullable enter_finally;
   struct basic_block *nullable finally_body;
   struct basic_block *nullable footer;
-  bool                try_reachable;
-  bool                had_except;
-  bool                had_else;
-  bool                had_finally;
-  bool                finally_needs_placeholder;
+  bool                         try_reachable;
+  bool                         had_except;
+  bool                         had_else;
+  bool                         had_finally;
+  bool                         finally_needs_placeholder;
 };
 
 struct with_state {

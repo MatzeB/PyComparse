@@ -2562,8 +2562,8 @@ void scanner_free(struct scanner_state *s)
   free(s->read_buffer);
 }
 
-void scanner_init_from_string(struct scanner_state *s, const char *buf,
-                              const char               *filename,
+void scanner_init_from_buffer(struct scanner_state *s, const char *buf,
+                              size_t buf_len, const char *filename,
                               struct symbol_table      *symbol_table,
                               struct object_intern     *objects,
                               struct arena             *strings,
@@ -2580,7 +2580,7 @@ void scanner_init_from_string(struct scanner_state *s, const char *buf,
   s->at_begin_of_line = true;
 
   const char *effective_buf = buf;
-  size_t      len = strlen(buf);
+  size_t      len = buf_len;
 #ifndef PYCOMPARSE_NO_ICONV
   if (!is_utf8) {
     char                 *transcoded = NULL;

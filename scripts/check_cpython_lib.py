@@ -55,21 +55,26 @@ RAN_TESTS_RE = re.compile(
     r"^Ran (?P<count>\d+) test(?P<plural>s?) in [0-9]+(?:\.[0-9]+)?s$",
     re.MULTILINE,
 )
+TRACEBACK_STRING_FRAME_RE = re.compile(
+    r'(?m)^(Traceback \(most recent call last\):\n)'
+    r'  File "<string>", line 1, in <module>\n'
+)
 COMPILE_WITH_CPYTHON = (
     "import py_compile,sys; "
     "py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
 )
 RUN_PYC_FALLBACK = (
-    "import marshal,os,sys; "
+    "import importlib.machinery,marshal,os,sys; "
     "pyc_path=sys.argv[1]; "
     "source_path=sys.argv[2] if len(sys.argv) > 2 else pyc_path; "
     "data=open(pyc_path,'rb').read(); "
     "code=marshal.loads(data[16:]); "
     "sys.argv=[source_path]; "
     "sys.path[0]=os.path.dirname(source_path); "
+    "loader=importlib.machinery.SourceFileLoader('__main__', source_path); "
     "main_globals=sys.modules['__main__'].__dict__; "
     "main_globals.update({'__name__':'__main__','__file__':source_path,"
-    "'__package__':None,'__cached__':None,'__spec__':None,'__loader__':None}); "
+    "'__package__':None,'__cached__':None,'__spec__':None,'__loader__':loader}); "
     "exec(code, main_globals)"
 )
 
@@ -235,6 +240,7 @@ def resolve_mode(args: argparse.Namespace) -> str:
 
 def normalize_text(text: str, normalize_unittest_timing: bool) -> str:
     normalized = text.replace("\r\n", "\n")
+    normalized = TRACEBACK_STRING_FRAME_RE.sub(r"\1", normalized)
     if normalize_unittest_timing:
         normalized = RAN_TESTS_RE.sub(
             lambda m: f"Ran {m.group('count')} test{m.group('plural')} in <TIME>s",
@@ -271,12 +277,6 @@ def run_process(
         out = b"" if exc.stdout is None else exc.stdout
         err = b"" if exc.stderr is None else exc.stderr
         return 124, out, err, True
-
-
-def should_retry_pyc_run_with_fallback(rc: int, stderr: bytes) -> bool:
-    if rc == 0:
-        return False
-    return "can't find '__main__' module in" in stderr.decode(errors="replace")
 
 
 def compile_reference_syntax(file_path: Path, cfg: Config) -> tuple[int, bool]:
@@ -442,7 +442,13 @@ def process_runtime(file_path: Path, cfg: Config) -> FileResult:
             compiled_file_installed = True
 
             ref_args = [*cfg.python_cmd, str(file_path)]
-            pyc_args = [*cfg.python_cmd, str(pyc_file)]
+            pyc_args = [
+                *cfg.python_cmd,
+                "-c",
+                RUN_PYC_FALLBACK,
+                str(pyc_file),
+                str(file_path),
+            ]
             ref_rc, ref_out_raw, ref_err_raw, ref_timed_out = run_process(
                 ref_args, timeout=cfg.timeout, env=cfg.env
             )
@@ -454,22 +460,6 @@ def process_runtime(file_path: Path, cfg: Config) -> FileResult:
             )
             if pyc_timed_out:
                 return FileResult(file_path, False, "runtime_timeout", detail="compiled")
-            if should_retry_pyc_run_with_fallback(pyc_rc, pyc_err_raw):
-                fallback_args = [
-                    *cfg.python_cmd,
-                    "-c",
-                    RUN_PYC_FALLBACK,
-                    str(pyc_file),
-                    str(file_path),
-                ]
-                pyc_rc, pyc_out_raw, pyc_err_raw, pyc_timed_out = run_process(
-                    fallback_args, timeout=cfg.timeout, env=cfg.env
-                )
-                if pyc_timed_out:
-                    return FileResult(
-                        file_path, False, "runtime_timeout", detail="compiled"
-                    )
-
             ref_out = normalize_text(
                 ref_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
             )

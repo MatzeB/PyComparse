@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 
 enum unparse_precedence {
   UNPARSE_PREC_ROOT = 0,
+  UNPARSE_PREC_NAMED,
   UNPARSE_PREC_LAMBDA,
   UNPARSE_PREC_CONDITIONAL,
   UNPARSE_PREC_LOGICAL_OR,
@@ -87,6 +89,16 @@ static void append_float(struct unparse_state      *s,
       && strcmp(buffer, "-inf") != 0 && strcmp(buffer, "nan") != 0) {
     append_cstring(s, ".0");
   }
+}
+
+static void append_double_for_complex(struct unparse_state *s, double value)
+{
+  char buffer[128];
+  int  length = snprintf(buffer, sizeof(buffer), "%.17g", value);
+  if (length <= 0 || (size_t)length >= sizeof(buffer)) {
+    internal_error("failed to format complex");
+  }
+  append_mem(s, buffer, (size_t)length);
 }
 
 static void append_escaped_char(struct unparse_state *s, char c)
@@ -203,6 +215,8 @@ static enum unparse_precedence
 precedence_of_expression(union ast_expression *expression)
 {
   switch (ast_expression_type(expression)) {
+  case AST_BINEXPR_ASSIGN:
+    return UNPARSE_PREC_NAMED;
   case AST_LAMBDA:
     return UNPARSE_PREC_LAMBDA;
   case AST_CONDITIONAL:
@@ -262,7 +276,6 @@ precedence_of_expression(union ast_expression *expression)
   case AST_YIELD_FROM:
     return UNPARSE_PREC_ATOM;
   case AST_INVALID:
-  case AST_BINEXPR_ASSIGN:
   case AST_BINEXPR_ADD_ASSIGN:
   case AST_BINEXPR_AND_ASSIGN:
   case AST_BINEXPR_FLOORDIV_ASSIGN:
@@ -547,6 +560,57 @@ static void unparse_constant_object(struct unparse_state *s,
   case OBJECT_FLOAT:
     append_float(s, &object->float_obj);
     break;
+  case OBJECT_COMPLEX: {
+    double real = object->complex.real;
+    double imag = object->complex.imag;
+    if (real == 0.0) {
+      append_double_for_complex(s, imag);
+      append_char(s, 'j');
+      break;
+    }
+    append_char(s, '(');
+    append_double_for_complex(s, real);
+    if (signbit(imag)) {
+      append_char(s, '-');
+    } else {
+      append_char(s, '+');
+    }
+    append_double_for_complex(s, fabs(imag));
+    append_char(s, 'j');
+    append_char(s, ')');
+    break;
+  }
+  case OBJECT_TUPLE: {
+    uint32_t length = object_tuple_length(object);
+    append_char(s, '(');
+    for (uint32_t i = 0; i < length; ++i) {
+      if (i > 0) {
+        append_cstring(s, ", ");
+      }
+      unparse_constant_object(s, object_tuple_at(object, i));
+    }
+    if (length == 1) {
+      append_char(s, ',');
+    }
+    append_char(s, ')');
+    break;
+  }
+  case OBJECT_FROZENSET: {
+    uint32_t length = object_frozenset_length(object);
+    if (length == 0) {
+      append_cstring(s, "frozenset()");
+      break;
+    }
+    append_cstring(s, "frozenset({");
+    for (uint32_t i = 0; i < length; ++i) {
+      if (i > 0) {
+        append_cstring(s, ", ");
+      }
+      unparse_constant_object(s, object_frozenset_at(object, i));
+    }
+    append_cstring(s, "})");
+    break;
+  }
   case OBJECT_STRING:
     append_escaped_string_literal(s, &object->string);
     break;
@@ -727,7 +791,8 @@ static void unparse_expression_prec(struct unparse_state   *s,
 {
   enum ast_expression_type type = ast_expression_type(expression);
   enum unparse_precedence  precedence = precedence_of_expression(expression);
-  bool                     wrap = needs_parens(precedence, parent_precedence);
+  bool                     wrap = (type == AST_BINEXPR_ASSIGN)
+              || needs_parens(precedence, parent_precedence);
   if (wrap) append_char(s, '(');
 
   switch (type) {
@@ -833,6 +898,12 @@ static void unparse_expression_prec(struct unparse_state   *s,
     append_cstring(s, "**");
     unparse_expression_prec(s, expression->unexpr.op, UNPARSE_PREC_UNARY);
     break;
+  case AST_BINEXPR_ASSIGN:
+    unparse_expression_prec(s, expression->binexpr.left,
+                            UNPARSE_PREC_NAMED + 1);
+    append_cstring(s, ":=");
+    unparse_expression_prec(s, expression->binexpr.right, UNPARSE_PREC_NAMED);
+    break;
   case AST_BINEXPR_LOGICAL_AND:
     unparse_expression_prec(s, expression->binexpr.left,
                             UNPARSE_PREC_LOGICAL_AND);
@@ -886,7 +957,6 @@ static void unparse_expression_prec(struct unparse_state   *s,
     unparse_expression_prec(s, expression->yield.value, UNPARSE_PREC_ROOT);
     break;
   case AST_INVALID:
-  case AST_BINEXPR_ASSIGN:
   case AST_BINEXPR_ADD_ASSIGN:
   case AST_BINEXPR_AND_ASSIGN:
   case AST_BINEXPR_FLOORDIV_ASSIGN:

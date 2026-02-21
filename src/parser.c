@@ -550,6 +550,26 @@ error_starred_expression_not_allowed(struct parser_state *s,
 }
 
 static inline union ast_expression *
+error_yield_expression_not_allowed_in_annotation(struct parser_state *s,
+                                                 struct location      location)
+{
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, "yield expression not allowed in annotation");
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
+static inline union ast_expression *
+parse_annotation_expression(struct parser_state *s)
+{
+  bool saved = s->parsing_annotation;
+  s->parsing_annotation = true;
+  union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
+  s->parsing_annotation = saved;
+  return expression;
+}
+
+static inline union ast_expression *
 reject_starred_expression(struct parser_state *s, union ast_expression *e)
 {
   enum ast_expression_type type = ast_expression_type(e);
@@ -898,7 +918,7 @@ static void parse_parameters(struct parser_state    *s,
       union ast_expression *type = NULL;
       bool                  allow_type_annotations = (end != ':');
       if (allow_type_annotations && accept(s, ':')) {
-        type = parse_expression(s, PREC_EXPRESSION);
+        type = parse_annotation_expression(s);
       }
 
       union ast_expression *initializer = NULL;
@@ -1133,6 +1153,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
 static union ast_expression *parse_yield_expression(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
+  bool            reject_in_annotation = s->parsing_annotation;
   eat(s, T_yield);
   bool                     is_yield_from = accept(s, T_from);
   enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
@@ -1147,6 +1168,9 @@ static union ast_expression *parse_yield_expression(struct parser_state *s)
   } else if (is_expression_start(peek(s)) || peek(s) == '*') {
     yield_expression = parse_star_expressions(s, PREC_EXPRESSION);
     yield_expression = reject_toplevel_star_expression(s, yield_expression);
+  }
+  if (reject_in_annotation) {
+    return error_yield_expression_not_allowed_in_annotation(s, location);
   }
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_expression_yield, type);
@@ -2218,7 +2242,7 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
   union ast_expression *expression = parse_star_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
     expression = check_annotation_target(s, expression, location);
-    union ast_expression *annotation = parse_expression(s, PREC_EXPRESSION);
+    union ast_expression *annotation = parse_annotation_expression(s);
     union ast_expression *value = NULL;
     if (accept(s, '=')) {
       /* "annotated_rhs": yield | star_expressions */
@@ -2861,7 +2885,7 @@ static union ast_statement *parse_def(struct parser_state   *s,
 
   union ast_expression *return_type = NULL;
   if (accept(s, T_MINUS_GREATER_THAN)) {
-    return_type = parse_expression(s, PREC_EXPRESSION);
+    return_type = parse_annotation_expression(s);
   }
   expect(s, ':');
 

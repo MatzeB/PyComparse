@@ -1,5 +1,6 @@
 #include "pycomparse/ast_fold_constants.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -348,6 +349,226 @@ static union object *nullable try_fold_sequence_repeat(
   return fold_tuple_repeat(s, sequence, repeat_count);
 }
 
+enum fold_number_kind {
+  FOLD_NUMBER_INT,
+  FOLD_NUMBER_FLOAT,
+  FOLD_NUMBER_COMPLEX,
+};
+
+struct fold_number {
+  enum fold_number_kind kind;
+  double                real;
+  double                imag;
+};
+
+static bool object_as_fold_number(const union object *object,
+                                  struct fold_number *number)
+{
+  switch (object_type(object)) {
+  case OBJECT_INT:
+    number->kind = FOLD_NUMBER_INT;
+    number->real = (double)object_int_value(object);
+    number->imag = 0.0;
+    return true;
+  case OBJECT_FLOAT:
+    number->kind = FOLD_NUMBER_FLOAT;
+    number->real = object_float_value(object);
+    number->imag = 0.0;
+    return true;
+  case OBJECT_COMPLEX:
+    number->kind = FOLD_NUMBER_COMPLEX;
+    number->real = object_complex_real(object);
+    number->imag = object_complex_imag(object);
+    return true;
+  default:
+    return false;
+  }
+}
+
+static inline struct fold_number fold_number_mul(struct fold_number left,
+                                                 struct fold_number right)
+{
+  return (struct fold_number){
+    .kind = FOLD_NUMBER_COMPLEX,
+    .real = left.real * right.real - left.imag * right.imag,
+    .imag = left.real * right.imag + left.imag * right.real,
+  };
+}
+
+static bool fold_number_div(struct fold_number left, struct fold_number right,
+                            struct fold_number *result)
+{
+  double denominator = right.real * right.real + right.imag * right.imag;
+  if (denominator == 0.0) {
+    return false;
+  }
+  *result = (struct fold_number){
+    .kind = FOLD_NUMBER_COMPLEX,
+    .real = (left.real * right.real + left.imag * right.imag) / denominator,
+    .imag = (left.imag * right.real - left.real * right.imag) / denominator,
+  };
+  return true;
+}
+
+static bool double_as_exact_int64(double value, int64_t *result)
+{
+  if (!isfinite(value)) {
+    return false;
+  }
+  if (value < (double)INT64_MIN || value > (double)INT64_MAX) {
+    return false;
+  }
+  int64_t converted = (int64_t)value;
+  if ((double)converted != value) {
+    return false;
+  }
+  *result = converted;
+  return true;
+}
+
+static bool fold_number_pow_integer(struct fold_number base, int64_t exponent,
+                                    struct fold_number *result)
+{
+  if (exponent == INT64_MIN) {
+    return false;
+  }
+  bool     negative_exponent = exponent < 0;
+  uint64_t remaining_exponent
+      = (uint64_t)(negative_exponent ? -exponent : exponent);
+  struct fold_number accumulated = {
+    .kind = FOLD_NUMBER_COMPLEX,
+    .real = 1.0,
+    .imag = 0.0,
+  };
+  struct fold_number factor = {
+    .kind = FOLD_NUMBER_COMPLEX,
+    .real = base.real,
+    .imag = base.imag,
+  };
+  while (remaining_exponent != 0) {
+    if ((remaining_exponent & 1u) != 0u) {
+      accumulated = fold_number_mul(accumulated, factor);
+    }
+    remaining_exponent >>= 1;
+    if (remaining_exponent != 0) {
+      factor = fold_number_mul(factor, factor);
+    }
+  }
+
+  if (negative_exponent) {
+    struct fold_number one = {
+      .kind = FOLD_NUMBER_COMPLEX,
+      .real = 1.0,
+      .imag = 0.0,
+    };
+    if (!fold_number_div(one, accumulated, &accumulated)) {
+      return false;
+    }
+  }
+  *result = accumulated;
+  return true;
+}
+
+static union object *nullable try_fold_float_or_complex_binexpr(
+    struct constant_fold_state *s, enum ast_expression_type type,
+    union object *left_object, union object *right_object)
+{
+  struct fold_number left;
+  struct fold_number right;
+  if (!object_as_fold_number(left_object, &left)
+      || !object_as_fold_number(right_object, &right)) {
+    return NULL;
+  }
+
+  bool fold_as_complex = (left.kind == FOLD_NUMBER_COMPLEX
+                          || right.kind == FOLD_NUMBER_COMPLEX);
+  bool fold_as_float
+      = (left.kind == FOLD_NUMBER_FLOAT || right.kind == FOLD_NUMBER_FLOAT);
+  if (!fold_as_complex && !fold_as_float) {
+    return NULL;
+  }
+
+  if (fold_as_complex) {
+    struct fold_number result = {
+      .kind = FOLD_NUMBER_COMPLEX,
+      .real = 0.0,
+      .imag = 0.0,
+    };
+    switch (type) {
+    case AST_BINEXPR_ADD:
+      result.real = left.real + right.real;
+      result.imag = left.imag + right.imag;
+      break;
+    case AST_BINEXPR_SUB:
+      result.real = left.real - right.real;
+      result.imag = left.imag - right.imag;
+      break;
+    case AST_BINEXPR_MUL:
+      result = fold_number_mul(left, right);
+      break;
+    case AST_BINEXPR_TRUEDIV:
+      if (!fold_number_div(left, right, &result)) {
+        return NULL;
+      }
+      break;
+    case AST_BINEXPR_POWER: {
+      if (right.imag != 0.0) {
+        return NULL;
+      }
+      int64_t exponent = 0;
+      if (!double_as_exact_int64(right.real, &exponent)
+          || !fold_number_pow_integer(left, exponent, &result)) {
+        return NULL;
+      }
+      break;
+    }
+    default:
+      return NULL;
+    }
+    return object_intern_complex(s->intern, result.real, result.imag);
+  }
+
+  double left_real = left.real;
+  double right_real = right.real;
+  switch (type) {
+  case AST_BINEXPR_ADD:
+    return object_intern_float(s->intern, left_real + right_real);
+  case AST_BINEXPR_SUB:
+    return object_intern_float(s->intern, left_real - right_real);
+  case AST_BINEXPR_MUL:
+    return object_intern_float(s->intern, left_real * right_real);
+  case AST_BINEXPR_TRUEDIV:
+    if (right_real == 0.0) {
+      return NULL;
+    }
+    return object_intern_float(s->intern, left_real / right_real);
+  case AST_BINEXPR_POWER: {
+    int64_t exponent = 0;
+    if (!double_as_exact_int64(right_real, &exponent)
+        || (left_real == 0.0 && exponent < 0)) {
+      return NULL;
+    }
+    struct fold_number base = {
+      .kind = FOLD_NUMBER_COMPLEX,
+      .real = left_real,
+      .imag = 0.0,
+    };
+    struct fold_number result = {
+      .kind = FOLD_NUMBER_COMPLEX,
+      .real = 0.0,
+      .imag = 0.0,
+    };
+    if (!fold_number_pow_integer(base, exponent, &result)
+        || result.imag != 0.0) {
+      return NULL;
+    }
+    return object_intern_float(s->intern, result.real);
+  }
+  default:
+    return NULL;
+  }
+}
+
 static size_t ast_expression_size(union ast_expression *expression)
 {
   switch (ast_expression_type(expression)) {
@@ -533,6 +754,7 @@ static union object *nullable try_fold_binexpr(
   case AST_BINEXPR_ADD:
   case AST_BINEXPR_SUB:
   case AST_BINEXPR_MUL:
+  case AST_BINEXPR_TRUEDIV:
   case AST_BINEXPR_FLOORDIV:
   case AST_BINEXPR_MOD:
   case AST_BINEXPR_POWER:
@@ -575,7 +797,8 @@ static union object *nullable try_fold_binexpr(
   int64_t right_value;
   if (!object_as_fast_int(left_object, &left_value)
       || !object_as_fast_int(right_object, &right_value)) {
-    return NULL;
+    return try_fold_float_or_complex_binexpr(s, type, left_object,
+                                             right_object);
   }
 
   int64_t result;

@@ -1,0 +1,16 @@
+test/errors/future_annotations_unparse_invalid_expressions.py:3 error: expected new line, got `:=`
+test/errors/future_annotations_unparse_invalid_expressions.py:4 error: yield expression not allowed in annotation
+test/errors/future_annotations_unparse_invalid_expressions.py:5 error: yield expression not allowed in annotation
+test/errors/future_annotations_unparse_invalid_expressions.py:6 error: expected new line, got `+=`
+test/errors/future_annotations_unparse_invalid_expressions.py:7 error: expected new line, got `-=`
+test/errors/future_annotations_unparse_invalid_expressions.py:8 error: expected new line, got `*=`
+test/errors/future_annotations_unparse_invalid_expressions.py:9 error: expected new line, got `@=`
+test/errors/future_annotations_unparse_invalid_expressions.py:10 error: expected new line, got `/=`
+test/errors/future_annotations_unparse_invalid_expressions.py:11 error: expected new line, got `//=`
+test/errors/future_annotations_unparse_invalid_expressions.py:12 error: expected new line, got `%=`
+test/errors/future_annotations_unparse_invalid_expressions.py:13 error: expected new line, got `**=`
+test/errors/future_annotations_unparse_invalid_expressions.py:14 error: expected new line, got `<<=`
+test/errors/future_annotations_unparse_invalid_expressions.py:15 error: expected new line, got `>>=`
+test/errors/future_annotations_unparse_invalid_expressions.py:16 error: expected new line, got `&=`
+test/errors/future_annotations_unparse_invalid_expressions.py:17 error: expected new line, got `^=`
+test/errors/future_annotations_unparse_invalid_expressions.py:18 error: expected new line, got `|=`

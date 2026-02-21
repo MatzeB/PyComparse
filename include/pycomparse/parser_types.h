@@ -24,6 +24,7 @@ struct parser_state {
   struct symbol *nullable   private_class_name;
   bool *nullable            current_function_has_yield;
   bool                      parsed_await_expression;
+  bool                      parsing_annotation;
   uint32_t                  future_flags;
   bool                      top_level_future_imports_allowed;
   bool                      top_level_seen_any_statement;

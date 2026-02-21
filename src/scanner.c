@@ -1950,6 +1950,8 @@ static bool scan_indentation(struct scanner_state *s)
         scan_eof(s);
         return true;
       }
+      /* Trailing spaces before EOF are not real indentation. */
+      column = 0;
       if (s->last_line_indent > 0) break;
       s->token.kind = T_EOF;
       return true;

@@ -11,6 +11,7 @@
 #include "pycomparse/symbol_table.h"
 #include "pycomparse/symbol_table_types.h"
 #include "pycomparse/token_kinds.h"
+#include "pycomparse/util.h"
 
 static char *read_file_into_string(FILE *input, size_t *out_len)
 {
@@ -24,20 +25,13 @@ static char *read_file_into_string(FILE *input, size_t *out_len)
     if (buf_len + n > buf_size) {
       buf_size = (buf_len + n) * 2;
       char *newbuf = realloc(buf, buf_size);
-      if (newbuf == NULL) {
-        free(buf);
-        return NULL;
-      }
+      if (newbuf == NULL) internal_error("out of memory");
       buf = newbuf;
     }
     memcpy(buf + buf_len, tmp, n);
     buf_len += n;
   }
 
-  if (buf == NULL) {
-    buf = malloc(1);
-    if (buf == NULL) return NULL;
-  }
   *out_len = buf_len;
   return buf;
 }
@@ -79,10 +73,6 @@ int main(int argc, char **argv)
   if (from_string) {
     buf = read_file_into_string(input, &buf_len);
     if (input != stdin) fclose(input);
-    if (buf == NULL) {
-      fprintf(stderr, "Failed to read '%s': out of memory\n", filename);
-      return 1;
-    }
     scanner_init_from_buffer(&s, buf, buf_len, filename, &symbol_table,
                              &objects, &strings, &diagnostics,
                              /*is_utf8=*/false);

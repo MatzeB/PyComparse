@@ -209,7 +209,10 @@ def run_parser_tests(repo_root: Path, compiler: str, tmpdir: str, verbose: bool)
 
 def expand_input_patterns(repo_root: Path, inputs: list[str]) -> list[Path]:
     if not inputs:
-        return sorted((repo_root / "test").glob("*.py"))
+        test_dir = repo_root / "test"
+        return sorted(
+            list(test_dir.glob("*.py")) + list(test_dir.glob("*.py.raw"))
+        )
 
     expanded: list[Path] = []
     for raw in inputs:
@@ -244,6 +247,7 @@ def run_scan_tests(
     repo_root: Path,
     scanner_test: str,
     inputs: list[str],
+    from_string: bool,
     allow_failures: bool,
     verbose: bool,
 ) -> int:
@@ -273,8 +277,12 @@ def run_scan_tests(
             with tokens.open("wb") as tokens_file, scanner_err.open(
                 "wb"
             ) as scanner_err_file:
+                cmd = [str(scanner_bin)]
+                if from_string:
+                    cmd.append("--from-string")
+                cmd.append(rel)
                 scanner_proc = subprocess.run(
-                    [str(scanner_bin), rel],
+                    cmd,
                     cwd=repo_root,
                     stdout=tokens_file,
                     stderr=scanner_err_file,
@@ -356,6 +364,11 @@ def parse_args() -> argparse.Namespace:
         help="Scanner binary path (default: $SCANNER_TEST or build/scanner_test)",
     )
     scan_mode.add_argument(
+        "--from-string",
+        action="store_true",
+        help="Pass --from-string to scanner_test (read file into buffer).",
+    )
+    scan_mode.add_argument(
         "--allow-failures",
         action="store_true",
         help="Always return success even if scan mismatches exist.",
@@ -391,6 +404,7 @@ def main() -> int:
             repo_root,
             args.scanner_test,
             args.inputs,
+            args.from_string,
             args.allow_failures,
             args.verbose,
         )

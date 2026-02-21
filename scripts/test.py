@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Unified test runner for parser and scanner tests."""
+"""Run parser/compiler and scanner tests for pycomparse.
+
+This script supports three modes:
+- ``scripts/test.py``: run parser + scanner suites
+- ``scripts/test.py parser``: run parser/compiler integration tests only
+- ``scripts/test.py scan``: run scanner tokenization tests only
+
+The default ``all`` mode prints one combined summary line for both suites.
+"""
 
 from __future__ import annotations
 
@@ -66,7 +74,13 @@ def maybe_relative(path: Path, root: Path) -> str:
         return str(path)
 
 
-def run_parser_tests(repo_root: Path, compiler: str, tmpdir: str, verbose: bool) -> int:
+def run_parser_tests(
+    repo_root: Path,
+    compiler: str,
+    tmpdir: str,
+    verbose: bool,
+    print_summary: bool = True,
+) -> tuple[int, int, int]:
     parser_bin = Path(compiler)
     if not parser_bin.is_absolute():
         parser_bin = repo_root / parser_bin
@@ -203,8 +217,9 @@ def run_parser_tests(repo_root: Path, compiler: str, tmpdir: str, verbose: bool)
             report_ok(f"{rel} (compile_only)")
 
     passed_tests = total_tests - failed_tests
-    print(f"Ran {total_tests} tests: {passed_tests} passed, {failed_tests} failed.")
-    return 1 if failed_tests else 0
+    if print_summary:
+        print(f"Ran {total_tests} tests: {passed_tests} passed, {failed_tests} failed.")
+    return (1 if failed_tests else 0), total_tests, failed_tests
 
 
 def expand_input_patterns(repo_root: Path, inputs: list[str]) -> list[Path]:
@@ -250,7 +265,8 @@ def run_scan_tests(
     from_string: bool,
     allow_failures: bool,
     verbose: bool,
-) -> int:
+    print_summary: bool = True,
+) -> tuple[int, int, int]:
     scanner_bin = Path(scanner_test)
     if not scanner_bin.is_absolute():
         scanner_bin = repo_root / scanner_bin
@@ -258,7 +274,7 @@ def run_scan_tests(
     tests = expand_input_patterns(repo_root, inputs)
     if not tests:
         print("No scan tests matched.")
-        return 0
+        return 0, 0, 0
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="pycomparse-scantest."))
     failed = 0
@@ -323,15 +339,19 @@ def run_scan_tests(
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     passed = len(tests) - failed
-    print(f"Ran {len(tests)} scan tests: {passed} passed, {failed} failed.")
+    if print_summary:
+        print(f"Ran {len(tests)} scan tests: {passed} passed, {failed} failed.")
 
     if failed and allow_failures:
-        return 0
-    return 1 if failed else 0
+        return 0, len(tests), failed
+    return (1 if failed else 0), len(tests), failed
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pycomparse test runner")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="mode")
 
     parser_mode = sub.add_parser("parser", help="Run parser/compiler tests")
@@ -401,19 +421,47 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
 
-    rc = 0
-    if args.mode in ("all", "parser"):
-        rc |= run_parser_tests(repo_root, args.compiler, args.tmpdir, args.verbose)
-    if args.mode in ("all", "scan"):
-        rc |= run_scan_tests(
+    if args.mode == "all":
+        parser_rc, parser_total, parser_failed = run_parser_tests(
+            repo_root,
+            args.compiler,
+            args.tmpdir,
+            args.verbose,
+            print_summary=False,
+        )
+        scan_rc, scan_total, scan_failed = run_scan_tests(
             repo_root,
             args.scanner_test,
             args.inputs,
             args.from_string,
             args.allow_failures,
             args.verbose,
+            print_summary=False,
         )
-    return rc
+        total = parser_total + scan_total
+        failed = parser_failed + scan_failed
+        passed = total - failed
+        print(
+            f"Ran {total} tests ({parser_total} parser, {scan_total} scan): "
+            f"{passed} passed, {failed} failed."
+        )
+        return parser_rc | scan_rc
+
+    if args.mode == "parser":
+        parser_rc, _, _ = run_parser_tests(
+            repo_root, args.compiler, args.tmpdir, args.verbose
+        )
+        return parser_rc
+
+    scan_rc, _, _ = run_scan_tests(
+        repo_root,
+        args.scanner_test,
+        args.inputs,
+        args.from_string,
+        args.allow_failures,
+        args.verbose,
+    )
+    return scan_rc
 
 
 if __name__ == "__main__":

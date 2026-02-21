@@ -2134,9 +2134,18 @@ static const struct postfix_expression_parser postfix_parsers[] = {
   /* clang-format on */
 };
 
+#define MAX_NESTING_DEPTH 200
+
 union ast_expression *parse_expression(struct parser_state *s,
                                        enum precedence      precedence)
 {
+  if (++s->nesting_depth > MAX_NESTING_DEPTH) {
+    --s->nesting_depth;
+    diag_begin_error(s->d, scanner_location(&s->scanner));
+    diag_frag(s->d, "too many nested parentheses");
+    diag_end(s->d);
+    return invalid_expression(s);
+  }
   union ast_expression *result = parse_prefix_expression(s);
 
   for (;;) {
@@ -2152,6 +2161,7 @@ union ast_expression *parse_expression(struct parser_state *s,
     }
     result = postfix_parser->func(s, result);
   }
+  --s->nesting_depth;
   return result;
 }
 

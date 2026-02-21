@@ -1,0 +1,2 @@
+test/errors/nesting_too_deep.py:1 error: too many nested parentheses
+test/errors/nesting_too_deep.py:1 error: expected `)`, got `(`

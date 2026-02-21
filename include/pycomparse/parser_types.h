@@ -28,6 +28,7 @@ struct parser_state {
   bool                      top_level_future_imports_allowed;
   bool                      top_level_seen_any_statement;
 
+  int      nesting_depth;
   uint16_t anchor_set[NUM_TOKENS];
 };
 

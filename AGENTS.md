@@ -50,17 +50,14 @@ The helper performs:
 
 ### Testing
 ```bash
-uv run scripts/test.py parser
+uv run scripts/test.py
 ```
 This runner executes parser integration tests in `test/`, compares output with
 reference Python execution, checks expected diagnostics in `test/errors/`, and
-includes `test/compile_only/`.
+includes `test/compile_only/`.  It also runs scanner tokenization checks.
+Use `uv run scripts/test.py parser` or `uv run scripts/test.py scan` to run
+only one suite.
 Use `--compiler <path>` to override the compiler binary.
-
-Scanner tokenization checks can be run with:
-```bash
-uv run scripts/test.py scan
-```
 Note: scan mode currently has known pre-existing mismatches in this repository.
 
 ### Code Quality
@@ -73,7 +70,7 @@ suite before finishing:
 
 ```bash
 ./scripts/format.sh
-uv run scripts/test.py parser
+uv run scripts/test.py
 ```
 
 ### Commit Messages

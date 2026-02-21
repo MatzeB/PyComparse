@@ -382,9 +382,13 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
     if args.mode is None:
-        args.mode = "parser"
+        args.mode = "all"
         args.compiler = "build/pycomparse"
         args.tmpdir = os.environ.get("TMPDIR", "/tmp")
+        args.scanner_test = os.environ.get("SCANNER_TEST", "build/scanner_test")
+        args.from_string = False
+        args.allow_failures = False
+        args.inputs = []
         args.verbose = False
     return args
 
@@ -397,10 +401,11 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
 
-    if args.mode == "parser":
-        return run_parser_tests(repo_root, args.compiler, args.tmpdir, args.verbose)
-    if args.mode == "scan":
-        return run_scan_tests(
+    rc = 0
+    if args.mode in ("all", "parser"):
+        rc |= run_parser_tests(repo_root, args.compiler, args.tmpdir, args.verbose)
+    if args.mode in ("all", "scan"):
+        rc |= run_scan_tests(
             repo_root,
             args.scanner_test,
             args.inputs,
@@ -408,8 +413,7 @@ def main() -> int:
             args.allow_failures,
             args.verbose,
         )
-
-    raise AssertionError(f"unknown mode: {args.mode}")
+    return rc
 
 
 if __name__ == "__main__":

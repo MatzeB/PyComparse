@@ -1,0 +1,1 @@
+test/errors/stmt_star_expression.py:1 error: starred expression not allowed here

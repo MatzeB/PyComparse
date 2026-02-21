@@ -1,0 +1,1 @@
+test/errors/expr_parenthesized_star_generator.py:3 error: starred expression not allowed here

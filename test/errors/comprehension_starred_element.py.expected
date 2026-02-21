@@ -1,0 +1,2 @@
+test/errors/comprehension_starred_element.py:2 error: starred expression not allowed here
+test/errors/comprehension_starred_element.py:3 error: starred expression not allowed here

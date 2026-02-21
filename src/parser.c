@@ -539,6 +539,89 @@ static union ast_expression *parse_star_expressions(struct parser_state *s,
   return expression;
 }
 
+static inline union ast_expression *
+error_starred_expression_not_allowed(struct parser_state *s,
+                                     struct location      location)
+{
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, "starred expression not allowed here");
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
+static inline union ast_expression *
+reject_starred_expression(struct parser_state *s, union ast_expression *e)
+{
+  enum ast_expression_type type = ast_expression_type(e);
+  if (type == AST_UNEXPR_STAR
+      || (type == AST_EXPRESSION_LIST
+          && e->expression_list.has_star_expression)) {
+    return error_starred_expression_not_allowed(s, get_expression_location(e));
+  }
+  return e;
+}
+
+static inline union ast_expression *
+reject_toplevel_star_expression(struct parser_state  *s,
+                                union ast_expression *e)
+{
+  if (ast_expression_type(e) == AST_UNEXPR_STAR) {
+    return error_starred_expression_not_allowed(s, get_expression_location(e));
+  }
+  return e;
+}
+
+static union ast_expression *check_assignment_target(
+    struct parser_state *s, union ast_expression *expression,
+    struct location location, bool is_del, bool show_equal_hint)
+{
+  enum ast_expression_type type = ast_expression_type(expression);
+  if (is_del && type == AST_UNEXPR_STAR) {
+    return error_starred_expression_not_allowed(
+        s, get_expression_location(expression));
+  }
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR)
+    return expression;
+  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
+    unsigned num_expressions = expression->expression_list.num_expressions;
+    union ast_expression **expressions
+        = expression->expression_list.expressions;
+    for (unsigned i = 0; i < num_expressions; i++) {
+      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
+        if (is_del) {
+          expressions[i] = error_starred_expression_not_allowed(
+              s, get_expression_location(expressions[i]));
+          continue;
+        }
+        expressions[i]->unexpr.op = check_assignment_target(
+            s, expressions[i]->unexpr.op, location, is_del, show_equal_hint);
+        continue;
+      }
+      expressions[i] = check_assignment_target(s, expressions[i], location,
+                                               is_del, show_equal_hint);
+    }
+    return expression;
+  }
+  if (type == AST_INVALID) {
+    return expression;
+  }
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
+  diag_expression(s->d, expression);
+  if (show_equal_hint) {
+    diag_frag(s->d, ". Maybe you meant ");
+    diag_token_kind(s->d, T_EQUALS_EQUALS);
+    diag_frag(s->d, ", or ");
+    diag_token_kind(s->d, T_COLON_EQUALS);
+    diag_frag(s->d, " instead of ");
+    diag_token_kind(s->d, '=');
+    diag_frag(s->d, "?");
+  }
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
 static union ast_expression *
 parse_generator_expression(struct parser_state     *s,
                            enum ast_expression_type type)
@@ -557,6 +640,9 @@ parse_generator_expression(struct parser_state     *s,
     if (peek(s) == T_for) {
       eat(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
+      targets = check_assignment_target(s, targets, location,
+                                        /*is_del=*/false,
+                                        /*show_equal_hint=*/false);
       expect(s, T_in);
       bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
@@ -570,6 +656,9 @@ parse_generator_expression(struct parser_state     *s,
       eat(s, T_async);
       expect(s, T_for);
       union ast_expression *targets = parse_star_expressions(s, PREC_OR);
+      targets = check_assignment_target(s, targets, location,
+                                        /*is_del=*/false,
+                                        /*show_equal_hint=*/false);
       expect(s, T_in);
       bool                  await_saved = await_tracking_begin(s);
       union ast_expression *expression = parse_expression(s, PREC_OR);
@@ -648,7 +737,7 @@ static struct argument *parse_argument(struct parser_state *s,
   bool expression_has_await = await_tracking_end(s, await_saved);
 
   if (peek(s) == T_for || peek(s) == T_async) {
-    union ast_expression *item = expression;
+    union ast_expression *item = reject_starred_expression(s, expression);
     expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
     set_generator_expression_item(expression, item, expression_has_await,
                                   /*item_value=*/NULL,
@@ -921,7 +1010,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
 
   union ast_expression *expression;
   if (peek(s) == T_for || peek(s) == T_async) {
-    /* TODO: disallow star-expression */
+    first = reject_starred_expression(s, first);
     expression = parse_generator_expression(s, AST_LIST_COMPREHENSION);
     expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,
@@ -977,13 +1066,14 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
     remove_anchor(s, ',');
   } else if (peek(s) == T_for || peek(s) == T_async) {
     /* set comprehension */
+    first = reject_starred_expression(s, first);
     expression = parse_generator_expression(s, AST_SET_COMPREHENSION);
     expression->generator_expression.base.location = location;
     set_generator_expression_item(expression, first, first_has_await,
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
   } else {
-    key = first;
+    key = reject_starred_expression(s, first);
     expect(s, ':'); /* TODO: say that we expected `,`, `:` or `}` on error? */
     bool await_saved = await_tracking_begin(s);
     value = parse_expression(s, PREC_NAMED);
@@ -1056,6 +1146,7 @@ static union ast_expression *parse_yield_expression(struct parser_state *s)
     }
   } else if (is_expression_start(peek(s)) || peek(s) == '*') {
     yield_expression = parse_star_expressions(s, PREC_EXPRESSION);
+    yield_expression = reject_toplevel_star_expression(s, yield_expression);
   }
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_expression_yield, type);
@@ -1092,7 +1183,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     union ast_expression *first = parse_star_expression(s, PREC_NAMED);
     bool                  first_has_await = await_tracking_end(s, await_saved);
     if (peek(s) == T_for || peek(s) == T_async) {
-      /* TODO: disallow star-expression */
+      first = reject_starred_expression(s, first);
       expression = parse_generator_expression(s, AST_GENERATOR_EXPRESSION);
       expression->generator_expression.base.location = location;
       set_generator_expression_item(expression, first, first_has_await,
@@ -1103,7 +1194,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
           s, AST_EXPRESSION_LIST, first, PREC_NAMED, /*allow_slices=*/false,
           /*allow_starred=*/true);
     } else {
-      expression = first;
+      expression = reject_starred_expression(s, first);
     }
   }
 
@@ -1315,6 +1406,7 @@ static union ast_expression *parse_string(struct parser_state *s)
 
         union ast_expression *expression
             = parse_star_expressions(s, PREC_EXPRESSION);
+        expression = reject_starred_expression(s, expression);
         bool          debug_expression = accept(s, '=');
         union object *debug_prefix = NULL;
         if (debug_expression) {
@@ -1472,6 +1564,26 @@ static bool is_expression_start(enum token_kind token_kind)
   }
 }
 
+static inline union ast_expression *
+check_annotation_target(struct parser_state *s, union ast_expression *target,
+                        struct location location)
+{
+  enum ast_expression_type type = ast_expression_type(target);
+  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
+      || type == AST_ATTR) {
+    return target;
+  }
+  if (type == AST_INVALID) {
+    return target;
+  }
+
+  diag_begin_error(s->d, location);
+  diag_frag(s->d, "cannot assign to ");
+  diag_expression(s->d, target);
+  diag_end(s->d);
+  return invalid_expression(s);
+}
+
 static union ast_expression *parse_prefix_expression(struct parser_state *s)
 {
   switch (peek(s)) {
@@ -1518,10 +1630,7 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
       enum ast_expression_type type
           = peek(s) == '*' ? AST_UNEXPR_STAR : AST_UNEXPR_STAR_STAR;
       parse_unexpr(s, PREC_OR, type);
-      diag_begin_error(s->d, location);
-      diag_frag(s->d, "starred expression not allowed here");
-      diag_end(s->d);
-      return invalid_expression(s);
+      return error_starred_expression_not_allowed(s, location);
     }
     error_expected(s, "expression");
     return invalid_expression(s);
@@ -1567,7 +1676,25 @@ parse_assignment_rhs(struct parser_state *s)
   if (peek(s) == T_yield) {
     return parse_yield_expression(s);
   }
-  return parse_star_expressions(s, PREC_EXPRESSION);
+  union ast_expression *rhs = parse_star_expressions(s, PREC_EXPRESSION);
+  return reject_toplevel_star_expression(s, rhs);
+}
+
+static inline union ast_expression *parse_augassign_rhs(struct parser_state *s)
+{
+  if (peek(s) == T_yield) {
+    return parse_yield_expression(s);
+  }
+  union ast_expression *rhs = parse_expression(s, PREC_EXPRESSION);
+  if (peek(s) == ',') {
+    rhs = parse_expression_list_helper(s, AST_EXPRESSION_LIST, rhs,
+                                       PREC_EXPRESSION, /*allow_slices=*/false,
+                                       /*allow_starred=*/false);
+    assert(ast_expression_type(rhs) == AST_EXPRESSION_LIST);
+    rhs->expression_list.as_constant
+        = ast_tuple_compute_constant(s->objects, &rhs->expression_list);
+  }
+  return rhs;
 }
 
 static inline union ast_expression *
@@ -1576,7 +1703,7 @@ parse_binexpr_assign(struct parser_state *s, enum ast_expression_type type,
 {
   struct location location = scanner_location(&s->scanner);
   next_token(s);
-  union ast_expression *right = parse_assignment_rhs(s);
+  union ast_expression *right = parse_augassign_rhs(s);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_binexpr, type);
   expression->binexpr.left = left;
@@ -2028,48 +2155,6 @@ union ast_expression *parse_expression(struct parser_state *s,
   return result;
 }
 
-static union ast_expression *check_assignment_target(
-    struct parser_state *s, union ast_expression *expression,
-    struct location location, bool is_del, bool show_equal_hint)
-{
-  enum ast_expression_type type = ast_expression_type(expression);
-  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
-      || type == AST_ATTR)
-    return expression;
-  if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
-    unsigned num_expressions = expression->expression_list.num_expressions;
-    union ast_expression **expressions
-        = expression->expression_list.expressions;
-    for (unsigned i = 0; i < num_expressions; i++) {
-      if (ast_expression_type(expressions[i]) == AST_UNEXPR_STAR) {
-        continue;
-      }
-      expressions[i] = check_assignment_target(s, expressions[i], location,
-                                               is_del, show_equal_hint);
-    }
-    return expression;
-  }
-  if (type == AST_INVALID) {
-    return expression;
-  }
-  diag_begin_error(s->d, location);
-  diag_frag(s->d, is_del ? "cannot delete " : "cannot assign to ");
-  diag_expression(s->d, expression);
-  if (show_equal_hint) {
-    /* TODO: only show ':=' suggestion where it makes sense (like cpython)...
-     */
-    diag_frag(s->d, ". Maybe you meant ");
-    diag_token_kind(s->d, T_EQUALS_EQUALS);
-    diag_frag(s->d, ", or ");
-    diag_token_kind(s->d, T_COLON_EQUALS);
-    diag_frag(s->d, " instead of ");
-    diag_token_kind(s->d, '=');
-    diag_frag(s->d, "?");
-  }
-  diag_end(s->d);
-  return invalid_expression(s);
-}
-
 static union ast_statement *parse_assignment(struct parser_state  *s,
                                              union ast_expression *target,
                                              struct location       location)
@@ -2122,9 +2207,7 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
   bool                  starts_with_lparen = (peek(s) == '(');
   union ast_expression *expression = parse_star_expression(s, PREC_NAMED);
   if (accept(s, ':')) {
-    /* TODO Check: check that expression is either:
-     *  NAME |  ( single_target ) | single_subscript_attribute_target
-     */
+    expression = check_annotation_target(s, expression, location);
     union ast_expression *annotation = parse_expression(s, PREC_EXPRESSION);
     union ast_expression *value = NULL;
     if (accept(s, '=')) {
@@ -2133,6 +2216,7 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
         value = parse_yield_expression(s);
       } else {
         value = parse_star_expressions(s, PREC_EXPRESSION);
+        value = reject_toplevel_star_expression(s, value);
       }
     }
 
@@ -2169,9 +2253,10 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
     return parse_assignment(s, expression, location);
   }
 
-  union ast_statement *statement;
-  statement = ast_allocate_statement(s, struct ast_expression_statement,
-                                     AST_STATEMENT_EXPRESSION, location);
+  expression = reject_starred_expression(s, expression);
+
+  union ast_statement *statement = ast_allocate_statement(
+      s, struct ast_expression_statement, AST_STATEMENT_EXPRESSION, location);
   statement->expression.expression = expression;
   statement->expression.print = print_expr;
   return statement;
@@ -2459,6 +2544,7 @@ static union ast_statement *parse_return(struct parser_state *s)
   union ast_expression *expression;
   if (is_expression_start(peek(s))) {
     expression = parse_star_expressions(s, PREC_EXPRESSION);
+    expression = reject_toplevel_star_expression(s, expression);
   } else {
     expression = NULL;
   }
@@ -2487,6 +2573,7 @@ static union ast_statement *parse_yield_statement(struct parser_state *s)
   union ast_expression *expression = NULL;
   if (is_expression_start(peek(s)) || peek(s) == '*') {
     expression = parse_star_expressions(s, PREC_EXPRESSION);
+    expression = reject_toplevel_star_expression(s, expression);
   }
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_yield, AST_STATEMENT_YIELD, location);
@@ -2932,12 +3019,25 @@ static union ast_statement *parse_try(struct parser_state *s)
   struct ast_try_except inline_storage[4];
   struct idynarray      excepts;
   idynarray_init(&excepts, inline_storage, sizeof(inline_storage));
+  bool saw_bare_except = false;
 
   while (peek(s) == T_except) {
     struct location except_location = scanner_location(&s->scanner);
     eat(s, T_except);
+    bool extra_except_after_bare = saw_bare_except;
+    if (extra_except_after_bare) {
+      diag_begin_error(s->d, except_location);
+      diag_frag(s->d, "default ");
+      diag_token_kind(s->d, T_except);
+      diag_frag(s->d, " must be last");
+      diag_end(s->d);
+    }
+
+    struct ast_try_except  ignored_except;
     struct ast_try_except *except_stmt
-        = idynarray_append(&excepts, struct ast_try_except);
+        = extra_except_after_bare
+              ? &ignored_except
+              : idynarray_append(&excepts, struct ast_try_except);
     except_stmt->location = except_location;
     except_stmt->match = NULL;
     except_stmt->as = NULL;
@@ -2950,6 +3050,9 @@ static union ast_statement *parse_try(struct parser_state *s)
     }
     expect(s, ':');
     except_stmt->body = parse_suite(s);
+    if (except_stmt->match == NULL) {
+      saw_bare_except = true;
+    }
   }
 
   bool had_except = idynarray_length(&excepts, struct ast_try_except) > 0;
@@ -3057,7 +3160,10 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
       item->as_location = scanner_location(&s->scanner);
       eat(s, T_as);
       item->targets = parse_expression(s, PREC_NAMED);
-      /* TODO: check_assignment_target */
+      item->targets
+          = check_assignment_target(s, item->targets, item->as_location,
+                                    /*is_del=*/false,
+                                    /*show_equal_hint=*/false);
     }
   } while (accept(s, ','));
   expect(s, ':');
@@ -3306,15 +3412,7 @@ struct ast_module *parse_single_expression(struct parser_state *s)
   add_anchor(s, T_EOF);
 
   union ast_expression *expression = parse_star_expressions(s, PREC_NAMED);
-  if (ast_expression_type(expression) == AST_UNEXPR_STAR
-      || (ast_expression_type(expression) == AST_EXPRESSION_LIST
-          && expression->expression_list.has_star_expression)) {
-    struct location result_location = get_expression_location(expression);
-    diag_begin_error(s->d, result_location);
-    diag_frag(s->d, "starred expression not allowed here");
-    diag_end(s->d);
-    expression = invalid_expression(s);
-  }
+  expression = reject_starred_expression(s, expression);
   finish_single_input(s);
 
   struct location      location = get_expression_location(expression);

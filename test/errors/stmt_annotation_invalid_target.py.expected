@@ -1,0 +1,1 @@
+test/errors/stmt_annotation_invalid_target.py:1 error: cannot assign to expression

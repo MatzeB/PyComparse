@@ -1,0 +1,1 @@
+test/errors/stmt_assign_star_operand_invalid.py:1 error: cannot assign to expression. Maybe you meant `==`, or `:=` instead of `=`?

@@ -1,0 +1,1 @@
+test/errors/expr_fstring_star.py:2 error: starred expression not allowed here

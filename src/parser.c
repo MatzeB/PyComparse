@@ -3211,7 +3211,7 @@ static struct ast_statement_list *parse_suite(struct parser_state *s)
     do {
       parse_statement(s, &statements, /*top_level=*/false,
                       /*print_expr=*/false);
-    } while (!accept(s, T_DEDENT));
+    } while (!accept(s, T_DEDENT) && peek(s) != T_EOF);
     remove_anchor(s, T_DEDENT);
 
     struct ast_statement_list *result = ast_statement_list_from_array(

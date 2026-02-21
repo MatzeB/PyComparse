@@ -2564,7 +2564,7 @@ void scanner_free(struct scanner_state *s)
   free(s->read_buffer);
 }
 
-void scanner_init_from_buffer(struct scanner_state *s, const char *buf,
+void scanner_init_from_buffer(struct scanner_state *s, const void *buf,
                               size_t buf_len, const char *filename,
                               struct symbol_table      *symbol_table,
                               struct object_intern     *objects,
@@ -2588,8 +2588,8 @@ void scanner_init_from_buffer(struct scanner_state *s, const char *buf,
     char                 *transcoded = NULL;
     size_t                transcoded_len = 0;
     struct encoding_error encoding_error
-        = encoding_maybe_transcode_to_utf8_from_string(buf, len, &transcoded,
-                                                       &transcoded_len);
+        = encoding_maybe_transcode_to_utf8_from_string(
+            effective_buf, len, &transcoded, &transcoded_len);
     if (encoding_error.kind != ENCODING_ERROR_NONE) {
       diag_begin_error(s->d, scanner_location(s));
       switch (encoding_error.kind) {

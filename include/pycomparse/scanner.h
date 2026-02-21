@@ -27,7 +27,7 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
                   struct object_intern *objects, struct arena *strings,
                   struct diagnostics_state *diagnostics);
 
-void scanner_init_from_buffer(struct scanner_state *s, const char *buf,
+void scanner_init_from_buffer(struct scanner_state *s, const void *buf,
                               size_t buf_len, const char *filename,
                               struct symbol_table      *symbol_table,
                               struct object_intern     *objects,

@@ -24,6 +24,7 @@ static void print_usage(FILE *out, const char *prog)
 {
   fprintf(out, "Usage: %s -o <out.pyc> <input.py>\n", prog);
   fprintf(out, "       %s --out <out.pyc> <input.py>\n", prog);
+  fprintf(out, "       Use --out - to write bytecode to stdout.\n");
   fprintf(out, "       %s -h|--help\n", prog);
 }
 
@@ -117,7 +118,8 @@ int main(int argc, char **argv)
 
   bool io_error = false;
   if (!diag_had_errors(&diagnostics)) {
-    FILE *out = fopen(out_filename, "wb");
+    bool  write_to_stdout = strcmp(out_filename, "-") == 0;
+    FILE *out = write_to_stdout ? stdout : fopen(out_filename, "wb");
     if (out == NULL) {
       fprintf(stderr, "Failed to open '%s': %s\n", out_filename,
               strerror(errno));
@@ -125,7 +127,11 @@ int main(int argc, char **argv)
     } else {
       write_module(out, code);
       bool write_failed = ferror(out);
-      write_failed |= fclose(out) != 0;
+      if (write_to_stdout) {
+        write_failed |= fflush(out) != 0;
+      } else {
+        write_failed |= fclose(out) != 0;
+      }
       if (write_failed) {
         fprintf(stderr, "Failed to write '%s': %s\n", out_filename,
                 strerror(errno));

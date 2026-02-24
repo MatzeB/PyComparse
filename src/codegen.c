@@ -1107,11 +1107,6 @@ void cg_load(struct cg_state *s, struct symbol *name)
 
 void cg_store(struct cg_state *s, struct symbol *name)
 {
-  if (is_dunder_debug(name)) {
-    diag_begin_error(s->d, INVALID_LOCATION);
-    diag_frag(s->d, "cannot assign to __debug__");
-    diag_end(s->d);
-  }
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/true);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:
@@ -1141,11 +1136,6 @@ void cg_store(struct cg_state *s, struct symbol *name)
 
 void cg_delete(struct cg_state *s, struct symbol *name)
 {
-  if (is_dunder_debug(name)) {
-    diag_begin_error(s->d, INVALID_LOCATION);
-    diag_frag(s->d, "cannot delete __debug__");
-    diag_end(s->d);
-  }
   struct symbol_info *info = get_or_init_info(s, name, /*is_def=*/true);
   switch ((enum symbol_info_type)info->type) {
   case SYMBOL_NAME:

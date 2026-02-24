@@ -1,0 +1,1 @@
+test/errors/stmt_yield_from_async.py:2 error: `yield from` inside async function

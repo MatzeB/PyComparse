@@ -270,15 +270,35 @@ static void expect(struct parser_state *s, enum token_kind expected_token_kind)
 static bool await_tracking_begin(struct parser_state *s)
 {
   bool saved = s->parsed_await_expression;
+  s->await_tracking_depth++;
   s->parsed_await_expression = false;
   return saved;
 }
 
 static bool await_tracking_end(struct parser_state *s, bool saved)
 {
+  assert(s->await_tracking_depth > 0);
+  s->await_tracking_depth--;
   bool parsed_await_expression = s->parsed_await_expression;
   s->parsed_await_expression = saved || parsed_await_expression;
   return parsed_await_expression;
+}
+
+static void diag_await_outside_async_function(struct parser_state *s)
+{
+  diag_begin_error(s->d, INVALID_LOCATION);
+  diag_token_kind(s->d, T_await);
+  diag_frag(s->d, " outside async function");
+  diag_end(s->d);
+}
+
+static void maybe_diag_await_outside_async_function(struct parser_state *s,
+                                                    bool has_await)
+{
+  if (!has_await || s->parsing_annotation) return;
+  if (!s->in_function || !s->in_async_function) {
+    diag_await_outside_async_function(s);
+  }
 }
 
 static union ast_expression *
@@ -376,6 +396,43 @@ static struct symbol *invalid_symbol(struct parser_state *s)
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
+static bool is_dunder_debug_symbol(const struct symbol *symbol)
+{
+  return strcmp(symbol->string, "__debug__") == 0;
+}
+
+static void diag_dunder_debug_binding(struct parser_state *s, bool is_del)
+{
+  diag_begin_error(s->d, INVALID_LOCATION);
+  diag_frag(s->d,
+            is_del ? "cannot delete __debug__" : "cannot assign to __debug__");
+  diag_end(s->d);
+}
+
+static void validate_yield_context(struct parser_state *s,
+                                   struct location      location,
+                                   bool                 is_yield_from)
+{
+  if (s->parsing_annotation) return;
+  if (!s->in_function) {
+    diag_begin_error(s->d, location);
+    if (is_yield_from) {
+      diag_frag(s->d, "`yield from` outside function");
+    } else {
+      diag_token_kind(s->d, T_yield);
+      diag_frag(s->d, " outside function");
+    }
+    diag_end(s->d);
+    return;
+  }
+
+  if (is_yield_from && s->in_async_function) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`yield from` inside async function");
+    diag_end(s->d);
+  }
+}
+
 static struct symbol *maybe_mangle_private_name(struct parser_state *s,
                                                 struct symbol       *symbol)
 {
@@ -422,6 +479,15 @@ static struct symbol *parse_identifier(struct parser_state *s)
     return invalid_symbol(s);
   }
   return maybe_mangle_private_name(s, eat_identifier(s));
+}
+
+static struct symbol *parse_binding_identifier(struct parser_state *s)
+{
+  struct symbol *name = parse_identifier(s);
+  if (is_dunder_debug_symbol(name)) {
+    diag_dunder_debug_binding(s, /*is_del=*/false);
+  }
+  return name;
 }
 
 static union ast_expression *parse_expression(struct parser_state *s,
@@ -600,9 +666,14 @@ static union ast_expression *check_assignment_target(
     return error_starred_expression_not_allowed(
         s, get_expression_location(expression));
   }
-  if (type == AST_IDENTIFIER || type == AST_BINEXPR_SUBSCRIPT
-      || type == AST_ATTR)
+  if (type == AST_IDENTIFIER) {
+    if (is_dunder_debug_symbol(expression->identifier.symbol)) {
+      diag_dunder_debug_binding(s, is_del);
+      return invalid_expression(s);
+    }
     return expression;
+  }
+  if (type == AST_BINEXPR_SUBSCRIPT || type == AST_ATTR) return expression;
   if (type == AST_EXPRESSION_LIST || type == AST_LIST_DISPLAY) {
     unsigned num_expressions = expression->expression_list.num_expressions;
     union ast_expression **expressions
@@ -710,6 +781,11 @@ parse_generator_expression(struct parser_state     *s,
   expression->generator_expression.base.location = location;
   expression->generator_expression.num_parts = num_parts;
   expression->generator_expression.is_async = is_async;
+  if (is_async && type != AST_GENERATOR_EXPRESSION && !s->in_async_function) {
+    diag_begin_error(s->d, INVALID_LOCATION);
+    diag_frag(s->d, "asynchronous comprehension outside async function");
+    diag_end(s->d);
+  }
   memcpy(expression->generator_expression.parts, idynarray_data(&parts),
          parts_size);
   idynarray_free(&parts);
@@ -762,6 +838,8 @@ static struct argument *parse_argument(struct parser_state *s,
     set_generator_expression_item(expression, item, expression_has_await,
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
+  } else {
+    maybe_diag_await_outside_async_function(s, expression_has_await);
   }
 
   argument->name = name;
@@ -910,7 +988,7 @@ static void parse_parameters(struct parser_state    *s,
     case T_IDENTIFIER:
     parameter: {
       struct location location = scanner_location(&s->scanner);
-      struct symbol  *name = parse_identifier(s);
+      struct symbol  *name = parse_binding_identifier(s);
       if (need_kwonly_after_bare_star && variant == PARAMETER_NORMAL) {
         need_kwonly_after_bare_star = false;
       }
@@ -1005,6 +1083,10 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 static union ast_expression *parse_await(struct parser_state *s)
 {
   s->parsed_await_expression = true;
+  if (!s->parsing_annotation && s->await_tracking_depth == 0
+      && (!s->in_function || !s->in_async_function)) {
+    diag_await_outside_async_function(s);
+  }
   return parse_unexpr(s, PREC_AWAIT, AST_UNEXPR_AWAIT);
 }
 
@@ -1037,6 +1119,7 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
   } else {
+    maybe_diag_await_outside_async_function(s, first_has_await);
     expression = parse_expression_list_helper(
         s, AST_LIST_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false,
         /*allow_starred=*/true);
@@ -1078,6 +1161,7 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *expression;
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
+    maybe_diag_await_outside_async_function(s, first_has_await);
     add_anchor(s, ',');
     expression = parse_expression_list_helper(
         s, AST_SET_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false,
@@ -1106,6 +1190,8 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
       set_generator_expression_item(expression, key, first_has_await, value,
                                     value_has_await);
     } else {
+      maybe_diag_await_outside_async_function(s, first_has_await
+                                                     || value_has_await);
     parse_dict: {
       /* dict display */
       struct dict_item inline_storage[16];
@@ -1155,7 +1241,8 @@ static union ast_expression *parse_yield_expression(struct parser_state *s)
   struct location location = scanner_location(&s->scanner);
   bool            reject_in_annotation = s->parsing_annotation;
   eat(s, T_yield);
-  bool                     is_yield_from = accept(s, T_from);
+  bool is_yield_from = accept(s, T_from);
+  validate_yield_context(s, location, is_yield_from);
   enum ast_expression_type type = is_yield_from ? AST_YIELD_FROM : AST_YIELD;
   union ast_expression    *yield_expression = NULL;
   if (is_yield_from) {
@@ -1214,10 +1301,12 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
                                     /*item_value=*/NULL,
                                     /*item_value_has_await=*/false);
     } else if (peek(s) == ',') {
+      maybe_diag_await_outside_async_function(s, first_has_await);
       expression = parse_expression_list_helper(
           s, AST_EXPRESSION_LIST, first, PREC_NAMED, /*allow_slices=*/false,
           /*allow_starred=*/true);
     } else {
+      maybe_diag_await_outside_async_function(s, first_has_await);
       expression = reject_starred_expression(s, first);
     }
   }
@@ -2318,6 +2407,12 @@ static union ast_statement *parse_break(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_break);
+  if (s->loop_depth == 0) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_break);
+    diag_frag(s->d, " outside loop");
+    diag_end(s->d);
+  }
   return ast_allocate_statement(s, struct ast_break, AST_STATEMENT_BREAK,
                                 location);
 }
@@ -2326,6 +2421,12 @@ static union ast_statement *parse_continue(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_continue);
+  if (s->loop_depth == 0) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_continue);
+    diag_frag(s->d, " outside loop");
+    diag_end(s->d);
+  }
   return ast_allocate_statement(s, struct ast_continue, AST_STATEMENT_CONTINUE,
                                 location);
 }
@@ -2416,7 +2517,12 @@ static union ast_statement *parse_from_import_statement(struct parser_state *s)
     struct symbol *name = parse_identifier(s);
     struct symbol *as = NULL;
     if (accept(s, T_as)) {
-      as = parse_identifier(s);
+      as = parse_binding_identifier(s);
+    }
+    if (as == NULL) {
+      if (is_dunder_debug_symbol(name)) {
+        diag_dunder_debug_binding(s, /*is_del=*/false);
+      }
     }
     struct from_import_item *item
         = idynarray_append(&pairs, struct from_import_item);
@@ -2489,7 +2595,11 @@ static union ast_statement *parse_import_statement(struct parser_state *s)
     struct dotted_name *dotted_name = parse_dotted_name(s);
     struct symbol      *as = NULL;
     if (accept(s, T_as)) {
-      as = parse_identifier(s);
+      as = parse_binding_identifier(s);
+    } else if (dotted_name->num_symbols > 0) {
+      if (is_dunder_debug_symbol(dotted_name->symbols[0])) {
+        diag_dunder_debug_binding(s, /*is_del=*/false);
+      }
     }
     struct ast_import_item *item
         = idynarray_append(&items, struct ast_import_item);
@@ -2574,6 +2684,12 @@ static union ast_statement *parse_return(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_return);
+  if (!s->in_function) {
+    diag_begin_error(s->d, location);
+    diag_token_kind(s->d, T_return);
+    diag_frag(s->d, " outside function");
+    diag_end(s->d);
+  }
 
   union ast_expression *expression;
   if (is_expression_start(peek(s))) {
@@ -2597,7 +2713,9 @@ static union ast_statement *parse_yield_statement(struct parser_state *s)
     *s->current_function_has_yield = true;
   }
 
-  if (accept(s, T_from)) {
+  bool is_yield_from = accept(s, T_from);
+  validate_yield_context(s, location, is_yield_from);
+  if (is_yield_from) {
     union ast_expression *expression = parse_expression(s, PREC_EXPRESSION);
     union ast_statement  *statement = ast_allocate_statement(
         s, struct ast_yield, AST_STATEMENT_YIELD_FROM, location);
@@ -2830,7 +2948,7 @@ static union ast_statement *parse_class(struct parser_state   *s,
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_class);
-  struct symbol *name = parse_identifier(s);
+  struct symbol *name = parse_binding_identifier(s);
 
   parse_type_parameters(s);
 
@@ -2847,9 +2965,18 @@ static union ast_statement *parse_class(struct parser_state   *s,
 
   expect(s, ':');
   struct symbol *saved_private_class_name = s->private_class_name;
+  bool           saved_in_function = s->in_function;
+  bool           saved_in_async_function = s->in_async_function;
+  unsigned       saved_loop_depth = s->loop_depth;
   s->private_class_name = name;
+  s->in_function = false;
+  s->in_async_function = false;
+  s->loop_depth = 0;
   struct ast_statement_list *body = parse_suite(s);
   s->private_class_name = saved_private_class_name;
+  s->in_function = saved_in_function;
+  s->in_async_function = saved_in_async_function;
+  s->loop_depth = saved_loop_depth;
 
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_class, AST_STATEMENT_CLASS, location);
@@ -2873,7 +3000,7 @@ static union ast_statement *parse_def(struct parser_state   *s,
   }
   struct location location = scanner_location(&s->scanner);
   expect(s, T_def);
-  struct symbol *name = parse_identifier(s);
+  struct symbol *name = parse_binding_identifier(s);
 
   struct parameter inline_storage[16];
   struct idynarray parameters;
@@ -2889,11 +3016,20 @@ static union ast_statement *parse_def(struct parser_state   *s,
   }
   expect(s, ':');
 
-  bool  has_yield = false;
-  bool *saved_function_has_yield = s->current_function_has_yield;
+  bool     has_yield = false;
+  bool    *saved_function_has_yield = s->current_function_has_yield;
+  bool     saved_in_function = s->in_function;
+  bool     saved_in_async_function = s->in_async_function;
+  unsigned saved_loop_depth = s->loop_depth;
   s->current_function_has_yield = &has_yield;
+  s->in_function = true;
+  s->in_async_function = async;
+  s->loop_depth = 0;
   struct ast_statement_list *body = parse_suite(s);
   s->current_function_has_yield = saved_function_has_yield;
+  s->in_function = saved_in_function;
+  s->in_async_function = saved_in_async_function;
+  s->loop_depth = saved_loop_depth;
 
   unsigned num_parameters = parameter_shape.num_parameters;
   size_t   parameters_size = num_parameters * sizeof(struct parameter);
@@ -2962,6 +3098,11 @@ static union ast_statement *parse_for(struct parser_state *s, bool async)
 {
   struct location location = scanner_location(&s->scanner);
   eat(s, T_for);
+  if (async && !s->in_async_function) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`async for` outside async function");
+    diag_end(s->d);
+  }
   union ast_expression *targets = parse_star_expressions(s, PREC_OR);
   targets = check_assignment_target(s, targets, location, /*is_del=*/false,
                                     /*show_equal_hint=*/false);
@@ -2979,7 +3120,10 @@ static union ast_statement *parse_for(struct parser_state *s, bool async)
     expression = invalid_expression(s);
   }
   expect(s, ':');
+  s->loop_depth++;
   struct ast_statement_list *body = parse_suite(s);
+  assert(s->loop_depth > 0);
+  s->loop_depth--;
 
   struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
@@ -3079,7 +3223,7 @@ static union ast_statement *parse_try(struct parser_state *s)
     if (peek(s) != ':') {
       except_stmt->match = parse_expression(s, PREC_TEST);
       if (accept(s, T_as)) {
-        except_stmt->as = parse_identifier(s);
+        except_stmt->as = parse_binding_identifier(s);
       }
     }
     expect(s, ':');
@@ -3159,7 +3303,10 @@ static union ast_statement *parse_while(struct parser_state *s)
   eat(s, T_while);
   union ast_expression *condition = parse_expression(s, PREC_NAMED);
   expect(s, ':');
+  s->loop_depth++;
   struct ast_statement_list *body = parse_suite(s);
+  assert(s->loop_depth > 0);
+  s->loop_depth--;
 
   struct ast_statement_list *else_body = NULL;
   if (accept(s, T_else)) {
@@ -3180,6 +3327,12 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
   struct location location = scanner_location(&s->scanner);
   eat(s, T_with);
 
+  if (async && !s->in_async_function) {
+    diag_begin_error(s->d, location);
+    diag_frag(s->d, "`async with` outside async function");
+    diag_end(s->d);
+  }
+
   struct ast_with_item inline_storage[4];
   struct idynarray     items;
   idynarray_init(&items, inline_storage, sizeof(inline_storage));
@@ -3188,16 +3341,17 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
     struct ast_with_item *item
         = idynarray_append(&items, struct ast_with_item);
     item->expression = parse_expression(s, PREC_TEST);
-    item->as_location = (struct location){ 0 };
-    item->targets = NULL;
     if (peek(s) == T_as) {
       item->as_location = scanner_location(&s->scanner);
       eat(s, T_as);
-      item->targets = parse_expression(s, PREC_NAMED);
-      item->targets
-          = check_assignment_target(s, item->targets, item->as_location,
-                                    /*is_del=*/false,
-                                    /*show_equal_hint=*/false);
+      union ast_expression *targets = parse_expression(s, PREC_NAMED);
+      targets = check_assignment_target(s, targets, item->as_location,
+                                        /*is_del=*/false,
+                                        /*show_equal_hint=*/false);
+      item->targets = targets;
+    } else {
+      item->as_location = (struct location){ 0 };
+      item->targets = NULL;
     }
   } while (accept(s, ','));
   expect(s, ':');

@@ -60,13 +60,6 @@ emit_generator_helper(struct cg_state                 *s,
              == GENERATOR_EXPRESSION_PART_FOR) {
     first_part_async = generator_expression->parts[0].async;
   }
-  if (async_comprehension && !is_generator_expression
-      && !s->code.in_async_function) {
-    struct location location = INVALID_LOCATION;
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "asynchronous comprehension outside async function");
-    diag_end(s->d);
-  }
 
   analyze_generator_bindings(s, generator_expression);
 
@@ -597,14 +590,6 @@ static void emit_attr(struct cg_state *s, struct ast_attr *attr)
 
 static void emit_await(struct cg_state *s, struct ast_unexpr *unexpr)
 {
-  if (!cg_in_function(s) || !s->code.in_async_function) {
-    struct location location = INVALID_LOCATION;
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_await);
-    diag_frag(s->d, " outside async function");
-    diag_end(s->d);
-  }
-
   emit_expression(s, unexpr->op);
   cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
   emit_none(s);
@@ -920,16 +905,10 @@ static void emit_generator_expression(
                         /*is_generator_expression=*/true);
 }
 
-void emit_yield(struct cg_state *s, union ast_expression *nullable value,
-                struct location location)
+void emit_yield(struct cg_state *s, union ast_expression *nullable value)
 {
   s->code.flags |= CO_GENERATOR;
-  if (!cg_in_function(s)) {
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_yield);
-    diag_frag(s->d, " outside function");
-    diag_end(s->d);
-  }
+  assert(cg_in_function(s));
 
   if (value != NULL) {
     emit_expression(s, value);
@@ -939,26 +918,16 @@ void emit_yield(struct cg_state *s, union ast_expression *nullable value,
   cg_op(s, OPCODE_YIELD_VALUE, 0);
 }
 
-void emit_yield_from(struct cg_state *s, union ast_expression *nullable value,
-                     struct location location)
+void emit_yield_from(struct cg_state *s, union ast_expression *nullable value)
 {
   s->code.flags |= CO_GENERATOR;
-  if (!cg_in_function(s)) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "`yield from` outside function");
-    diag_end(s->d);
-  } else if (s->code.in_async_function) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "`yield from` inside async function");
-    diag_end(s->d);
-  }
+  assert(cg_in_function(s));
+  assert(!s->code.in_async_function);
 
   if (value != NULL) {
     emit_expression(s, value);
   } else {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "expected expression after `yield from`");
-    diag_end(s->d);
+    assert(value != NULL);
     emit_none(s);
   }
   cg_op(s, OPCODE_GET_YIELD_FROM_ITER, 0);
@@ -1082,12 +1051,10 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_UNEXPR_STAR_STAR:
     internal_error("attempted to emit `*`/`**` as value");
   case AST_YIELD:
-    emit_yield(s, expression->yield.value,
-               get_expression_location(expression));
+    emit_yield(s, expression->yield.value);
     return;
   case AST_YIELD_FROM:
-    emit_yield_from(s, expression->yield.value,
-                    get_expression_location(expression));
+    emit_yield_from(s, expression->yield.value);
     return;
   }
 }

@@ -1,0 +1,1 @@
+test/errors/stmt_yield_non_function.py:1 error: `yield` outside function

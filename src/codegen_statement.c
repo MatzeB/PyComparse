@@ -1124,14 +1124,8 @@ static void emit_for_begin_async(struct cg_state        *s,
 
 static void emit_for_begin(struct cg_state *s, struct for_while_state *state,
                            union ast_expression *targets,
-                           union ast_expression *expression, bool async,
-                           struct location location)
+                           union ast_expression *expression, bool async)
 {
-  if (async && (!cg_in_function(s) || !s->code.in_async_function)) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "`async for` outside async function");
-    diag_end(s->d);
-  }
   if (async) {
     emit_for_begin_async(s, state, targets, expression);
   } else {
@@ -1194,11 +1188,11 @@ static bool break_or_continue_exits_active_finally(struct cg_state *s)
   return s->code.active_finally_body_depth > s->code.loop_state.finally_depth;
 }
 
-static bool emit_continue(struct cg_state         *s,
+static void emit_continue(struct cg_state         *s,
                           struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
-  if (target == NULL) return false;
+  assert(target != NULL);
   if (break_or_continue_exits_active_finally(s)) {
     emit_finally_abrupt_exit_prefix(s);
   }
@@ -1207,27 +1201,25 @@ static bool emit_continue(struct cg_state         *s,
   if (!unreachable(s)) {
     cg_jump(s, target);
   }
-  return true;
 }
 
-static bool emit_break(struct cg_state         *s,
+static void emit_break(struct cg_state         *s,
                        struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.break_block;
-  if (target == NULL) return false;
+  assert(target != NULL);
   if (break_or_continue_exits_active_finally(s)) {
     emit_finally_abrupt_exit_prefix(s);
   }
   emit_pending_finally(s, current_function,
                        s->code.loop_state.pending_at_loop);
-  if (unreachable(s)) return true;
+  if (unreachable(s)) return;
   if (!unreachable(s)) {
     if (s->code.loop_state.pop_on_break) {
       cg_op(s, OPCODE_POP_TOP, 0);
     }
     cg_jump(s, target);
   }
-  return true;
 }
 
 static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
@@ -1357,8 +1349,7 @@ static void emit_generator_expression_part(
     struct for_while_state state;
     union ast_expression  *targets = part->targets;
     assert(targets != NULL);
-    emit_for_begin(s, &state, targets, part->expression, part->async,
-                   INVALID_LOCATION);
+    emit_for_begin(s, &state, targets, part->expression, part->async);
 
     emit_generator_expression_part(s, generator_expression, part_index + 1);
 
@@ -1448,8 +1439,7 @@ void emit_generator_expression_code(
 static void emit_with_begin(struct cg_state *s, struct with_state *state,
                             union ast_expression *expression,
                             struct location       as_location,
-                            union ast_expression *targets, bool async,
-                            struct location location)
+                            union ast_expression *targets, bool async)
 {
   if (unreachable(s)) {
     memset(state, 0, sizeof(*state));
@@ -1457,11 +1447,6 @@ static void emit_with_begin(struct cg_state *s, struct with_state *state,
   }
   state->async_with = async;
 
-  if (async && (!cg_in_function(s) || !s->code.in_async_function)) {
-    diag_begin_error(s->d, location);
-    diag_frag(s->d, "`async with` outside async function");
-    diag_end(s->d);
-  }
   if (async) {
     cg_push(s, 8);
     cg_pop(s, 8);
@@ -2824,7 +2809,7 @@ static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
 {
   struct for_while_state state;
   emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression,
-                 for_stmt->async, for_stmt->base.location);
+                 for_stmt->async);
   emit_statement_list_with_function(s, for_stmt->body, current_function);
   emit_for_else(s, &state);
   if (for_stmt->else_body != NULL) {
@@ -3251,7 +3236,7 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
   for (unsigned i = 0; i < num_items; ++i) {
     struct ast_with_item *item = &with->items[i];
     emit_with_begin(s, &states[i], item->expression, item->as_location,
-                    item->targets, with->async, with->base.location);
+                    item->targets, with->async);
     with_cleanups[i] = (struct pending_finally_state){
       .kind = CLEANUP_WITH,
       .async_with = with->async,
@@ -3286,29 +3271,6 @@ static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
   }
 }
 
-static void emit_break_statement(struct cg_state *s, struct location location,
-                                 struct ast_def *nullable current_function)
-{
-  if (!emit_break(s, current_function)) {
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_break);
-    diag_frag(s->d, " outside loop");
-    diag_end(s->d);
-  }
-}
-
-static void emit_continue_statement(struct cg_state         *s,
-                                    struct location          location,
-                                    struct ast_def *nullable current_function)
-{
-  if (!emit_continue(s, current_function)) {
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_continue);
-    diag_frag(s->d, " outside loop");
-    diag_end(s->d);
-  }
-}
-
 static void emit_expression_statement(struct cg_state                 *s,
                                       struct ast_expression_statement *expr)
 {
@@ -3336,16 +3298,9 @@ static void emit_raise(struct cg_state *s, struct ast_raise *raise)
   }
 }
 
-static void emit_return(struct cg_state *s, struct location location,
-                        struct ast_return       *return_stmt,
+static void emit_return(struct cg_state *s, struct ast_return *return_stmt,
                         struct ast_def *nullable current_function)
 {
-  if (!cg_in_function(s)) {
-    diag_begin_error(s->d, location);
-    diag_token_kind(s->d, T_return);
-    diag_frag(s->d, " outside function");
-    diag_end(s->d);
-  }
   if (!unreachable(s)) {
     emit_finally_abrupt_exit_prefix(s);
     bool has_value = (return_stmt->expression != NULL);
@@ -3381,7 +3336,7 @@ static void emit_return(struct cg_state *s, struct location location,
 static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 {
   if (!unreachable(s)) {
-    emit_yield(s, yield->expression, yield->base.location);
+    emit_yield(s, yield->expression);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
@@ -3390,7 +3345,7 @@ static void emit_yield_from_statement(struct cg_state  *s,
                                       struct ast_yield *yield_from)
 {
   if (!unreachable(s)) {
-    emit_yield_from(s, yield_from->expression, yield_from->base.location);
+    emit_yield_from(s, yield_from->expression);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
 }
@@ -3415,13 +3370,13 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_augassign(s, &statement->augassign);
     return;
   case AST_STATEMENT_BREAK:
-    emit_break_statement(s, statement->base.location, current_function);
+    emit_break(s, current_function);
     return;
   case AST_STATEMENT_CLASS:
     emit_class(s, &statement->class_);
     return;
   case AST_STATEMENT_CONTINUE:
-    emit_continue_statement(s, statement->base.location, current_function);
+    emit_continue(s, current_function);
     return;
   case AST_STATEMENT_DEF:
     emit_def(s, &statement->def);
@@ -3458,8 +3413,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_raise(s, &statement->raise);
     return;
   case AST_STATEMENT_RETURN:
-    emit_return(s, statement->base.location, &statement->return_,
-                current_function);
+    emit_return(s, &statement->return_, current_function);
     return;
   case AST_STATEMENT_TRY:
     emit_try(s, &statement->try_, current_function);

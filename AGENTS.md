@@ -22,9 +22,15 @@ The build produces three main executables:
 
 ## Development Commands
 
-### Building
+### Setup
+
 ```bash
-cmake -S . -B build -G Ninja
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPYCOMPARSE_ENABLE_SANITIZERS=On
+```
+
+### Building
+
+```bash
 ninja --quiet -C build
 ```
 

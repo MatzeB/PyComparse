@@ -1163,7 +1163,7 @@ static void fold_with_items_inplace(struct constant_fold_state    *s,
   }
   for (unsigned i = 0; i < num_items; ++i) {
     items[i].expression = fold_expression(s, items[i].expression);
-    items[i].targets = fold_expression_nullable(s, items[i].targets);
+    items[i].target = fold_expression_nullable(s, items[i].target);
   }
 }
 

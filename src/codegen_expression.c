@@ -121,16 +121,12 @@ emit_generator_helper(struct cg_state                 *s,
   struct generator_expression_part *part = &generator_expression->parts[0];
   emit_expression(s, part->expression);
   if (first_part_async) {
-    cg_push(s, 8);
-    cg_pop(s, 8);
     cg_op_pop_push(s, OPCODE_GET_AITER, 0, /*pop=*/1, /*push=*/1);
   } else {
     cg_op_pop_push(s, OPCODE_GET_ITER, 0, /*pop=*/1, /*push=*/1);
   }
   cg_op_pop_push(s, OPCODE_CALL_FUNCTION, 1, /*pop=*/2, /*push=*/1);
   if (async_comprehension && !is_generator_expression) {
-    cg_push(s, 4);
-    cg_pop(s, 4);
     cg_op_pop_push(s, OPCODE_GET_AWAITABLE, 0, /*pop=*/1, /*push=*/1);
     cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
@@ -937,10 +933,11 @@ void emit_yield_from(struct cg_state *s, union ast_expression *nullable value)
 
 void emit_expression(struct cg_state *s, union ast_expression *expression)
 {
+  assert(!cg_unreachable(s));
   switch (ast_expression_type(expression)) {
   case AST_ATTR:
     emit_attr(s, &expression->attr);
-    return;
+    break;
   case AST_BINEXPR_ADD:
   case AST_BINEXPR_AND:
   case AST_BINEXPR_FLOORDIV:
@@ -956,7 +953,7 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_BINEXPR_TRUEDIV:
   case AST_BINEXPR_XOR:
     emit_binexpr(s, &expression->binexpr);
-    return;
+    break;
   case AST_BINEXPR_ADD_ASSIGN:
   case AST_BINEXPR_AND_ASSIGN:
   case AST_BINEXPR_FLOORDIV_ASSIGN:
@@ -971,90 +968,91 @@ void emit_expression(struct cg_state *s, union ast_expression *expression)
   case AST_BINEXPR_TRUEDIV_ASSIGN:
   case AST_BINEXPR_XOR_ASSIGN:
     emit_binexpr_assign(s, &expression->binexpr);
-    return;
+    break;
   case AST_BINEXPR_ASSIGN:
     emit_assign_expression(s, &expression->binexpr);
-    return;
+    break;
   case AST_BINEXPR_LOGICAL_AND:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_FALSE_OR_POP);
-    return;
+    break;
   case AST_BINEXPR_LOGICAL_OR:
     emit_binexpr_logical(s, &expression->binexpr, OPCODE_JUMP_IF_TRUE_OR_POP);
-    return;
+    break;
   case AST_CALL:
     emit_call(s, &expression->call);
-    return;
+    break;
   case AST_COMPARISON:
     emit_comparison(s, &expression->comparison);
-    return;
+    break;
   case AST_CONDITIONAL:
     emit_conditional(s, &expression->conditional);
-    return;
+    break;
   case AST_CONST:
     cg_load_const(s, expression->cnst.object);
-    return;
+    break;
   case AST_INVALID:
     emit_invalid(s, &expression->cnst);
-    return;
+    break;
   case AST_DICT_COMPREHENSION:
     emit_dictionary_comprehension(s, &expression->generator_expression);
-    return;
+    break;
   case AST_DICT_DISPLAY:
     emit_dictionary_display(s, &expression->dict_item_list);
-    return;
+    break;
   case AST_EXPRESSION_LIST:
     emit_tuple(s, &expression->expression_list);
-    return;
+    break;
   case AST_FSTRING:
     emit_fstring(s, &expression->fstring);
-    return;
+    break;
   case AST_GENERATOR_EXPRESSION:
     emit_generator_expression(s, &expression->generator_expression);
-    return;
+    break;
   case AST_IDENTIFIER:
     cg_load(s, expression->identifier.symbol);
-    return;
+    break;
   case AST_LAMBDA:
     emit_lambda(s, &expression->lambda);
-    return;
+    break;
   case AST_LIST_COMPREHENSION:
     emit_list_comprehension(s, &expression->generator_expression);
-    return;
+    break;
   case AST_LIST_DISPLAY:
     emit_list_display(s, &expression->expression_list);
-    return;
+    break;
   case AST_SET_COMPREHENSION:
     emit_set_comprehension(s, &expression->generator_expression);
-    return;
+    break;
   case AST_SET_DISPLAY:
     emit_set_display(s, &expression->expression_list);
-    return;
+    break;
   case AST_SLICE:
     emit_slice(s, &expression->slice);
-    return;
+    break;
   case AST_UNEXPR_AWAIT:
     emit_await(s, &expression->unexpr);
-    return;
+    break;
   case AST_UNEXPR_PLUS:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_POSITIVE);
-    return;
+    break;
   case AST_UNEXPR_NEGATIVE:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_NEGATIVE);
-    return;
+    break;
   case AST_UNEXPR_NOT:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_NOT);
-    return;
+    break;
   case AST_UNEXPR_INVERT:
     emit_unexpr(s, &expression->unexpr, OPCODE_UNARY_INVERT);
-    return;
+    break;
   case AST_UNEXPR_STAR:
   case AST_UNEXPR_STAR_STAR:
     internal_error("attempted to emit `*`/`**` as value");
   case AST_YIELD:
     emit_yield(s, expression->yield.value);
-    return;
+    break;
   case AST_YIELD_FROM:
     emit_yield_from(s, expression->yield.value);
-    return;
+    break;
   }
+  assert(!cg_unreachable(s));
 }

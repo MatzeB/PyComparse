@@ -24,6 +24,58 @@
 #include "pycomparse/symbol_types.h"
 #include "pycomparse/util.h"
 
+struct try_state {
+  struct basic_block *nullable excepts;
+  struct basic_block *nullable except_next;
+  struct basic_block *nullable except_unassign_as;
+  struct basic_block *nullable try_else_block;
+  struct basic_block *nullable enter_finally;
+  struct basic_block *nullable finally_block;
+  struct basic_block *nullable footer;
+};
+
+enum scope_cleanup_kind {
+  SCOPE_CLEANUP_LOOP_ITER,
+  SCOPE_CLEANUP_POP_BLOCK,
+  SCOPE_CLEANUP_POP_EXCEPT,
+  SCOPE_CLEANUP_FINALLY,
+  SCOPE_CLEANUP_WITHIN_FINALLY,
+  SCOPE_CLEANUP_EXCEPT_AS,
+  SCOPE_CLEANUP_WITH,
+};
+
+struct scope_cleanup_base {
+  enum scope_cleanup_kind       kind;
+  union scope_cleanup *nullable prev;
+};
+
+struct except_as_scope_cleanup {
+  struct scope_cleanup_base base;
+  struct symbol *nullable   as_symbol;
+};
+
+struct finally_scope_cleanup {
+  struct scope_cleanup_base           base;
+  bool                                finally_needs_placeholder;
+  struct basic_block *nullable        finally_block;
+  struct ast_statement_list *nullable finally_body;
+};
+
+struct with_scope_cleanup {
+  struct scope_cleanup_base base;
+  bool                      async;
+  struct basic_block       *block;
+};
+
+union scope_cleanup {
+  enum scope_cleanup_kind   kind;
+  struct scope_cleanup_base base;
+
+  struct except_as_scope_cleanup except_as;
+  struct finally_scope_cleanup   finally;
+  struct with_scope_cleanup      with;
+};
+
 static void emit_comparison_multi(struct cg_state             *s,
                                   struct ast_comparison       *comparison,
                                   struct basic_block *nullable true_block,
@@ -92,27 +144,10 @@ static void emit_comparison_multi(struct cg_state             *s,
   }
 }
 
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function,
-                                 struct pending_finally_state *nullable stop);
-
-enum pending_cleanup_kind {
-  CLEANUP_POP_BLOCK,
-  CLEANUP_POP_EXCEPT,
-  CLEANUP_FINALLY,
-  CLEANUP_EXCEPT_AS,
-  CLEANUP_WITH,
-};
-
-struct pending_finally_state {
-  enum pending_cleanup_kind              kind;
-  struct ast_statement_list *nullable    finally_body;
-  struct basic_block *nullable           finally_block;
-  bool                                   finally_needs_placeholder;
-  struct symbol *nullable                as_symbol;
-  bool                                   async_with;
-  struct pending_finally_state *nullable prev;
-};
+static void emit_scope_cleanup(struct cg_state              *s,
+                               struct ast_def *nullable      current_function,
+                               union scope_cleanup *nullable stop,
+                               bool value_passthrough);
 
 void emit_comparison_multi_value(struct cg_state       *s,
                                  struct ast_comparison *comparison)
@@ -199,25 +234,9 @@ void emit_condjump_expr(struct cg_state *s, union ast_expression *expression,
   }
 }
 
-static bool unreachable(struct cg_state *s)
-{
-  return !cg_in_block(s);
-}
-
-static void ensure_dead_block_for_unreachable_finally(struct cg_state *s)
-{
-  if (!unreachable(s) || s->code.active_finally_body_depth == 0) {
-    return;
-  }
-  /* Keep emitting line metadata for statements that are syntactically in the
-   * active finally body, even after control flow became unreachable. */
-  struct basic_block *dead = cg_block_allocate(s);
-  cg_block_begin(s, dead);
-}
-
 void emit_code_end(struct cg_state *s)
 {
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
   cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
   cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
   cg_block_end(s);
@@ -251,7 +270,7 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
   if (!cg_in_function(s)) {
     s->code.setup_annotations = true;
   }
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
 
   switch (ast_expression_type(target)) {
   case AST_IDENTIFIER:
@@ -292,7 +311,7 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
 static void emit_assert(struct cg_state *s, union ast_expression *expression,
                         union ast_expression *message)
 {
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
 
   struct basic_block *fail = cg_block_allocate(s);
   struct basic_block *continue_block = cg_block_allocate(s);
@@ -319,7 +338,7 @@ static void emit_assign(struct cg_state *s, unsigned num_targets,
                         union ast_expression **targets,
                         union ast_expression  *value)
 {
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
   emit_expression(s, value);
   for (unsigned i = 0; i < num_targets; i++) {
     union ast_expression *target = targets[i];
@@ -359,7 +378,7 @@ static void emit_from_import(struct cg_state *s, unsigned num_prefix_dots,
                              struct dotted_name *module, unsigned num_pairs,
                              struct from_import_item *items)
 {
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
   unsigned module_name = module != NULL ? register_dotted_name(s, module)
                                         : cg_register_name_from_cstring(s, "");
   bool     import_star = (num_pairs == 0);
@@ -402,7 +421,7 @@ static void emit_from_import(struct cg_state *s, unsigned num_prefix_dots,
 static void emit_import(struct cg_state *s, struct dotted_name *module,
                         struct symbol *as)
 {
-  if (unreachable(s)) return;
+  if (cg_unreachable(s)) return;
   unsigned      module_name = register_dotted_name(s, module);
   union object *object = object_intern_int(s->objects, 0);
   cg_load_const(s, object);
@@ -651,73 +670,16 @@ void emit_make_function_end(struct cg_state            *s,
                  /*pop=*/operands, /*push=*/1);
 }
 
-static void emit_try_body_begin(struct cg_state *s, struct try_state *state,
-                                bool has_finally)
+static void emit_except_begin(struct cg_state *s, struct try_state *state,
+                              struct location       location,
+                              union ast_expression *match, struct symbol *as)
 {
-  memset(state, 0, sizeof(*state));
-  if (unreachable(s)) return;
-  state->try_reachable = true;
-
-  struct basic_block *setup_finally = cg_block_allocate(s);
-  struct basic_block *setup_except = cg_block_allocate(s);
-  state->setup_finally = setup_finally;
-  state->setup_except = setup_except;
-  if (has_finally) {
-    state->finally_body = cg_block_allocate(s);
-  }
-
-  cg_jump(s, setup_finally);
-  cg_block_insert_delayed(s, setup_finally);
-  cg_block_insert_delayed(s, setup_except);
-
-  struct basic_block *body = cg_block_allocate(s);
-  cg_block_begin(s, body);
-}
-
-static void emit_try_body_end(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-  if (unreachable(s)) return;
-
-  /* if there was an except, then we need to insert a POP_BLOCK here */
-  struct basic_block *body_exit = cg_block_allocate(s);
-  state->body_exit = body_exit;
-
-  cg_jump(s, body_exit);
-  cg_block_insert_delayed(s, body_exit);
-}
-
-static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
-                                  struct location       location,
-                                  union ast_expression *match,
-                                  struct symbol        *as)
-{
-  if (!state->try_reachable) return;
-
-  struct basic_block *excepts;
-  if (!state->had_except) {
-    excepts = cg_block_allocate(s);
-
-    struct basic_block *setup_except = state->setup_except;
-    cg_block_begin_delayed(s, setup_except);
-    cg_condjump(s, OPCODE_SETUP_FINALLY,
-                /*target=*/excepts, /*fallthrough=*/setup_except->next);
-    state->setup_except = NULL;
-
-    state->had_except = true;
-  } else {
-    excepts = state->excepts;
-    assert(excepts != NULL);
-  }
-
-  cg_block_begin(s, excepts);
   cg_set_lineno(s, location.line);
   cg_push(s, 3); /* runtime pushes traceback, value, type when entering */
-  /* SETUP_FINALLY exception state is larger than what we model explicitly. */
-  cg_mark_max_stack_extra(s, 5);
 
+  struct basic_block *except_next = NULL;
   if (match != NULL) {
-    struct basic_block *excepts_next = cg_block_allocate(s);
+    except_next = cg_block_allocate(s);
     struct basic_block *except_match = cg_block_allocate(s);
     cg_op_push1(s, OPCODE_DUP_TOP, 0);
     emit_expression(s, match);
@@ -725,12 +687,10 @@ static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
                    /*pop=*/2, /*push=*/1);
     cg_pop(s, 1);
     cg_condjump(s, OPCODE_POP_JUMP_IF_FALSE,
-                /*target=*/excepts_next, /*fallthrough=*/except_match);
-    state->excepts = excepts_next;
+                /*target=*/except_next, /*fallthrough=*/except_match);
     cg_block_begin(s, except_match);
-  } else {
-    state->excepts = NULL;
   }
+  state->except_next = except_next;
 
   cg_op_pop1(s, OPCODE_POP_TOP, 0);
   if (as != NULL) {
@@ -751,215 +711,64 @@ static void emit_try_except_begin(struct cg_state *s, struct try_state *state,
   }
 }
 
-static void emit_try_except_end(struct cg_state *s, struct try_state *state,
-                                struct symbol *as)
+static void emit_except_end(struct cg_state *s, struct try_state *state,
+                            struct symbol *as)
 {
-  if (!state->try_reachable) return;
   struct basic_block *except_unassign_as = state->except_unassign_as;
 
   if (except_unassign_as != NULL) {
     assert(as != NULL);
-    if (!unreachable(s)) {
+    if (!cg_unreachable(s)) {
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      cg_op(s, OPCODE_BEGIN_FINALLY, 0);
+      cg_op_pop_push(s, OPCODE_BEGIN_FINALLY, 0, /*pop=*/0, /*push=*/6);
       cg_jump(s, except_unassign_as);
+    } else {
+      cg_push(s, 6);
     }
 
     cg_block_begin(s, except_unassign_as);
     cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
     cg_store(s, as);
     cg_delete(s, as);
-    cg_op(s, OPCODE_END_FINALLY, 0);
+    cg_op_pop_push(s, OPCODE_END_FINALLY, 0, /*pop=*/6, /*push=*/0);
     state->except_unassign_as = NULL;
   } else {
-    if (unreachable(s)) return;
+    if (cg_unreachable(s)) {
+      struct basic_block *except_next = state->except_next;
+      if (except_next != NULL) {
+        cg_block_begin(s, except_next);
+      }
+      return;
+    }
   }
   cg_op(s, OPCODE_POP_EXCEPT, 0);
 
-  struct basic_block *enter_finally = state->enter_finally;
-  if (enter_finally == NULL) {
-    enter_finally = cg_block_allocate(s);
-    state->enter_finally = enter_finally;
-  }
-  cg_jump(s, enter_finally);
-}
-
-static void emit_try_else_begin(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-  state->had_else = true;
-
-  struct basic_block *else_block = state->else_block;
-  if (else_block == NULL) {
-    else_block = cg_block_allocate(s);
-    state->else_block = else_block;
-  }
-
-  struct basic_block *excepts = state->excepts;
-  if (excepts != NULL) {
-    cg_block_begin(s, excepts);
-    cg_op(s, OPCODE_END_FINALLY, 0);
-    /* END_FINALLY will jump away; no separate jump needed */
-    cg_block_end(s);
-    state->excepts = NULL;
-  }
-
-  cg_block_begin(s, else_block);
-}
-
-static void emit_try_else_end(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-
-  if (!unreachable(s)) {
+  if (state->finally_block != NULL) {
     struct basic_block *enter_finally = state->enter_finally;
     if (enter_finally == NULL) {
       enter_finally = cg_block_allocate(s);
       state->enter_finally = enter_finally;
     }
     cg_jump(s, enter_finally);
-  }
-}
-
-static void emit_try_finally_begin(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-  state->had_finally = true;
-
-  struct basic_block *finally_body = state->finally_body;
-  assert(finally_body != NULL);
-
-  struct basic_block *setup_finally = state->setup_finally;
-  cg_block_begin_delayed(s, setup_finally);
-  if (state->finally_needs_placeholder) {
-    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
-  }
-  cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_body,
-              /*fallthrough=*/setup_finally->next);
-  cg_push(s, 1);
-  /* BEGIN/END_FINALLY protocol uses 6 stack entries; we model one token. */
-  cg_mark_max_stack_extra(s, 5);
-
-  struct basic_block *enter_finally = state->enter_finally;
-  struct basic_block *excepts = state->excepts;
-  if (enter_finally == NULL && (state->body_exit != NULL || excepts != NULL)) {
-    enter_finally = cg_block_allocate(s);
-    state->enter_finally = enter_finally;
-  }
-
-  if (excepts != NULL) {
-    cg_block_begin(s, excepts);
-    cg_op(s, OPCODE_END_FINALLY, 0);
-    cg_jump(s, enter_finally);
-    state->excepts = NULL;
-  }
-
-  if (enter_finally != NULL) {
-    cg_block_begin(s, enter_finally);
-    if (state->had_except) {
-      cg_op(s, OPCODE_POP_BLOCK, 0);
-    }
-    cg_op(s, OPCODE_BEGIN_FINALLY, 0);
-    cg_jump(s, finally_body);
-  }
-
-  cg_block_begin(s, finally_body);
-}
-
-static void emit_try_finally_end(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-  if (unreachable(s)) {
-    /* Abrupt exits consume the finally token and optional placeholder. */
-    cg_pop(s, state->finally_needs_placeholder ? 2 : 1);
-
-    /* Match CPython's trailing finally shape even when unreachable:
-     * keep END_FINALLY (and placeholder POP_TOP) so line/block metadata used
-     * by tracing and f_lineno validation stays compatible. */
-    struct basic_block *dead_finally_tail = cg_block_allocate(s);
-    cg_block_begin(s, dead_finally_tail);
-    cg_op(s, OPCODE_END_FINALLY, 0);
-    if (state->finally_needs_placeholder) {
-      cg_op(s, OPCODE_POP_TOP, 0);
-    }
-    cg_block_end(s);
-    return;
-  }
-  cg_op_pop1(s, OPCODE_END_FINALLY, 0);
-  if (state->finally_needs_placeholder) {
-    cg_op_pop1(s, OPCODE_POP_TOP, 0);
-  }
-
-  struct basic_block *footer = state->footer;
-  if (footer == NULL) {
-    footer = cg_block_allocate(s);
-    state->footer = footer;
-  }
-  cg_jump(s, footer);
-}
-
-static void emit_try_end(struct cg_state *s, struct try_state *state)
-{
-  if (!state->try_reachable) return;
-
-  struct basic_block *footer = state->footer;
-  if (footer == NULL) {
-    footer = cg_block_allocate(s);
-    state->footer = footer;
-  }
-
-  struct basic_block *enter_finally = state->enter_finally;
-
-  if (state->had_except) {
-    struct basic_block *excepts = state->excepts;
-    if (excepts == NULL) {
-      excepts = cg_block_allocate(s);
-    }
-    assert(footer != NULL);
-    cg_block_begin(s, excepts);
-    cg_op(s, OPCODE_END_FINALLY, 0);
-    cg_jump(s, footer);
   } else {
-    struct basic_block *setup_except = state->setup_except;
-    struct basic_block *setup_except_next = state->setup_except->next;
-    assert(setup_except_next != NULL);
-    cg_block_begin_delayed(s, setup_except);
-    cg_jump(s, setup_except_next);
-  }
-
-  if (!state->had_finally) {
-    struct basic_block *setup_finally = state->setup_finally;
-    struct basic_block *setup_finally_next = state->setup_finally->next;
-    assert(setup_finally_next != NULL);
-    cg_block_begin_delayed(s, setup_finally);
-    cg_jump(s, setup_finally_next);
-
-    if (enter_finally != NULL) {
-      cg_block_begin(s, enter_finally);
-      cg_jump(s, footer);
+    struct basic_block *footer = state->footer;
+    if (footer == NULL) {
+      footer = cg_block_allocate(s);
+      state->footer = footer;
     }
+    cg_jump(s, footer);
   }
 
-  struct basic_block *body_exit = state->body_exit;
-  if (body_exit != NULL) {
-    struct basic_block *body_exit_target = footer;
-    if (state->had_else) {
-      body_exit_target = state->else_block;
-    } else if (state->had_finally) {
-      body_exit_target = enter_finally;
-    }
-    cg_block_begin_delayed(s, body_exit);
-    cg_op(s, OPCODE_POP_BLOCK, 0);
-    cg_jump(s, body_exit_target);
+  struct basic_block *except_next = state->except_next;
+  if (except_next != NULL) {
+    cg_block_begin(s, except_next);
   }
-
-  cg_block_begin(s, footer);
 }
 
 static void emit_if_begin(struct cg_state *s, struct if_state *state,
                           union ast_expression *expression)
 {
-  if (unreachable(s)) {
+  if (cg_unreachable(s)) {
     memset(state, 0, sizeof(*state));
     return;
   }
@@ -986,7 +795,7 @@ static void emit_if_elif(struct cg_state *s, struct if_state *state,
     footer = cg_block_allocate(s);
     state->footer = footer;
   }
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     cg_jump(s, footer);
   }
 
@@ -1010,7 +819,7 @@ static void emit_if_else(struct cg_state *s, struct if_state *state)
     state->footer = footer;
   }
   state->else_or_footer = NULL;
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     cg_jump(s, footer);
   }
 
@@ -1023,7 +832,7 @@ static void emit_if_end(struct cg_state *s, struct if_state *state)
   struct basic_block *else_or_footer = state->else_or_footer;
   if (footer == NULL) footer = else_or_footer;
   if (footer == NULL) return;
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     cg_jump(s, footer);
   }
 
@@ -1055,28 +864,24 @@ static void emit_for_begin_impl(struct cg_state        *s,
 
   state->else_or_footer = else_block;
   state->saved = s->code.loop_state;
+  state->has_loop_iter_cleanup = true;
   state->async_for = false;
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
-    .pending_at_loop = s->code.pending_finally,
-    .finally_depth = s->code.active_finally_body_depth,
+    .scope_cleanup_at_loop = s->code.scope_cleanup,
     .pop_on_break = true,
   };
-}
 
-static void emit_for_begin_sync(struct cg_state        *s,
-                                struct for_while_state *state,
-                                union ast_expression   *targets,
-                                union ast_expression   *expression)
-{
-  if (unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
-  emit_expression(s, expression);
-  cg_op(s, OPCODE_GET_ITER, 0);
-  emit_for_begin_impl(s, state, targets);
+  struct scope_cleanup_base *loop_cleanup = arena_allocate_type(
+      object_intern_arena(s->objects), struct scope_cleanup_base);
+  *loop_cleanup = (struct scope_cleanup_base){
+    .kind = SCOPE_CLEANUP_LOOP_ITER,
+    .prev = s->code.scope_cleanup,
+  };
+  state->loop_iter_cleanup = (union scope_cleanup *)loop_cleanup;
+  s->code.scope_cleanup = (union scope_cleanup *)loop_cleanup;
+  s->code.loop_state.scope_cleanup_at_loop = (union scope_cleanup *)loop_cleanup;
 }
 
 static void emit_for_begin_async(struct cg_state        *s,
@@ -1084,13 +889,6 @@ static void emit_for_begin_async(struct cg_state        *s,
                                  union ast_expression   *targets,
                                  union ast_expression   *expression)
 {
-  if (unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
-  cg_push(s, 8);
-  cg_pop(s, 8);
-
   emit_expression(s, expression);
   cg_op(s, OPCODE_GET_AITER, 0);
 
@@ -1112,12 +910,13 @@ static void emit_for_begin_async(struct cg_state        *s,
 
   state->else_or_footer = else_block;
   state->saved = s->code.loop_state;
+  state->has_loop_iter_cleanup = false;
+  state->loop_iter_cleanup = NULL;
   state->async_for = true;
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
-    .pending_at_loop = s->code.pending_finally,
-    .finally_depth = s->code.active_finally_body_depth,
+    .scope_cleanup_at_loop = s->code.scope_cleanup,
     .pop_on_break = true,
   };
 }
@@ -1126,10 +925,16 @@ static void emit_for_begin(struct cg_state *s, struct for_while_state *state,
                            union ast_expression *targets,
                            union ast_expression *expression, bool async)
 {
+  if (cg_unreachable(s)) {
+    memset(state, 0, sizeof(*state));
+    return;
+  }
   if (async) {
     emit_for_begin_async(s, state, targets, expression);
   } else {
-    emit_for_begin_sync(s, state, targets, expression);
+    emit_expression(s, expression);
+    cg_op(s, OPCODE_GET_ITER, 0);
+    emit_for_begin_impl(s, state, targets);
   }
 }
 
@@ -1138,10 +943,20 @@ static void emit_loop_else(struct cg_state *s, struct for_while_state *state)
   struct basic_block *else_block = state->else_or_footer;
   if (else_block == NULL) return;
 
+  if (state->has_loop_iter_cleanup) {
+    union scope_cleanup *loop_cleanup = state->loop_iter_cleanup;
+    if (loop_cleanup != NULL && s->code.scope_cleanup == loop_cleanup) {
+      s->code.scope_cleanup = loop_cleanup->base.prev;
+    } else {
+      /* Unwinding should have restored the loop marker as the current head. */
+      s->code.scope_cleanup = state->saved.scope_cleanup_at_loop;
+    }
+  }
+
   struct basic_block *footer = s->code.loop_state.break_block;
   struct basic_block *header = s->code.loop_state.continue_block;
   s->code.loop_state = state->saved;
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     cg_jump(s, header);
   }
 
@@ -1154,7 +969,7 @@ static void emit_loop_end(struct cg_state *s, struct for_while_state *state)
   struct basic_block *footer = state->else_or_footer;
   if (footer == NULL) return;
 
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     cg_jump(s, footer);
   }
   cg_block_begin(s, footer);
@@ -1175,32 +990,19 @@ static void emit_for_end(struct cg_state *s, struct for_while_state *state)
   emit_loop_end(s, state);
 }
 
-static void emit_finally_abrupt_exit_prefix(struct cg_state *s)
-{
-  if (s->code.active_finally_body_depth == 0) return;
-  cg_op(s, OPCODE_POP_FINALLY, 0);
-  /* Keep stack tracking conservative for conditional abrupt exits. */
-  cg_op(s, OPCODE_POP_TOP, 0);
-}
-
-static bool break_or_continue_exits_active_finally(struct cg_state *s)
-{
-  return s->code.active_finally_body_depth > s->code.loop_state.finally_depth;
-}
-
 static void emit_continue(struct cg_state         *s,
                           struct ast_def *nullable current_function)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   assert(target != NULL);
-  if (break_or_continue_exits_active_finally(s)) {
-    emit_finally_abrupt_exit_prefix(s);
-  }
-  emit_pending_finally(s, current_function,
-                       s->code.loop_state.pending_at_loop);
-  if (!unreachable(s)) {
+  unsigned saved_stacksize = s->code.stacksize;
+  emit_scope_cleanup(s, current_function,
+                     s->code.loop_state.scope_cleanup_at_loop,
+                     /*value_passthrough=*/false);
+  if (!cg_unreachable(s)) {
     cg_jump(s, target);
   }
+  s->code.stacksize = saved_stacksize;
 }
 
 static void emit_break(struct cg_state         *s,
@@ -1208,24 +1010,23 @@ static void emit_break(struct cg_state         *s,
 {
   struct basic_block *target = s->code.loop_state.break_block;
   assert(target != NULL);
-  if (break_or_continue_exits_active_finally(s)) {
-    emit_finally_abrupt_exit_prefix(s);
-  }
-  emit_pending_finally(s, current_function,
-                       s->code.loop_state.pending_at_loop);
-  if (unreachable(s)) return;
-  if (!unreachable(s)) {
+  unsigned saved_stacksize = s->code.stacksize;
+  emit_scope_cleanup(s, current_function,
+                     s->code.loop_state.scope_cleanup_at_loop,
+                     /*value_passthrough=*/false);
+  if (!cg_unreachable(s)) {
     if (s->code.loop_state.pop_on_break) {
       cg_op(s, OPCODE_POP_TOP, 0);
     }
     cg_jump(s, target);
   }
+  s->code.stacksize = saved_stacksize;
 }
 
 static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
                              union ast_expression *expression)
 {
-  if (unreachable(s)) {
+  if (cg_unreachable(s)) {
     memset(state, 0, sizeof(*state));
     return;
   }
@@ -1244,11 +1045,12 @@ static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
 
   state->else_or_footer = else_block;
   state->saved = s->code.loop_state;
+  state->has_loop_iter_cleanup = false;
+  state->loop_iter_cleanup = NULL;
   s->code.loop_state = (struct loop_state){
     .continue_block = header,
     .break_block = footer,
-    .pending_at_loop = s->code.pending_finally,
-    .finally_depth = s->code.active_finally_body_depth,
+    .scope_cleanup_at_loop = s->code.scope_cleanup,
     .pop_on_break = false,
   };
 }
@@ -1393,8 +1195,8 @@ void emit_generator_expression_code(
   cg_op_push1(s, OPCODE_LOAD_FAST, 0);
   struct for_while_state state;
   if (part->async) {
-    cg_push(s, 8);
-    cg_pop(s, 8);
+    state.has_loop_iter_cleanup = false;
+    state.loop_iter_cleanup = NULL;
     state.async_for = true;
     struct basic_block *header = cg_block_allocate(s);
     struct basic_block *footer = cg_block_allocate(s);
@@ -1417,8 +1219,7 @@ void emit_generator_expression_code(
     s->code.loop_state = (struct loop_state){
       .continue_block = header,
       .break_block = footer,
-      .pending_at_loop = s->code.pending_finally,
-      .finally_depth = s->code.active_finally_body_depth,
+      .scope_cleanup_at_loop = s->code.scope_cleanup,
       .pop_on_break = true,
     };
   } else {
@@ -1434,75 +1235,6 @@ void emit_generator_expression_code(
     cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
     cg_block_end(s);
   }
-}
-
-static void emit_with_begin(struct cg_state *s, struct with_state *state,
-                            union ast_expression *expression,
-                            struct location       as_location,
-                            union ast_expression *targets, bool async)
-{
-  if (unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
-  state->async_with = async;
-
-  if (async) {
-    cg_push(s, 8);
-    cg_pop(s, 8);
-  }
-
-  struct basic_block *cleanup = cg_block_allocate(s);
-  struct basic_block *body = cg_block_allocate(s);
-  state->cleanup = cleanup;
-
-  emit_expression(s, expression);
-  /*
-   * SETUP_WITH / SETUP_ASYNC_WITH push additional exception-handler state that
-   * our linear stack simulation does not model explicitly.
-   */
-  cg_mark_max_stack_extra(s, 8);
-  if (async) {
-    cg_op(s, OPCODE_BEFORE_ASYNC_WITH, 0);
-    cg_op(s, OPCODE_GET_AWAITABLE, 0);
-    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
-    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
-    cg_condjump(s, OPCODE_SETUP_ASYNC_WITH, cleanup, body);
-  } else {
-    cg_condjump(s, OPCODE_SETUP_WITH, cleanup, body);
-  }
-  cg_push(s, 1);
-
-  cg_block_begin(s, body);
-  if (targets != NULL) {
-    if (as_location.line != 0) {
-      cg_set_lineno(s, as_location.line);
-    }
-    emit_assignment(s, targets);
-  } else {
-    cg_op_pop1(s, OPCODE_POP_TOP, 0);
-  }
-}
-
-static void emit_with_end(struct cg_state *s, struct with_state *state)
-{
-  if (state->cleanup == NULL) return;
-  if (!unreachable(s)) {
-    cg_op(s, OPCODE_POP_BLOCK, 0);
-    cg_op(s, OPCODE_BEGIN_FINALLY, 0);
-    cg_jump(s, state->cleanup);
-  }
-
-  cg_block_begin(s, state->cleanup);
-  cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
-  if (state->async_with) {
-    cg_op(s, OPCODE_GET_AWAITABLE, 0);
-    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
-    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
-  }
-  cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
-  cg_op(s, OPCODE_END_FINALLY, 0);
-  cg_pop(s, 1);
 }
 
 struct binding_scope {
@@ -1548,9 +1280,6 @@ static void emit_statement_list_with_function_from(
     struct ast_def *nullable current_function, unsigned first_statement);
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function);
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function,
-                                 struct pending_finally_state *nullable stop);
 
 static bool symbol_array_contains(struct idynarray *array,
                                   struct symbol    *symbol)
@@ -1587,65 +1316,91 @@ static bool class_explicitly_binds_class_symbol(struct binding_scope *scope)
          || symbol_array_contains(&scope->nonlocals, scope->class_symbol);
 }
 
-static void emit_pending_finally(struct cg_state         *s,
-                                 struct ast_def *nullable current_function,
-                                 struct pending_finally_state *nullable stop)
+static void emit_scope_cleanup(struct cg_state              *s,
+                               struct ast_def *nullable      current_function,
+                               union scope_cleanup *nullable stop,
+                               bool                          value_passthrough)
 {
-  struct pending_finally_state *head = s->code.pending_finally;
-  for (struct pending_finally_state *state = head;
-       state != NULL && state != stop; state = state->prev) {
-    s->code.pending_finally = state->prev;
-    switch (state->kind) {
-    case CLEANUP_POP_BLOCK:
-      cg_op(s, OPCODE_POP_BLOCK, 0);
+  union scope_cleanup *saved_cleanup = s->code.scope_cleanup;
+  for (union scope_cleanup *cleanup = saved_cleanup;
+       cleanup != NULL && cleanup != stop; cleanup = cleanup->base.prev) {
+    s->code.scope_cleanup = cleanup->base.prev;
+    switch (cleanup->kind) {
+    case SCOPE_CLEANUP_LOOP_ITER:
+      if (value_passthrough) {
+        cg_op(s, OPCODE_ROT_TWO, 0);
+      }
+      cg_op_pop1(s, OPCODE_POP_TOP, 0);
       break;
-    case CLEANUP_POP_EXCEPT:
-      cg_op(s, OPCODE_POP_EXCEPT, 0);
-      break;
-    case CLEANUP_FINALLY:
+    case SCOPE_CLEANUP_POP_BLOCK:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      if (state->finally_block != NULL) {
-        struct basic_block *after_finally = cg_block_allocate(s);
-        cg_condjump(s, OPCODE_CALL_FINALLY, state->finally_block,
-                    /*fallthrough=*/NULL);
-        cg_block_begin(s, after_finally);
-        if (state->finally_needs_placeholder) {
-          cg_op(s, OPCODE_POP_TOP, 0);
+      if (value_passthrough) cg_op(s, OPCODE_ROT_TWO, 0);
+      break;
+    case SCOPE_CLEANUP_POP_EXCEPT:
+      if (value_passthrough) cg_op(s, OPCODE_ROT_FOUR, 0);
+      cg_op_pop_push(s, OPCODE_POP_EXCEPT, 0, /*pop=*/3, /*push=*/0);
+      break;
+    case SCOPE_CLEANUP_FINALLY:
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+
+      if (cleanup->finally.finally_block != NULL) {
+        if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
+          /* Preserve the return value across the finally call by removing the
+           * pre-SETUP_FINALLY placeholder before CALL_FINALLY runs. */
+          cg_op(s, OPCODE_ROT_TWO, 0);
+          cg_op_pop1(s, OPCODE_POP_TOP, 0);
+        }
+        struct basic_block *after_call_finally = cg_block_allocate(s);
+        cg_condjump(s, OPCODE_CALL_FINALLY, cleanup->finally.finally_block,
+                    /*fallthrough=*/after_call_finally);
+        cg_block_begin(s, after_call_finally);
+        if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
+          /* CALL_FINALLY returns with an extra token above/below the preserved
+           * value; rotate and discard it before continuing the return path. */
+          cg_op(s, OPCODE_ROT_TWO, 0);
+          cg_op_pop1(s, OPCODE_POP_TOP, 0);
+        } else if (cleanup->finally.finally_needs_placeholder) {
+          cg_op_pop1(s, OPCODE_POP_TOP, 0);
         }
       } else {
-        if (state->finally_needs_placeholder) {
+        if (cleanup->finally.finally_needs_placeholder) {
           /* Keep loop iterator stack tracking stable in synthetic cleanup
            * fallback paths. */
-          cg_op(s, OPCODE_POP_TOP, 0);
+          cg_op_pop1(s, OPCODE_POP_TOP, 0);
         }
-        emit_statement_list_with_function(s, state->finally_body,
+        emit_statement_list_with_function(s, cleanup->finally.finally_body,
                                           current_function);
       }
       break;
-    case CLEANUP_EXCEPT_AS:
+    case SCOPE_CLEANUP_WITHIN_FINALLY:
+      cg_op_pop_push(s, OPCODE_POP_FINALLY, 0, /*pop=*/6, /*push=*/0);
+      cg_op_pop1(s, OPCODE_POP_TOP, 0);
+      break;
+    case SCOPE_CLEANUP_EXCEPT_AS:
       cg_op(s, OPCODE_POP_BLOCK, 0);
       cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
-      cg_store(s, state->as_symbol);
-      cg_delete(s, state->as_symbol);
+      cg_store(s, cleanup->except_as.as_symbol);
+      cg_delete(s, cleanup->except_as.as_symbol);
       break;
-    case CLEANUP_WITH:
+    case SCOPE_CLEANUP_WITH:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      cg_op(s, OPCODE_BEGIN_FINALLY, 0);
-      cg_op_push1(s, OPCODE_WITH_CLEANUP_START, 0);
-      if (state->async_with) {
+      if (value_passthrough) cg_op(s, OPCODE_ROT_TWO, 0);
+      cg_op_pop_push(s, OPCODE_BEGIN_FINALLY, 0, /*pop=*/0, /*push=*/6);
+      cg_op_pop_push(s, OPCODE_WITH_CLEANUP_START, 0, /*pop=*/0, /*push=*/2);
+      if (cleanup->with.async) {
         cg_op(s, OPCODE_GET_AWAITABLE, 0);
         cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
         cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
       }
-      cg_op_pop1(s, OPCODE_WITH_CLEANUP_FINISH, 0);
-      cg_op(s, OPCODE_POP_FINALLY, 0);
+      cg_op_pop_push(s, OPCODE_WITH_CLEANUP_FINISH, 0, /*pop=*/3, /*push=*/0);
+      cg_op_pop_push(s, OPCODE_POP_FINALLY, 0, /*pop=*/6, /*push=*/0);
       break;
     }
-    if (unreachable(s)) {
+    if (cg_unreachable(s)) {
       break;
     }
   }
-  s->code.pending_finally = head;
+  s->code.scope_cleanup = saved_cleanup;
 }
 
 static bool statement_list_has_scope_annotation(
@@ -2295,10 +2050,11 @@ static void analyze_statement_collect(struct binding_scope *scope,
     return;
   case AST_STATEMENT_WITH:
     for (unsigned i = 0; i < statement->with.num_items; ++i) {
-      analyze_expression(scope, statement->with.items[i].expression);
-      if (statement->with.items[i].targets != NULL) {
-        analyze_assignment_target(scope, statement->with.items[i].targets,
-                                  /*bind=*/true);
+      struct ast_with_item *item = &statement->with.items[i];
+      analyze_expression(scope, item->expression);
+      union ast_expression *target = item->target;
+      if (target != NULL) {
+        analyze_assignment_target(scope, target, /*bind=*/true);
       }
     }
     analyze_statement_list_collect(scope, statement->with.body);
@@ -2667,7 +2423,7 @@ static void emit_statement_list_with_function_from(
 
 static void emit_def(struct cg_state *s, struct ast_def *def)
 {
-  if (unreachable(s)) {
+  if (cg_unreachable(s)) {
     return;
   }
   analyze_function_bindings(s, def, /*parent=*/NULL);
@@ -2761,7 +2517,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
                                          /*current_function=*/NULL,
                                          first_statement);
   if (class_stmt->needs_class_cell) {
-    if (!unreachable(s)) {
+    if (!cg_unreachable(s)) {
       struct symbol *class_symbol
           = symbol_table_get_or_insert(s->symbol_table, "__class__");
       struct symbol *classcell_symbol
@@ -3046,102 +2802,220 @@ emit_nonlocal_statement_node(struct cg_state *s, struct location location,
 static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
                      struct ast_def *nullable current_function)
 {
-  struct pending_finally_state *saved_pending = s->code.pending_finally;
-  bool                          has_finally = (try_stmt->finally_body != NULL);
-  bool                          has_except = (try_stmt->num_excepts > 0);
-  bool                          finally_needs_placeholder
-      = has_finally
+  if (cg_unreachable(s)) return;
+
+  union scope_cleanup *saved_scope_cleanup = s->code.scope_cleanup;
+  bool                 finally_needs_placeholder
+      = try_stmt->finally_body != NULL
         && finally_body_needs_placeholder_statement_list(
             try_stmt->finally_body, /*loop_depth=*/0);
+  unsigned num_excepts = try_stmt->num_excepts;
 
   struct try_state state;
-  emit_try_body_begin(s, &state, has_finally);
-  state.finally_needs_placeholder = finally_needs_placeholder;
+  memset(&state, 0, sizeof(state));
 
-  /* Push cleanup entries for break/continue/return inside the try body.
-   * Order: finally (outermost) then except POP_BLOCK (innermost). */
-  struct pending_finally_state finally_cleanup;
-  if (has_finally) {
-    finally_cleanup = (struct pending_finally_state){
-      .kind = CLEANUP_FINALLY,
-      .finally_body = try_stmt->finally_body,
-      .finally_block = state.finally_body,
+  struct finally_scope_cleanup finally_cleanup;
+  if (try_stmt->finally_body) {
+    struct basic_block *finally_block = cg_block_allocate(s);
+    state.finally_block = finally_block;
+    if (finally_needs_placeholder) {
+      /* Reserve a placeholder so abrupt exits from the finally body
+       * (`break`/`continue`/`return`) can balance the END/POP_FINALLY path. */
+      cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
+    }
+    struct basic_block *setup_finally_next = cg_block_allocate(s);
+    cg_condjump(s, OPCODE_SETUP_FINALLY, /*target=*/finally_block,
+                /*fallthrough=*/setup_finally_next);
+    cg_block_begin(s, setup_finally_next);
+
+    finally_cleanup = (struct finally_scope_cleanup){
+      .base = {
+        .kind = SCOPE_CLEANUP_FINALLY,
+        .prev = saved_scope_cleanup,
+      },
       .finally_needs_placeholder = finally_needs_placeholder,
-      .prev = saved_pending,
+      .finally_block = state.finally_block,
+      .finally_body = try_stmt->finally_body,
     };
-    s->code.pending_finally = &finally_cleanup;
+    s->code.scope_cleanup = (union scope_cleanup *)&finally_cleanup;
   }
 
-  struct pending_finally_state  except_cleanup;
-  struct pending_finally_state *pre_body_pending = s->code.pending_finally;
-  if (has_except) {
-    except_cleanup = (struct pending_finally_state){
-      .kind = CLEANUP_POP_BLOCK,
+  union scope_cleanup      *pre_body_pending = s->code.scope_cleanup;
+  struct scope_cleanup_base except_cleanup;
+  if (num_excepts > 0) {
+    struct basic_block *setup_finally_next = cg_block_allocate(s);
+    struct basic_block *excepts = cg_block_allocate(s);
+    state.excepts = excepts;
+    cg_condjump(s, OPCODE_SETUP_FINALLY,
+                /*target=*/excepts, /*fallthrough=*/setup_finally_next);
+    cg_block_begin(s, setup_finally_next);
+
+    except_cleanup = (struct scope_cleanup_base){
+      .kind = SCOPE_CLEANUP_POP_BLOCK,
       .prev = pre_body_pending,
     };
-    s->code.pending_finally = &except_cleanup;
+    s->code.scope_cleanup = (union scope_cleanup *)&except_cleanup;
   }
 
   emit_statement_list_with_function(s, try_stmt->body, current_function);
-  emit_try_body_end(s, &state);
 
   /* Pop the except SETUP_FINALLY cleanup before entering except handlers. */
-  if (has_except) {
-    s->code.pending_finally = pre_body_pending;
+  if (num_excepts > 0) {
+    s->code.scope_cleanup = pre_body_pending;
   }
 
-  for (unsigned i = 0; i < try_stmt->num_excepts; ++i) {
-    struct ast_try_except *except_stmt = &try_stmt->excepts[i];
-    emit_try_except_begin(s, &state, except_stmt->location, except_stmt->match,
-                          except_stmt->as);
-
-    /* Push cleanup entries for break/continue/return inside the except
-     * handler body.  Innermost first: as-cleanup, then POP_EXCEPT. */
-    struct pending_finally_state *pre_handler_pending
-        = s->code.pending_finally;
-    struct pending_finally_state pop_except_cleanup = {
-      .kind = CLEANUP_POP_EXCEPT,
-      .prev = s->code.pending_finally,
-    };
-    struct pending_finally_state as_cleanup;
-    if (except_stmt->as != NULL) {
-      as_cleanup = (struct pending_finally_state){
-        .kind = CLEANUP_EXCEPT_AS,
-        .as_symbol = except_stmt->as,
-        .prev = &pop_except_cleanup,
-      };
-      s->code.pending_finally = &as_cleanup;
+  if (!cg_unreachable(s)) {
+    if (num_excepts > 0) {
+      cg_op(s, OPCODE_POP_BLOCK, 0); /* pop setup_finally for excepts */
+    }
+    if (try_stmt->else_body != NULL) {
+      assert(state.try_else_block == NULL);
+      struct basic_block *try_else_block = cg_block_allocate(s);
+      state.try_else_block = try_else_block;
+      cg_jump(s, state.try_else_block);
+    } else if (try_stmt->finally_body) {
+      struct basic_block *enter_finally = state.enter_finally;
+      if (enter_finally == NULL) {
+        enter_finally = cg_block_allocate(s);
+        state.enter_finally = enter_finally;
+      }
+      cg_jump(s, enter_finally);
     } else {
-      s->code.pending_finally = &pop_except_cleanup;
+      struct basic_block *footer = state.footer;
+      if (footer == NULL) {
+        footer = cg_block_allocate(s);
+        state.footer = footer;
+      }
+      cg_jump(s, footer);
+    }
+  }
+
+  if (num_excepts > 0) {
+    cg_block_begin(s, state.excepts);
+    cg_push(s, 6);
+    for (unsigned i = 0; i < num_excepts; ++i) {
+      struct ast_try_except *except_stmt = &try_stmt->excepts[i];
+      emit_except_begin(s, &state, except_stmt->location, except_stmt->match,
+                        except_stmt->as);
+
+      /* Push cleanup entries for break/continue/return inside the except
+       * handler body.  Innermost first: as-cleanup, then POP_EXCEPT. */
+      union scope_cleanup *pre_handler_pending = s->code.scope_cleanup;
+      union scope_cleanup pop_except_cleanup = {
+        .base = {
+          .kind = SCOPE_CLEANUP_POP_EXCEPT,
+          .prev = s->code.scope_cleanup,
+        },
+      };
+      union scope_cleanup as_cleanup;
+      if (except_stmt->as != NULL) {
+        as_cleanup = (union scope_cleanup){
+          .except_as = {
+            .base = {
+              .kind = SCOPE_CLEANUP_EXCEPT_AS,
+              .prev = &pop_except_cleanup,
+            },
+            .as_symbol = except_stmt->as,
+          },
+        };
+        s->code.scope_cleanup = &as_cleanup;
+      } else {
+        s->code.scope_cleanup = &pop_except_cleanup;
+      }
+
+      emit_statement_list_with_function(s, except_stmt->body,
+                                        current_function);
+
+      /* Restore before emit_except_end emits its own cleanup. */
+      s->code.scope_cleanup = pre_handler_pending;
+      emit_except_end(s, &state, except_stmt->as);
     }
 
-    emit_statement_list_with_function(s, except_stmt->body, current_function);
-
-    /* Restore before emit_try_except_end emits its own cleanup. */
-    s->code.pending_finally = pre_handler_pending;
-    emit_try_except_end(s, &state, except_stmt->as);
+    if (!cg_unreachable(s)) {
+      cg_op_pop_push(s, OPCODE_END_FINALLY, 0, /*pop=*/6, /*push=*/0);
+    } else {
+      cg_pop(s, 6);
+    }
   }
 
   if (try_stmt->else_body != NULL) {
-    emit_try_else_begin(s, &state);
+    struct basic_block *try_else_block = state.try_else_block;
+    if (try_else_block != NULL) {
+      if (!cg_unreachable(s)) {
+        cg_jump(s, try_else_block);
+      }
+      cg_block_begin(s, try_else_block);
+    }
+
     emit_statement_list_with_function(s, try_stmt->else_body,
                                       current_function);
-    emit_try_else_end(s, &state);
   }
 
   if (try_stmt->finally_body != NULL) {
-    s->code.pending_finally = saved_pending;
-    emit_try_finally_begin(s, &state);
-    s->code.active_finally_body_depth++;
+    struct basic_block *enter_finally = state.enter_finally;
+    if (enter_finally != NULL) {
+      if (!cg_unreachable(s)) {
+        cg_jump(s, enter_finally);
+      }
+      cg_block_begin(s, enter_finally);
+    }
+
+    struct basic_block *finally_block = state.finally_block;
+    if (!cg_unreachable(s)) {
+      cg_op(s, OPCODE_POP_BLOCK, 0);
+      cg_op_pop_push(s, OPCODE_BEGIN_FINALLY, 0, /*pop=*/0, /*push=*/6);
+      cg_jump(s, finally_block);
+    } else {
+      /* Placeholder (if any) was pushed before SETUP_FINALLY and is already
+       * reflected in the tracked stack size; only model BEGIN_FINALLY here. */
+      cg_push(s, 6);
+    }
+    cg_block_begin(s, finally_block);
+
+    s->code.scope_cleanup = saved_scope_cleanup;
+    struct scope_cleanup_base cleanup = {
+      .kind = SCOPE_CLEANUP_WITHIN_FINALLY,
+      .prev = s->code.scope_cleanup,
+    };
+    s->code.scope_cleanup = (union scope_cleanup *)&cleanup;
+
     emit_statement_list_with_function(s, try_stmt->finally_body,
                                       current_function);
-    assert(s->code.active_finally_body_depth > 0);
-    s->code.active_finally_body_depth--;
-    emit_try_finally_end(s, &state);
+
+    /* Keep the trailing END_FINALLY (and placeholder POP_TOP when present)
+     * even when unreachable so line/block metadata stays consistent. */
+    bool dead_tail = cg_unreachable(s);
+    if (dead_tail) {
+      struct basic_block *dead_finally_tail = cg_block_allocate(s);
+      cg_block_begin(s, dead_finally_tail);
+    }
+
+    cg_op_pop_push(s, OPCODE_END_FINALLY, 0, /*pop=*/6, /*push=*/0);
+    if (finally_needs_placeholder) {
+      cg_op_pop1(s, OPCODE_POP_TOP, 0);
+    }
+
+    if (dead_tail) {
+      cg_block_end(s);
+    }
+    s->code.scope_cleanup = saved_scope_cleanup;
   }
 
-  emit_try_end(s, &state);
-  s->code.pending_finally = saved_pending;
+  if (!cg_unreachable(s)) {
+    struct basic_block *footer = state.footer;
+    if (footer == NULL) {
+      footer = cg_block_allocate(s);
+      state.footer = footer;
+    }
+    cg_jump(s, footer);
+  }
+
+  s->code.scope_cleanup = saved_scope_cleanup;
+
+  struct basic_block *footer = state.footer;
+  if (footer != NULL) {
+    cg_block_begin(s, footer);
+  }
 }
 
 static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
@@ -3170,7 +3044,7 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
     }
 
     if (condition_type == OBJECT_TRUE) {
-      if (unreachable(s)) {
+      if (cg_unreachable(s)) {
         return;
       }
 
@@ -3184,15 +3058,14 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
       s->code.loop_state = (struct loop_state){
         .continue_block = header,
         .break_block = footer,
-        .pending_at_loop = s->code.pending_finally,
-        .finally_depth = s->code.active_finally_body_depth,
+        .scope_cleanup_at_loop = s->code.scope_cleanup,
         .pop_on_break = false,
       };
 
       emit_statement_list_with_function(s, while_stmt->body, current_function);
 
       s->code.loop_state = saved;
-      if (!unreachable(s)) {
+      if (!cg_unreachable(s)) {
         cg_jump(s, header);
       }
       cg_block_begin(s, footer);
@@ -3211,46 +3084,99 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
   emit_while_end(s, &state);
 }
 
+static void emit_with_setup(struct cg_state           *s,
+                            struct with_scope_cleanup *cleanup,
+                            union ast_expression      *expression,
+                            struct location            as_location,
+                            union ast_expression *target, bool async)
+{
+  struct basic_block *cleanup_block = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
+
+  emit_expression(s, expression);
+  if (async) {
+    cg_op(s, OPCODE_BEFORE_ASYNC_WITH, 0);
+    cg_op(s, OPCODE_GET_AWAITABLE, 0);
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+    cg_condjump(s, OPCODE_SETUP_ASYNC_WITH, cleanup_block, body);
+    cg_push(s, 1);
+  } else {
+    cg_condjump(s, OPCODE_SETUP_WITH, cleanup_block, body);
+    cg_push(s, 1);
+  }
+  cg_block_begin(s, body);
+
+  if (target != NULL) {
+    if (as_location.line != 0) {
+      cg_set_lineno(s, as_location.line);
+    }
+    emit_assignment(s, target);
+  } else {
+    cg_op_pop1(s, OPCODE_POP_TOP, 0);
+  }
+
+  *cleanup = (struct with_scope_cleanup){
+    .base = {
+      .kind = SCOPE_CLEANUP_WITH,
+      .prev = s->code.scope_cleanup,
+    },
+    .async = async,
+    .block = cleanup_block,
+  };
+  s->code.scope_cleanup = (union scope_cleanup *)cleanup;
+}
+
+static void emit_with_cleanup(struct cg_state                 *s,
+                              const struct with_scope_cleanup *cleanup)
+{
+  struct basic_block *block = cleanup->block;
+  if (!cg_unreachable(s)) {
+    cg_op(s, OPCODE_POP_BLOCK, 0);
+    cg_op_pop_push(s, OPCODE_BEGIN_FINALLY, 0, /*pop=*/0, /*push=*/6);
+    cg_jump(s, block);
+  } else {
+    cg_push(s, 6);
+  }
+
+  cg_block_begin(s, block);
+  cg_op_pop_push(s, OPCODE_WITH_CLEANUP_START, 0, /*pop=*/0, /*push=*/2);
+  if (cleanup->async) {
+    cg_op(s, OPCODE_GET_AWAITABLE, 0);
+    cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
+    cg_op_pop1(s, OPCODE_YIELD_FROM, 0);
+  }
+  cg_op_pop_push(s, OPCODE_WITH_CLEANUP_FINISH, 0, /*pop=*/3, /*push=*/0);
+  cg_op_pop_push(s, OPCODE_END_FINALLY, 0, /*pop=*/6, /*push=*/0);
+}
+
 static void emit_with(struct cg_state *s, struct ast_with *with,
                       struct ast_def *nullable current_function)
 {
-  unsigned           num_items = with->num_items;
-  struct with_state *states = NULL;
+  if (cg_unreachable(s)) return;
+
+  unsigned                   num_items = with->num_items;
+  union scope_cleanup       *saved_scope_cleanup = s->code.scope_cleanup;
+  struct with_scope_cleanup *cleanups = NULL;
   if (num_items > 0) {
-    states = (struct with_state *)calloc(num_items, sizeof(*states));
-    if (states == NULL) {
-      internal_error("out of memory");
+    cleanups
+        = (struct with_scope_cleanup *)calloc(num_items, sizeof(*cleanups));
+    if (cleanups == NULL) internal_error("out of memory");
+
+    for (unsigned i = 0; i < num_items; ++i) {
+      struct ast_with_item *item = &with->items[i];
+      emit_with_setup(s, &cleanups[i], item->expression, item->as_location,
+                      item->target, with->async);
     }
   }
 
-  struct pending_finally_state *with_cleanups = NULL;
-  if (num_items > 0) {
-    with_cleanups = (struct pending_finally_state *)calloc(
-        num_items, sizeof(*with_cleanups));
-    if (with_cleanups == NULL) {
-      internal_error("out of memory");
-    }
-  }
-
-  struct pending_finally_state *saved_pending = s->code.pending_finally;
-  for (unsigned i = 0; i < num_items; ++i) {
-    struct ast_with_item *item = &with->items[i];
-    emit_with_begin(s, &states[i], item->expression, item->as_location,
-                    item->targets, with->async);
-    with_cleanups[i] = (struct pending_finally_state){
-      .kind = CLEANUP_WITH,
-      .async_with = with->async,
-      .prev = s->code.pending_finally,
-    };
-    s->code.pending_finally = &with_cleanups[i];
-  }
   emit_statement_list_with_function(s, with->body, current_function);
-  s->code.pending_finally = saved_pending;
+  s->code.scope_cleanup = saved_scope_cleanup;
+
   for (unsigned i = num_items; i-- > 0;) {
-    emit_with_end(s, &states[i]);
+    emit_with_cleanup(s, &cleanups[i]);
   }
-  free(with_cleanups);
-  free(states);
+  free(cleanups);
 }
 
 static void emit_annotation_stmt(struct cg_state                 *s,
@@ -3266,7 +3192,7 @@ static void emit_annotation_stmt(struct cg_state                 *s,
 
 static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
 {
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     emit_expression(s, augassign->expression);
   }
 }
@@ -3274,7 +3200,7 @@ static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
 static void emit_expression_statement(struct cg_state                 *s,
                                       struct ast_expression_statement *expr)
 {
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     emit_expression(s, expr->expression);
     cg_op_pop1(s, expr->print ? OPCODE_PRINT_EXPR : OPCODE_POP_TOP, 0);
   }
@@ -3282,7 +3208,7 @@ static void emit_expression_statement(struct cg_state                 *s,
 
 static void emit_raise(struct cg_state *s, struct ast_raise *raise)
 {
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     unsigned args = 0;
     if (raise->expression != NULL) {
       emit_expression(s, raise->expression);
@@ -3298,44 +3224,63 @@ static void emit_raise(struct cg_state *s, struct ast_raise *raise)
   }
 }
 
+static bool is_side_effect_free(union ast_expression *expression)
+{
+  /* TODO: Any more cases here? */
+  return ast_expression_type(expression) == AST_CONST;
+}
+
 static void emit_return(struct cg_state *s, struct ast_return *return_stmt,
                         struct ast_def *nullable current_function)
 {
-  if (!unreachable(s)) {
-    emit_finally_abrupt_exit_prefix(s);
-    bool has_value = (return_stmt->expression != NULL);
-    if (has_value) {
-      emit_expression(s, return_stmt->expression);
-    }
-    if (s->code.pending_finally != NULL) {
-      struct symbol *nullable tmp = NULL;
-      if (has_value) {
-        tmp = symbol_table_get_or_insert(s->symbol_table,
-                                         "<pycomparse-return>");
-        if (cg_in_function(s)) {
-          cg_declare(s, tmp, SYMBOL_LOCAL);
-        }
-        cg_store(s, tmp);
+  if (cg_unreachable(s)) return;
+
+  unsigned saved_stacksize = s->code.stacksize;
+
+  union ast_expression *expression = return_stmt->expression;
+  bool                  side_effect_free
+      = expression == NULL || is_side_effect_free(expression);
+  bool has_scope_cleanup = (s->code.scope_cleanup != NULL);
+  bool in_loop = (s->code.loop_state.break_block != NULL);
+  bool use_value_passthrough
+      = !side_effect_free && (!in_loop || !has_scope_cleanup);
+  struct symbol *nullable tmp = NULL;
+  if (!side_effect_free) {
+    emit_expression(s, return_stmt->expression);
+    if (!use_value_passthrough && has_scope_cleanup) {
+      /* Loop iterator cleanup is not represented in scope_cleanup; stash the
+       * return value so cleanup can freely unwind the runtime stack shape. */
+      tmp = symbol_table_get_or_insert(s->symbol_table, "<pycomparse-return>");
+      if (cg_in_function(s)) {
+        cg_declare(s, tmp, SYMBOL_LOCAL);
       }
-      emit_pending_finally(s, current_function, /*stop=*/NULL);
-      if (unreachable(s)) {
-        return;
-      }
-      if (tmp != NULL) {
-        cg_load(s, tmp);
-      }
+      cg_store(s, tmp);
     }
-    if (!has_value) {
-      cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
-    }
-    cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
-    cg_block_end(s);
   }
+
+  emit_scope_cleanup(s, current_function, /*stop=*/NULL,
+                     /*value_passthrough=*/use_value_passthrough);
+
+  if (tmp != NULL) {
+    cg_load(s, tmp);
+  }
+
+  if (side_effect_free) {
+    if (expression == NULL) {
+      cg_load_const(s, object_intern_singleton(s->objects, OBJECT_NONE));
+    } else {
+      emit_expression(s, expression);
+    }
+  }
+  cg_op_pop1(s, OPCODE_RETURN_VALUE, 0);
+  cg_block_end(s);
+
+  s->code.stacksize = saved_stacksize;
 }
 
 static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 {
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     emit_yield(s, yield->expression);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
@@ -3344,7 +3289,7 @@ static void emit_yield_statement(struct cg_state *s, struct ast_yield *yield)
 static void emit_yield_from_statement(struct cg_state  *s,
                                       struct ast_yield *yield_from)
 {
-  if (!unreachable(s)) {
+  if (!cg_unreachable(s)) {
     emit_yield_from(s, yield_from->expression);
     cg_op_pop1(s, OPCODE_POP_TOP, 0);
   }
@@ -3353,7 +3298,6 @@ static void emit_yield_from_statement(struct cg_state  *s,
 static void emit_statement(struct cg_state *s, union ast_statement *statement,
                            struct ast_def *nullable current_function)
 {
-  ensure_dead_block_for_unreachable_finally(s);
   cg_set_lineno(s, statement->base.location.line);
   switch (ast_statement_type(statement)) {
   case AST_STATEMENT_ANNOTATION:

@@ -40,36 +40,16 @@ struct make_function_state {
 };
 
 struct for_while_state {
-  struct basic_block *else_or_footer;
-  struct loop_state   saved;
-  bool                async_for;
+  struct basic_block           *else_or_footer;
+  struct loop_state             saved;
+  union scope_cleanup *nullable loop_iter_cleanup;
+  bool                          has_loop_iter_cleanup;
+  bool                          async_for;
 };
 
 struct if_state {
   struct basic_block *nullable else_or_footer;
   struct basic_block *nullable footer;
-};
-
-struct try_state {
-  struct basic_block *nullable setup_finally;
-  struct basic_block *nullable setup_except;
-  struct basic_block *nullable body_exit;
-  struct basic_block *nullable excepts;
-  struct basic_block *nullable except_unassign_as;
-  struct basic_block *nullable else_block;
-  struct basic_block *nullable enter_finally;
-  struct basic_block *nullable finally_body;
-  struct basic_block *nullable footer;
-  bool                         try_reachable;
-  bool                         had_except;
-  bool                         had_else;
-  bool                         had_finally;
-  bool                         finally_needs_placeholder;
-};
-
-struct with_state {
-  struct basic_block *cleanup;
-  bool                async_with;
 };
 
 union object *emit_module(struct cg_state *s, struct ast_module *module);

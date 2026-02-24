@@ -196,7 +196,7 @@ struct ast_while {
 struct ast_with_item {
   union ast_expression          *expression;
   struct location                as_location;
-  union ast_expression *nullable targets;
+  union ast_expression *nullable target;
 };
 
 struct ast_with {

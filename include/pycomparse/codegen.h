@@ -32,7 +32,6 @@ unsigned cg_register_freevar(struct cg_state *s, struct symbol *symbol);
 void cg_op(struct cg_state *s, enum opcode opcode, uint32_t arg);
 void cg_push(struct cg_state *s, unsigned n);
 void cg_pop(struct cg_state *s, unsigned n);
-void cg_mark_max_stack_extra(struct cg_state *s, unsigned extra);
 void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
                     unsigned pop, unsigned push);
 void cg_op_pop1(struct cg_state *s, enum opcode opcode, uint32_t arg);
@@ -42,6 +41,7 @@ struct basic_block *cg_block_allocate(struct cg_state *s);
 void cg_block_begin(struct cg_state *s, struct basic_block *block);
 struct basic_block *cg_block_end(struct cg_state *s);
 bool                cg_in_block(struct cg_state *s);
+bool                cg_unreachable(struct cg_state *s);
 void                cg_condjump(struct cg_state *s, enum opcode opcode,
                                 struct basic_block          *target,
                                 struct basic_block *nullable fallthrough);

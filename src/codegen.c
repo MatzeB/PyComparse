@@ -188,14 +188,6 @@ void cg_pop(struct cg_state *s, unsigned n)
   s->code.stacksize -= n;
 }
 
-void cg_mark_max_stack_extra(struct cg_state *s, unsigned extra)
-{
-  unsigned with_extra = s->code.stacksize + extra;
-  if (with_extra > s->code.max_stacksize) {
-    s->code.max_stacksize = with_extra;
-  }
-}
-
 void cg_op_pop_push(struct cg_state *s, enum opcode opcode, uint32_t arg,
                     unsigned pop, unsigned push)
 {
@@ -315,6 +307,11 @@ void cg_jump(struct cg_state *s, struct basic_block *target)
 bool cg_in_block(struct cg_state *s)
 {
   return s->code.current_block != NULL;
+}
+
+bool cg_unreachable(struct cg_state *s)
+{
+  return !cg_in_block(s);
 }
 
 void cg_code_begin(struct cg_state *s, bool in_function)

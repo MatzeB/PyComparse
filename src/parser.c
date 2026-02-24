@@ -3344,14 +3344,14 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
     if (peek(s) == T_as) {
       item->as_location = scanner_location(&s->scanner);
       eat(s, T_as);
-      union ast_expression *targets = parse_expression(s, PREC_NAMED);
-      targets = check_assignment_target(s, targets, item->as_location,
-                                        /*is_del=*/false,
-                                        /*show_equal_hint=*/false);
-      item->targets = targets;
+      union ast_expression *target = parse_expression(s, PREC_NAMED);
+      target = check_assignment_target(s, target, item->as_location,
+                                       /*is_del=*/false,
+                                       /*show_equal_hint=*/false);
+      item->target = target;
     } else {
       item->as_location = (struct location){ 0 };
-      item->targets = NULL;
+      item->target = NULL;
     }
   } while (accept(s, ','));
   expect(s, ':');

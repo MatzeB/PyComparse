@@ -1,0 +1,1 @@
+test/errors/expr_lambda_async_comprehension_in_async_function.py error: asynchronous comprehension outside async function

@@ -43,6 +43,8 @@ def main() -> int:
 
     args, extra = parser.parse_known_args()
     build_dir = args.build_dir
+    repo_root = os.getcwd()
+    build_dir_abs = os.path.abspath(build_dir)
 
     print(f"[1/2] Configuring fuzzer build in {build_dir}")
     subprocess.run(
@@ -74,10 +76,12 @@ def main() -> int:
 
     nproc = get_nproc()
     cmd = [
-        f"{build_dir}/fuzz_compile",
-        f"{build_dir}/corpus",
-        "test/", "test/errors/", "test/compile_only/",
-        f"-artifact_prefix={build_dir}/artifacts/",
+        os.path.join(build_dir_abs, "fuzz_compile"),
+        os.path.join(build_dir_abs, "corpus"),
+        os.path.join(repo_root, "test"),
+        os.path.join(repo_root, "test/errors"),
+        os.path.join(repo_root, "test/compile_only"),
+        f"-artifact_prefix={os.path.join(build_dir_abs, 'artifacts')}/",
         f"-workers={nproc}",
         f"-jobs={nproc}",
         "-timeout=5",
@@ -85,6 +89,7 @@ def main() -> int:
     ]
 
     print("Running fuzzer (Ctrl-C to stop)...")
+    os.chdir(build_dir_abs)
     os.execvp(cmd[0], cmd)
     return 1  # unreachable
 

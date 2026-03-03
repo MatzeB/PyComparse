@@ -85,6 +85,8 @@ struct scanner_state {
   unsigned                     indentation_stack_top;
 
   struct diagnostics_state *d;
+  bool                      single_input_mode;
+  bool                      incomplete_input;
   bool                      read_error_seen;
   bool                      read_error_token_pending;
 

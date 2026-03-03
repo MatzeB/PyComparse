@@ -216,6 +216,98 @@ def run_parser_tests(
 
             report_ok(f"{rel} (compile_only)")
 
+        interactive_tests = [
+            (
+                "interactive_if_block",
+                "if True:\n    x = 1\n",
+                ["incomplete", "ok"],
+            ),
+            (
+                "interactive_parenthesized_expression",
+                "x = (\n    1\n)\n",
+                ["incomplete", "incomplete", "ok"],
+            ),
+            (
+                "interactive_backslash_continuation",
+                "x = 1 + \\\n    2\n",
+                ["incomplete", "ok"],
+            ),
+            (
+                "interactive_triple_string",
+                "s = '''a\nb'''\n",
+                ["incomplete", "ok"],
+            ),
+        ]
+
+        for label, input_text, expected_statuses in interactive_tests:
+            total_tests += 1
+            out_prefix = tmp / f"{label}.out"
+            proc = subprocess.run(
+                [
+                    str(parser_bin),
+                    "--interactive-test",
+                    "--interactive-out-prefix",
+                    str(out_prefix),
+                ],
+                cwd=repo_root,
+                input=input_text,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                report_fail(f"{label} (interactive exit)")
+                if proc.stderr:
+                    print(proc.stderr, end="")
+                continue
+
+            statuses: list[str] = []
+            output_paths: list[Path] = []
+            unexpected_line = None
+            for raw_line in proc.stdout.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line == "incomplete":
+                    statuses.append("incomplete")
+                elif line == "error":
+                    statuses.append("error")
+                elif line.startswith("ok: "):
+                    statuses.append("ok")
+                    output_paths.append(Path(line[4:]))
+                else:
+                    unexpected_line = line
+                    break
+
+            if unexpected_line is not None:
+                report_fail(f"{label} (interactive output format)")
+                print(f"unexpected output line: {unexpected_line}")
+                continue
+
+            if statuses != expected_statuses:
+                report_fail(f"{label} (interactive status sequence)")
+                print(f"expected statuses: {expected_statuses}")
+                print(f"actual statuses:   {statuses}")
+                continue
+
+            missing_output = False
+            for output_path in output_paths:
+                if not output_path.exists() or output_path.stat().st_size == 0:
+                    missing_output = True
+                    break
+            if missing_output:
+                report_fail(f"{label} (interactive output file)")
+                print("interactive mode reported output file that was not written")
+                continue
+
+            if proc.stderr:
+                report_fail(f"{label} (interactive stderr)")
+                print(proc.stderr, end="")
+                continue
+
+            report_ok(f"{label} (interactive)")
+
         optimize_dir = repo_root / "test" / "optimize"
         optimize_tests = sorted(optimize_dir.glob("*.py")) if optimize_dir.exists() else []
 

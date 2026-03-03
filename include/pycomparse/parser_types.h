@@ -32,6 +32,8 @@ struct parser_state {
   bool                      top_level_future_imports_allowed;
   bool                      top_level_seen_any_statement;
   unsigned                  loop_depth;
+  bool                      single_input_mode;
+  bool                      incomplete_input;
 
   int      nesting_depth;
   uint16_t anchor_set[NUM_TOKENS];

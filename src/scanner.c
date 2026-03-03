@@ -1834,7 +1834,11 @@ static void scan_string_literal(struct scanner_state    *s,
       arena_grow_char(strings, '\n');
       continue;
     case C_EOF:
-      error_unterminated_string(s);
+      if (s->single_input_mode && (quote & QUOTE_TRIPLE) != 0) {
+        s->incomplete_input = true;
+      } else {
+        error_unterminated_string(s);
+      }
       goto finish_string;
     default:
       if ((unsigned char)s->c >= 0x80) {
@@ -1883,6 +1887,16 @@ static void scan_eof(struct scanner_state *s)
   if (s->read_error_token_pending) {
     s->read_error_token_pending = false;
     s->token.kind = T_INVALID;
+    return;
+  }
+  if (s->single_input_mode && s->paren_level > 0) {
+    s->incomplete_input = true;
+    s->token.kind = T_EOF;
+    return;
+  }
+  if (s->single_input_mode && s->fstring_stack_top > 0) {
+    s->incomplete_input = true;
+    s->token.kind = T_EOF;
     return;
   }
   if (s->fstring_stack_top > 0) {
@@ -2442,8 +2456,18 @@ begin_new_line:
       if (s->c == '\n') {
         next_char(s);
         s->line++;
+        if (s->single_input_mode && s->c == C_EOF) {
+          s->incomplete_input = true;
+          s->token.kind = T_EOF;
+          return;
+        }
         /* no token; continue on next line without indentation check. */
         continue;
+      }
+      if (s->single_input_mode && s->c == C_EOF) {
+        s->incomplete_input = true;
+        s->token.kind = T_EOF;
+        return;
       }
       invalid_c = '\\';
       goto invalid_char;

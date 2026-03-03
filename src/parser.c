@@ -211,6 +211,10 @@ static void eat_until_anchor(struct parser_state *s)
 static void error_expected(struct parser_state *s, const char *what)
 {
   if (peek(s) == T_INVALID) return;
+  if (s->single_input_mode && peek(s) == T_EOF) {
+    s->incomplete_input = true;
+    return;
+  }
   diag_begin_error(s->d, scanner_location(&s->scanner));
   diag_frag(s->d, "expected ");
   diag_frag(s->d, what);
@@ -222,6 +226,10 @@ static void error_expected(struct parser_state *s, const char *what)
 static void error_expected_tok1(struct parser_state *s, enum token_kind kind)
 {
   if (peek(s) == T_INVALID) return;
+  if (s->single_input_mode && peek(s) == T_EOF) {
+    s->incomplete_input = true;
+    return;
+  }
   diag_begin_error(s->d, scanner_location(&s->scanner));
   diag_frag(s->d, "expected ");
   diag_token_kind(s->d, kind);
@@ -234,6 +242,10 @@ static void error_expected_tok2(struct parser_state *s, enum token_kind kind0,
                                 enum token_kind kind1)
 {
   if (peek(s) == T_INVALID) return;
+  if (s->single_input_mode && peek(s) == T_EOF) {
+    s->incomplete_input = true;
+    return;
+  }
   diag_begin_error(s->d, scanner_location(&s->scanner));
   diag_frag(s->d, "expected ");
   diag_token_kind(s->d, kind0);
@@ -383,7 +395,8 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 
 static union ast_expression *invalid_expression(struct parser_state *s)
 {
-  assert(diag_had_errors(s->d));
+  assert(diag_had_errors(s->d) || s->incomplete_input
+         || s->scanner.incomplete_input);
   struct location       location = scanner_location(&s->scanner);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
@@ -394,7 +407,8 @@ static union ast_expression *invalid_expression(struct parser_state *s)
 
 static struct symbol *invalid_symbol(struct parser_state *s)
 {
-  assert(diag_had_errors(s->d));
+  assert(diag_had_errors(s->d) || s->incomplete_input
+         || s->scanner.incomplete_input);
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 
@@ -3614,6 +3628,60 @@ struct ast_module *parse_single_statement(struct parser_state *s)
       idynarray_length(&statements, union ast_statement *));
   idynarray_free(&statements);
   return module;
+}
+
+enum parser_single_result parse_single_statement_with_status(
+    struct parser_state *s, struct ast_module * nullable * nonnull out_module)
+{
+  assert(out_module != NULL);
+  *out_module = NULL;
+
+  s->single_input_mode = true;
+  s->incomplete_input = false;
+  s->scanner.single_input_mode = true;
+  s->scanner.incomplete_input = false;
+
+  next_token(s);
+  add_anchor(s, T_EOF);
+  while (accept(s, T_NEWLINE)) {
+  }
+
+  union ast_statement *inline_storage[8];
+  struct idynarray     statements;
+  idynarray_init(&statements, inline_storage, sizeof(inline_storage));
+
+  if (peek(s) != T_EOF) {
+    parse_statement(s, &statements, /*top_level=*/true,
+                    /*print_expr=*/true);
+  }
+  finish_single_input(s);
+
+  bool incomplete = s->incomplete_input || s->scanner.incomplete_input;
+  s->single_input_mode = false;
+  s->scanner.single_input_mode = false;
+  s->incomplete_input = false;
+  s->scanner.incomplete_input = false;
+
+  if (diag_had_errors(s->d)) {
+    idynarray_free(&statements);
+    return PARSER_SINGLE_ERROR;
+  }
+  if (incomplete) {
+    idynarray_free(&statements);
+    return PARSER_SINGLE_INCOMPLETE;
+  }
+
+  struct location       location = scanner_location(&s->scanner);
+  union ast_expression *none_expr = ast_const_new(
+      s, object_intern_singleton(s->objects, OBJECT_NONE), location);
+  union ast_statement *ret_stmt
+      = make_return_statement(s, location, none_expr);
+  *idynarray_append(&statements, union ast_statement *) = ret_stmt;
+  *out_module = module_from_statement_array(
+      s, idynarray_data(&statements),
+      idynarray_length(&statements, union ast_statement *));
+  idynarray_free(&statements);
+  return PARSER_SINGLE_OK;
 }
 
 struct ast_module *parse_single_expression(struct parser_state *s)

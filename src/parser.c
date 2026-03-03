@@ -3600,22 +3600,38 @@ make_return_statement(struct parser_state *s, struct location location,
   return statement;
 }
 
-struct ast_module *parse_single_statement(struct parser_state *s)
+/* Returns true if either the parser or scanner detected incomplete input.
+   Both track incomplete state independently: the scanner flags structural
+   incompleteness (open delimiters, line continuations) while the parser
+   flags it when error_expected* is called at T_EOF in single_input_mode. */
+static bool parser_is_incomplete(const struct parser_state *s)
+{
+  return s->incomplete_input || s->scanner.incomplete_input;
+}
+
+/* Shared body for single-statement parse modes: advances to the first real
+   token, parses one statement (if present), and calls finish_single_input.
+   The caller must initialise `statements` before calling this helper. */
+static void parse_single_stmt_body(struct parser_state *s,
+                                   struct idynarray    *statements)
 {
   next_token(s);
   add_anchor(s, T_EOF);
   while (accept(s, T_NEWLINE)) {
   }
+  if (peek(s) != T_EOF) {
+    parse_statement(s, statements, /*top_level=*/true, /*print_expr=*/true);
+  }
+  finish_single_input(s);
+}
 
+struct ast_module *parse_single_statement(struct parser_state *s)
+{
   union ast_statement *inline_storage[8];
   struct idynarray     statements;
   idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
-  if (peek(s) != T_EOF) {
-    parse_statement(s, &statements, /*top_level=*/true,
-                    /*print_expr=*/true);
-  }
-  finish_single_input(s);
+  parse_single_stmt_body(s, &statements);
 
   struct location       location = scanner_location(&s->scanner);
   union ast_expression *none_expr = ast_const_new(
@@ -3630,6 +3646,9 @@ struct ast_module *parse_single_statement(struct parser_state *s)
   return module;
 }
 
+/* Sets single_input_mode on the parser and scanner for the duration of the
+   parse so that error_expected* and the scanner treat EOF as incomplete
+   rather than an error.  Both flags are cleared before returning. */
 enum parser_single_result parse_single_statement_with_status(
     struct parser_state *s, struct ast_module * nullable * nonnull out_module)
 {
@@ -3641,22 +3660,13 @@ enum parser_single_result parse_single_statement_with_status(
   s->scanner.single_input_mode = true;
   s->scanner.incomplete_input = false;
 
-  next_token(s);
-  add_anchor(s, T_EOF);
-  while (accept(s, T_NEWLINE)) {
-  }
-
   union ast_statement *inline_storage[8];
   struct idynarray     statements;
   idynarray_init(&statements, inline_storage, sizeof(inline_storage));
 
-  if (peek(s) != T_EOF) {
-    parse_statement(s, &statements, /*top_level=*/true,
-                    /*print_expr=*/true);
-  }
-  finish_single_input(s);
+  parse_single_stmt_body(s, &statements);
 
-  bool incomplete = s->incomplete_input || s->scanner.incomplete_input;
+  bool incomplete = parser_is_incomplete(s);
   s->single_input_mode = false;
   s->scanner.single_input_mode = false;
   s->incomplete_input = false;

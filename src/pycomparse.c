@@ -117,14 +117,14 @@ compile_single_buffer(const char *source, size_t source_len,
   }
 
   if (result == PARSER_SINGLE_INCOMPLETE) {
-    if (diag_had_errors(&diagnostics)) {
-      diag_print_all(&diagnostics, stderr);
-      result = PARSER_SINGLE_ERROR;
-    }
+    /* parse_single_statement_with_status only returns INCOMPLETE when there
+       are no diagnostics errors - the two states are mutually exclusive. */
+    assert(!diag_had_errors(&diagnostics));
   } else if (diag_had_errors(&diagnostics)) {
     diag_print_all(&diagnostics, stderr);
     result = PARSER_SINGLE_ERROR;
   } else {
+    assert(code != NULL);
     if (!write_module_to_file(out_filename, code)) {
       result = PARSER_SINGLE_ERROR;
     }
@@ -143,11 +143,13 @@ compile_single_buffer(const char *source, size_t source_len,
 static int run_interactive_test_mode(const char *out_prefix,
                                      int         optimize_level)
 {
-  char     line[4096];
-  char    *source = NULL;
-  size_t   source_len = 0;
-  size_t   source_capacity = 0;
-  bool     has_pending_unparsed_data = false;
+  char   line[4096];
+  char  *source = NULL;
+  size_t source_len = 0;
+  size_t source_capacity = 0;
+  /* True when fgets returned data without a trailing newline, meaning we are
+     mid-line at EOF and the accumulated source has not yet been compiled. */
+  bool     unterminated_line = false;
   unsigned output_index = 1;
 
   while (fgets(line, sizeof(line), stdin) != NULL) {
@@ -158,10 +160,11 @@ static int run_interactive_test_mode(const char *out_prefix,
       free(source);
       return 1;
     }
-    has_pending_unparsed_data = true;
     if (line_len == 0 || line[line_len - 1] != '\n') {
+      unterminated_line = true;
       continue;
     }
+    unterminated_line = false;
 
     char output_path[1024];
     int n = snprintf(output_path, sizeof(output_path), "%s.%u.pyc", out_prefix,
@@ -172,7 +175,6 @@ static int run_interactive_test_mode(const char *out_prefix,
       return 1;
     }
 
-    has_pending_unparsed_data = false;
     enum parser_single_result result = compile_single_buffer(
         source, source_len, "<stdin>", output_path, optimize_level);
     if (result == PARSER_SINGLE_INCOMPLETE) {
@@ -197,7 +199,7 @@ static int run_interactive_test_mode(const char *out_prefix,
     free(source);
     return 1;
   }
-  if (has_pending_unparsed_data) {
+  if (unterminated_line) {
     char output_path[1024];
     int n = snprintf(output_path, sizeof(output_path), "%s.%u.pyc", out_prefix,
                      output_index);

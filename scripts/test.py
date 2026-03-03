@@ -237,6 +237,21 @@ def run_parser_tests(
                 "s = '''a\nb'''\n",
                 ["incomplete", "ok"],
             ),
+            (
+                "interactive_fstring_triple",
+                "s = f'''a\nb'''\n",
+                ["incomplete", "ok"],
+            ),
+            (
+                "interactive_error",
+                "x = )\n",
+                ["error"],
+            ),
+            (
+                "interactive_multi_statement",
+                "x = 1\ny = 2\n",
+                ["ok", "ok"],
+            ),
         ]
 
         for label, input_text, expected_statuses in interactive_tests:
@@ -301,7 +316,9 @@ def run_parser_tests(
                 print("interactive mode reported output file that was not written")
                 continue
 
-            if proc.stderr:
+            # Diagnostics are printed to stderr; allow stderr when the test
+            # expects at least one error status.
+            if proc.stderr and "error" not in expected_statuses:
                 report_fail(f"{label} (interactive stderr)")
                 print(proc.stderr, end="")
                 continue

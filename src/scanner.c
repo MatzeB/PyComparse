@@ -1889,12 +1889,8 @@ static void scan_eof(struct scanner_state *s)
     s->token.kind = T_INVALID;
     return;
   }
-  if (s->single_input_mode && s->paren_level > 0) {
-    s->incomplete_input = true;
-    s->token.kind = T_EOF;
-    return;
-  }
-  if (s->single_input_mode && s->fstring_stack_top > 0) {
+  if (s->single_input_mode
+      && (s->paren_level > 0 || s->fstring_stack_top > 0)) {
     s->incomplete_input = true;
     s->token.kind = T_EOF;
     return;

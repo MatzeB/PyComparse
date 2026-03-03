@@ -2545,6 +2545,11 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
       break;
     }
     diag_end(s->d);
+    s->input = NULL;
+    s->p = NULL;
+    s->buffer_end = NULL;
+    s->c = C_EOF;
+    return;
   }
 #endif
   s->c = refill_buffer(s);
@@ -2617,6 +2622,10 @@ void scanner_init_from_buffer(struct scanner_state *s, const void *buf,
         break;
       }
       diag_end(s->d);
+      s->p = NULL;
+      s->buffer_end = NULL;
+      s->c = C_EOF;
+      return;
     }
     if (transcoded != NULL) {
       s->transcoded_source = transcoded;
@@ -2781,10 +2790,11 @@ void print_token(FILE *out, const struct token *token)
     struct object_string *string = &object->string;
     for (const char *c = string->chars, *e = c + string->length; c != e; ++c) {
       /* TODO: more escaping... */
-      if (isprint(*c)) {
+      unsigned char uc = (unsigned char)*c;
+      if (isprint(uc)) {
         fputc(*c, out);
       } else {
-        fprintf(out, "\\x%02x", (unsigned char)*c);
+        fprintf(out, "\\x%02x", uc);
       }
     }
     fputc('"', out);

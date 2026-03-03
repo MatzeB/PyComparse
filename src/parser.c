@@ -284,20 +284,22 @@ static bool await_tracking_end(struct parser_state *s, bool saved)
   return parsed_await_expression;
 }
 
-static void diag_await_outside_async_function(struct parser_state *s)
+static void diag_await_outside_async_function(struct parser_state *s,
+                                              struct location      location)
 {
-  diag_begin_error(s->d, INVALID_LOCATION);
+  diag_begin_error(s->d, location);
   diag_token_kind(s->d, T_await);
   diag_frag(s->d, " outside async function");
   diag_end(s->d);
 }
 
 static void maybe_diag_await_outside_async_function(struct parser_state *s,
-                                                    bool has_await)
+                                                    bool            has_await,
+                                                    struct location location)
 {
   if (!has_await || s->parsing_annotation) return;
   if (!s->in_function || !s->in_async_function) {
-    diag_await_outside_async_function(s);
+    diag_await_outside_async_function(s, location);
   }
 }
 
@@ -401,9 +403,10 @@ static bool is_dunder_debug_symbol(const struct symbol *symbol)
   return strcmp(symbol->string, "__debug__") == 0;
 }
 
-static void diag_dunder_debug_binding(struct parser_state *s, bool is_del)
+static void diag_dunder_debug_binding(struct parser_state *s,
+                                      struct location location, bool is_del)
 {
-  diag_begin_error(s->d, INVALID_LOCATION);
+  diag_begin_error(s->d, location);
   diag_frag(s->d,
             is_del ? "cannot delete __debug__" : "cannot assign to __debug__");
   diag_end(s->d);
@@ -483,9 +486,10 @@ static struct symbol *parse_identifier(struct parser_state *s)
 
 static struct symbol *parse_binding_identifier(struct parser_state *s)
 {
-  struct symbol *name = parse_identifier(s);
+  struct location location = scanner_location(&s->scanner);
+  struct symbol  *name = parse_identifier(s);
   if (is_dunder_debug_symbol(name)) {
-    diag_dunder_debug_binding(s, /*is_del=*/false);
+    diag_dunder_debug_binding(s, location, /*is_del=*/false);
   }
   return name;
 }
@@ -668,7 +672,7 @@ static union ast_expression *check_assignment_target(
   }
   if (type == AST_IDENTIFIER) {
     if (is_dunder_debug_symbol(expression->identifier.symbol)) {
-      diag_dunder_debug_binding(s, is_del);
+      diag_dunder_debug_binding(s, location, is_del);
       return invalid_expression(s);
     }
     return expression;
@@ -782,7 +786,7 @@ parse_generator_expression(struct parser_state     *s,
   expression->generator_expression.num_parts = num_parts;
   expression->generator_expression.is_async = is_async;
   if (is_async && type != AST_GENERATOR_EXPRESSION && !s->in_async_function) {
-    diag_begin_error(s->d, INVALID_LOCATION);
+    diag_begin_error(s->d, location);
     diag_frag(s->d, "asynchronous comprehension outside async function");
     diag_end(s->d);
   }
@@ -839,7 +843,8 @@ static struct argument *parse_argument(struct parser_state *s,
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
   } else {
-    maybe_diag_await_outside_async_function(s, expression_has_await);
+    maybe_diag_await_outside_async_function(
+        s, expression_has_await, get_expression_location(expression));
   }
 
   argument->name = name;
@@ -1082,10 +1087,11 @@ static union ast_expression *parse_singleton(struct parser_state *s,
 
 static union ast_expression *parse_await(struct parser_state *s)
 {
+  struct location location = scanner_location(&s->scanner);
   s->parsed_await_expression = true;
   if (!s->parsing_annotation && s->await_tracking_depth == 0
       && (!s->in_function || !s->in_async_function)) {
-    diag_await_outside_async_function(s);
+    diag_await_outside_async_function(s, location);
   }
   return parse_unexpr(s, PREC_AWAIT, AST_UNEXPR_AWAIT);
 }
@@ -1119,7 +1125,8 @@ static union ast_expression *parse_l_bracket(struct parser_state *s)
                                   /*item_value=*/NULL,
                                   /*item_value_has_await=*/false);
   } else {
-    maybe_diag_await_outside_async_function(s, first_has_await);
+    maybe_diag_await_outside_async_function(s, first_has_await,
+                                            get_expression_location(first));
     expression = parse_expression_list_helper(
         s, AST_LIST_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false,
         /*allow_starred=*/true);
@@ -1161,7 +1168,8 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
   union ast_expression *expression;
   /* set display */
   if (peek(s) == ',' || peek(s) == '}') {
-    maybe_diag_await_outside_async_function(s, first_has_await);
+    maybe_diag_await_outside_async_function(s, first_has_await,
+                                            get_expression_location(first));
     add_anchor(s, ',');
     expression = parse_expression_list_helper(
         s, AST_SET_DISPLAY, first, PREC_NAMED, /*allow_slices=*/false,
@@ -1190,8 +1198,11 @@ static union ast_expression *parse_l_curly(struct parser_state *s)
       set_generator_expression_item(expression, key, first_has_await, value,
                                     value_has_await);
     } else {
-      maybe_diag_await_outside_async_function(s, first_has_await
-                                                     || value_has_await);
+      struct location await_location = first_has_await
+                                           ? get_expression_location(first)
+                                           : get_expression_location(value);
+      maybe_diag_await_outside_async_function(
+          s, first_has_await || value_has_await, await_location);
     parse_dict: {
       /* dict display */
       struct dict_item inline_storage[16];
@@ -1301,12 +1312,14 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
                                     /*item_value=*/NULL,
                                     /*item_value_has_await=*/false);
     } else if (peek(s) == ',') {
-      maybe_diag_await_outside_async_function(s, first_has_await);
+      maybe_diag_await_outside_async_function(s, first_has_await,
+                                              get_expression_location(first));
       expression = parse_expression_list_helper(
           s, AST_EXPRESSION_LIST, first, PREC_NAMED, /*allow_slices=*/false,
           /*allow_starred=*/true);
     } else {
-      maybe_diag_await_outside_async_function(s, first_has_await);
+      maybe_diag_await_outside_async_function(s, first_has_await,
+                                              get_expression_location(first));
       expression = reject_starred_expression(s, first);
     }
   }
@@ -2530,7 +2543,7 @@ static union ast_statement *parse_from_import_statement(struct parser_state *s)
     }
     if (as == NULL) {
       if (is_dunder_debug_symbol(name)) {
-        diag_dunder_debug_binding(s, /*is_del=*/false);
+        diag_dunder_debug_binding(s, location, /*is_del=*/false);
       }
     }
     struct from_import_item *item
@@ -2607,7 +2620,7 @@ static union ast_statement *parse_import_statement(struct parser_state *s)
       as = parse_binding_identifier(s);
     } else if (dotted_name->num_symbols > 0) {
       if (is_dunder_debug_symbol(dotted_name->symbols[0])) {
-        diag_dunder_debug_binding(s, /*is_del=*/false);
+        diag_dunder_debug_binding(s, location, /*is_del=*/false);
       }
     }
     struct ast_import_item *item

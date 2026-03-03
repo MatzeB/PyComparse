@@ -1,1 +1,1 @@
-test/errors/expr_async_comprehension_non_async.py error: asynchronous comprehension outside async function
+test/errors/expr_async_comprehension_non_async.py:2 error: asynchronous comprehension outside async function

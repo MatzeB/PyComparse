@@ -1,0 +1,1 @@
+test/errors/scan_bad_coding_no_cascade.py:1 error: unknown encoding: uft-8

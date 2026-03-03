@@ -285,7 +285,7 @@ void emit_assignment(struct cg_state *s, union ast_expression *target)
     unsigned                    num_expressions = list->num_expressions;
     if (list->has_star_expression) {
       if (num_expressions > 256) {
-        struct location location = INVALID_LOCATION;
+        struct location location = get_expression_location(target);
         diag_begin_error(s->d, location);
         diag_frag(s->d, "too many expressions in star-unpacking assignment");
         diag_end(s->d);

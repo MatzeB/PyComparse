@@ -1,1 +1,1 @@
-test/errors/expr_lambda_await_in_async_function.py error: `await` outside async function
+test/errors/expr_lambda_await_in_async_function.py:2 error: `await` outside async function

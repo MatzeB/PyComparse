@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,11 +56,15 @@ void diag_frag(struct diagnostics_state *s, const char *message)
 void diag_frag_copy(struct diagnostics_state *s, const char *str, size_t len)
 {
   assert(s->in_diagnostic);
-  assert(len <= 255);
-  struct diag_elem_inline_str e = { (uint8_t)len };
-  diag_push_tag(s, DIAG_ELEM_INLINE_STR);
-  diag_push(s, &e, sizeof(e));
-  diag_push(s, str, (unsigned)len);
+  while (len > 0) {
+    uint8_t chunk_len = len > UINT8_MAX ? UINT8_MAX : (uint8_t)len;
+    struct diag_elem_inline_str e = { chunk_len };
+    diag_push_tag(s, DIAG_ELEM_INLINE_STR);
+    diag_push(s, &e, sizeof(e));
+    diag_push(s, str, chunk_len);
+    str += chunk_len;
+    len -= chunk_len;
+  }
 }
 
 void diag_token(struct diagnostics_state *s, struct token *token)
@@ -192,10 +197,11 @@ static void print_token_elem(FILE *out, uint16_t kind, const union object *obj)
     }
     const struct object_string *str = &obj->string;
     for (const char *c = str->chars, *e = c + str->length; c != e; ++c) {
-      if (isprint(*c)) {
+      unsigned char uc = (unsigned char)*c;
+      if (isprint(uc)) {
         fputc(*c, out);
       } else {
-        fprintf(out, "\\x%02x", (unsigned char)*c);
+        fprintf(out, "\\x%02x", uc);
       }
     }
     fputc('"', out);
@@ -214,6 +220,43 @@ static void print_token_elem(FILE *out, uint16_t kind, const union object *obj)
   default:
     break;
   }
+}
+
+static void print_quoted_char_elem(FILE *out, char c)
+{
+  unsigned char uc = (unsigned char)c;
+  fputc('`', out);
+  switch (c) {
+  case '\n':
+    fputs("\\n", out);
+    break;
+  case '\r':
+    fputs("\\r", out);
+    break;
+  case '\t':
+    fputs("\\t", out);
+    break;
+  case '\f':
+    fputs("\\f", out);
+    break;
+  case '\v':
+    fputs("\\v", out);
+    break;
+  case '\\':
+    fputs("\\\\", out);
+    break;
+  case '`':
+    fputs("\\`", out);
+    break;
+  default:
+    if (isprint(uc)) {
+      fputc(c, out);
+    } else {
+      fprintf(out, "\\x%02x", uc);
+    }
+    break;
+  }
+  fputc('`', out);
 }
 
 void diag_print_all(const struct diagnostics_state *s, FILE *out)
@@ -257,9 +300,7 @@ void diag_print_all(const struct diagnostics_state *s, FILE *out)
       struct diag_elem_quoted_char e;
       memcpy(&e, p, sizeof(e));
       p += sizeof(e);
-      fputc('`', out);
-      fputc(e.c, out);
-      fputc('`', out);
+      print_quoted_char_elem(out, e.c);
       break;
     }
     case DIAG_ELEM_TOKEN: {

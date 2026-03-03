@@ -333,6 +333,45 @@ def break_nested_loops_try():
     return out
 
 
+def return_expr_in_try_except():
+    # return of a non-constant expression inside try/except body;
+    # a spurious ROT_TWO after POP_BLOCK would corrupt the return value.
+    def g(x, y):
+        try:
+            return x + y
+        except ValueError:
+            pass
+
+    return g(3, 4)
+
+
+def return_expr_in_try_except_finally():
+    out = []
+
+    def g(x, y):
+        try:
+            return x + y
+        except ValueError:
+            out.append("e")
+        finally:
+            out.append("f")
+
+    return g(10, 5), out
+
+
+def return_expr_in_nested_try_except():
+    def g(x, y):
+        try:
+            try:
+                return x + y
+            except TypeError:
+                pass
+        except ValueError:
+            pass
+
+    return g(6, 7)
+
+
 print(break_case())
 print(continue_case())
 print(return_case())
@@ -355,3 +394,32 @@ print(continue_try_loop_try_try())
 print(return_try_loop_try_try())
 print(break_try_loop_except_as_finally())
 print(break_nested_loops_try())
+print(return_expr_in_try_except())
+print(return_expr_in_try_except_finally())
+print(return_expr_in_nested_try_except())
+
+
+def return_expr_in_finally_body():
+    # return of a non-constant expression from inside a finally body;
+    # requires POP_FINALLY(preserve_tos=1) rather than POP_FINALLY(0).
+    def g(x, y):
+        try:
+            pass
+        finally:
+            return x + y
+
+    return g(3, 4)
+
+
+def return_expr_in_finally_body_with_try_content():
+    def g(x, y):
+        try:
+            z = x * 2
+        finally:
+            return x + y
+
+    return g(3, 4)
+
+
+print(return_expr_in_finally_body())
+print(return_expr_in_finally_body_with_try_content())

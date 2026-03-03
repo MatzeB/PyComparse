@@ -1336,7 +1336,6 @@ static void emit_scope_cleanup(struct cg_state              *s,
       break;
     case SCOPE_CLEANUP_POP_BLOCK:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-      if (value_passthrough) cg_op(s, OPCODE_ROT_TWO, 0);
       break;
     case SCOPE_CLEANUP_POP_EXCEPT:
       if (value_passthrough) cg_op(s, OPCODE_ROT_FOUR, 0);
@@ -1375,7 +1374,9 @@ static void emit_scope_cleanup(struct cg_state              *s,
       }
       break;
     case SCOPE_CLEANUP_WITHIN_FINALLY:
-      cg_op_pop_push(s, OPCODE_POP_FINALLY, 0, /*pop=*/6, /*push=*/0);
+      cg_op_pop_push(s, OPCODE_POP_FINALLY, value_passthrough ? 1 : 0,
+                     /*pop=*/6, /*push=*/0);
+      if (value_passthrough) cg_op(s, OPCODE_ROT_TWO, 0);
       cg_op_pop1(s, OPCODE_POP_TOP, 0);
       break;
     case SCOPE_CLEANUP_EXCEPT_AS:

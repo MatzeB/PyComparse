@@ -75,7 +75,7 @@ static inline void idynarray_init(struct idynarray *a, void *inline_storage,
   idynarray_refresh_poisoning_(a);
 }
 
-static void idynarray_free(struct idynarray *a)
+static inline void idynarray_free(struct idynarray *a)
 {
   char *data = a->data;
   idynarray_poison_freed_(data, a->capacity);
@@ -84,7 +84,7 @@ static void idynarray_free(struct idynarray *a)
   }
 }
 
-static void idynarray_clear(struct idynarray *a)
+static inline void idynarray_clear(struct idynarray *a)
 {
   a->size = 0;
   idynarray_refresh_poisoning_(a);
@@ -146,7 +146,7 @@ static inline unsigned idynarray_size(struct idynarray *a)
 #define idynarray_length(dynarray, type)                                      \
   (idynarray_size((dynarray)) / (unsigned)sizeof(type))
 
-static void *idynarray_data(struct idynarray *a)
+static inline void *idynarray_data(struct idynarray *a)
 {
   return a->data;
 }

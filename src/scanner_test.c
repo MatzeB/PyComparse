@@ -62,7 +62,7 @@ int main(int argc, char **argv)
   arena_init(&strings);
 
   struct diagnostics_state diagnostics;
-  diag_init(&diagnostics, stderr, filename);
+  diag_init(&diagnostics, filename);
 
   struct scanner_state s;
   struct object_intern objects;
@@ -94,10 +94,13 @@ int main(int argc, char **argv)
     fclose(input);
   }
 
+  diag_print_all(&diagnostics, stderr);
+  bool had_errors = diag_had_errors(&diagnostics);
   scanner_free(&s);
   free(buf);
   object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
-  return diag_had_errors(&diagnostics) ? 1 : 0;
+  diag_free(&diagnostics);
+  return had_errors ? 1 : 0;
 }

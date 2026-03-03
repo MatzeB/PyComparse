@@ -107,7 +107,7 @@ int main(int argc, char **argv)
   arena_init(&strings);
 
   struct diagnostics_state diagnostics;
-  diag_init(&diagnostics, stderr, input_filename);
+  diag_init(&diagnostics, input_filename);
 
   struct object_intern objects;
   object_intern_init(&objects);
@@ -131,6 +131,8 @@ int main(int argc, char **argv)
     ast_fold_constants(&objects, &parser.ast, module);
     code = emit_module(&cg, module);
   }
+
+  diag_print_all(&diagnostics, stderr);
 
   bool io_error = false;
   if (!diag_had_errors(&diagnostics)) {
@@ -156,11 +158,13 @@ int main(int argc, char **argv)
     }
   }
 
+  bool had_errors = diag_had_errors(&diagnostics);
   scanner_free(&parser.scanner);
   parser_free(&parser);
   cg_free(&cg);
   object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
-  return (diag_had_errors(&diagnostics) || io_error) ? 1 : 0;
+  diag_free(&diagnostics);
+  return (had_errors || io_error) ? 1 : 0;
 }

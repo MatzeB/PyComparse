@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #if (defined(__x86_64__) || defined(__i386__))                                \
     && (defined(__clang__) || defined(__GNUC__))
@@ -2526,16 +2527,19 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
     switch (encoding_error.kind) {
     case ENCODING_ERROR_UNKNOWN_ENCODING:
       diag_frag(s->d, "unknown encoding: ");
-      diag_frag(s->d, encoding_error.encoding);
+      diag_frag_copy(s->d, encoding_error.encoding,
+                     strlen(encoding_error.encoding));
       break;
     case ENCODING_ERROR_BOM_COOKIE_MISMATCH:
       diag_frag(s->d, "encoding problem: ");
-      diag_frag(s->d, encoding_error.encoding);
+      diag_frag_copy(s->d, encoding_error.encoding,
+                     strlen(encoding_error.encoding));
       diag_frag(s->d, " with BOM");
       break;
     case ENCODING_ERROR_DECODE_FAILED:
       diag_frag(s->d, "failed to decode source with encoding: ");
-      diag_frag(s->d, encoding_error.encoding);
+      diag_frag_copy(s->d, encoding_error.encoding,
+                     strlen(encoding_error.encoding));
       break;
     case ENCODING_ERROR_NONE:
       break;
@@ -2595,16 +2599,19 @@ void scanner_init_from_buffer(struct scanner_state *s, const void *buf,
       switch (encoding_error.kind) {
       case ENCODING_ERROR_UNKNOWN_ENCODING:
         diag_frag(s->d, "unknown encoding: ");
-        diag_frag(s->d, encoding_error.encoding);
+        diag_frag_copy(s->d, encoding_error.encoding,
+                       strlen(encoding_error.encoding));
         break;
       case ENCODING_ERROR_BOM_COOKIE_MISMATCH:
         diag_frag(s->d, "encoding problem: ");
-        diag_frag(s->d, encoding_error.encoding);
+        diag_frag_copy(s->d, encoding_error.encoding,
+                       strlen(encoding_error.encoding));
         diag_frag(s->d, " with BOM");
         break;
       case ENCODING_ERROR_DECODE_FAILED:
         diag_frag(s->d, "failed to decode source with encoding: ");
-        diag_frag(s->d, encoding_error.encoding);
+        diag_frag_copy(s->d, encoding_error.encoding,
+                       strlen(encoding_error.encoding));
         break;
       case ENCODING_ERROR_NONE:
         break;

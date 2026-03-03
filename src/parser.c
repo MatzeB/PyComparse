@@ -381,7 +381,7 @@ static union ast_expression *ast_const_new(struct parser_state *s,
 
 static union ast_expression *invalid_expression(struct parser_state *s)
 {
-  assert(s->d->had_error);
+  assert(diag_had_errors(s->d));
   struct location       location = scanner_location(&s->scanner);
   union ast_expression *expression
       = ast_allocate_expression(s, struct ast_const, AST_INVALID);
@@ -392,7 +392,7 @@ static union ast_expression *invalid_expression(struct parser_state *s)
 
 static struct symbol *invalid_symbol(struct parser_state *s)
 {
-  assert(s->d->had_error);
+  assert(diag_had_errors(s->d));
   return symbol_table_get_or_insert(s->scanner.symbol_table, "<invalid>");
 }
 

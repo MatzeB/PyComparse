@@ -18,18 +18,7 @@
 #include "pycomparse/symbol_table.h"
 #include "pycomparse/symbol_table_types.h"
 
-static FILE *dev_null;
-
-int LLVMFuzzerInitialize(int *argc, char ***argv);
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
-
-int LLVMFuzzerInitialize(int *argc, char ***argv)
-{
-  (void)argc;
-  (void)argv;
-  dev_null = fopen("/dev/null", "w");
-  return 0;
-}
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
@@ -45,7 +34,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
   symbol_table_init(&symbol_table);
   arena_init(&strings);
-  diag_init(&diagnostics, dev_null, "<fuzz>");
+  diag_init(&diagnostics, "<fuzz>");
   object_intern_init(&objects);
   cg_init(&cg, &objects, &symbol_table, "<fuzz>", &diagnostics);
   parser_init(&parser, &objects, &diagnostics);
@@ -66,5 +55,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   object_intern_free(&objects);
   arena_free(&strings);
   symbol_table_free(&symbol_table);
+  diag_free(&diagnostics);
   return 0;
 }

@@ -101,6 +101,9 @@ struct cg_state {
   struct diagnostics_state *d;
 
   uint32_t next_scope_id;
+
+  bool optimize_no_assertions; /* -O: skip assert statements */
+  bool optimize_no_docstrings; /* -OO: strip docstrings */
 };
 
 ASSUME_NONNULL_END

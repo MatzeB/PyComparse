@@ -1371,9 +1371,9 @@ static union ast_expression *parse_lambda(struct parser_state *s)
 
   struct parameter_shape parameter_shape;
   parse_parameters(s, &parameters, &parameter_shape, /*end=*/':');
-  bool     saved_in_function = s->in_function;
-  bool     saved_in_async_function = s->in_async_function;
-  bool    *saved_function_has_yield = s->current_function_has_yield;
+  bool  saved_in_function = s->in_function;
+  bool  saved_in_async_function = s->in_async_function;
+  bool *saved_function_has_yield = s->current_function_has_yield;
   s->in_function = true;
   s->in_async_function = false;
   s->current_function_has_yield = NULL;

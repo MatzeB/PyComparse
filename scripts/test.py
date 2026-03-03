@@ -216,6 +216,75 @@ def run_parser_tests(
 
             report_ok(f"{rel} (compile_only)")
 
+        optimize_dir = repo_root / "test" / "optimize"
+        optimize_tests = sorted(optimize_dir.glob("*.py")) if optimize_dir.exists() else []
+
+        for test_file in optimize_tests:
+            total_tests += 1
+            rel = str(test_file.relative_to(repo_root))
+
+            stem = test_file.stem
+            if stem.endswith("_OO"):
+                opt_flag = "-OO"
+            elif stem.endswith("_O"):
+                opt_flag = "-O"
+            else:
+                opt_flag = None
+
+            compile_cmd = [str(parser_bin), "--out", str(pyc), rel]
+            if opt_flag:
+                compile_cmd = [str(parser_bin), opt_flag, "--out", str(pyc), rel]
+
+            with compile_err.open("wb") as compile_err_file:
+                compile_proc = subprocess.run(
+                    compile_cmd,
+                    cwd=repo_root,
+                    stdout=subprocess.DEVNULL,
+                    stderr=compile_err_file,
+                    check=False,
+                )
+            if compile_proc.returncode != 0:
+                report_fail(f"{rel} (compile)")
+                cat_file(compile_err)
+                continue
+
+            with output.open("wb") as output_file, run_err.open("wb") as run_err_file:
+                run_proc = subprocess.run(
+                    ["python3", str(pyc)],
+                    cwd=repo_root,
+                    stdout=output_file,
+                    stderr=run_err_file,
+                    check=False,
+                )
+            if run_proc.returncode != 0:
+                report_fail(f"{rel} (compiled output runtime)")
+                cat_file(run_err)
+                continue
+
+            ref_cmd = ["python3", rel] if opt_flag is None else ["python3", opt_flag, rel]
+            with reference.open("wb") as reference_file, ref_err.open(
+                "wb"
+            ) as ref_err_file:
+                ref_proc = subprocess.run(
+                    ref_cmd,
+                    cwd=repo_root,
+                    stdout=reference_file,
+                    stderr=ref_err_file,
+                    check=False,
+                )
+            if ref_proc.returncode != 0:
+                report_fail(f"{rel} (reference runtime)")
+                cat_file(ref_err)
+                continue
+
+            diff_text = unified_diff(reference, output)
+            if diff_text:
+                report_fail(f"{rel} (output mismatch)")
+                print(diff_text, end="")
+                continue
+
+            report_ok(f"{rel} (optimize)")
+
     passed_tests = total_tests - failed_tests
     if print_summary:
         print(f"Ran {total_tests} tests: {passed_tests} passed, {failed_tests} failed.")

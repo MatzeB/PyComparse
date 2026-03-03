@@ -311,6 +311,7 @@ static void emit_annotation(struct cg_state *s, union ast_expression *target,
 static void emit_assert(struct cg_state *s, union ast_expression *expression,
                         union ast_expression *message)
 {
+  if (s->optimize_no_assertions) return;
   if (cg_unreachable(s)) return;
 
   struct basic_block *fail = cg_block_allocate(s);
@@ -881,7 +882,8 @@ static void emit_for_begin_impl(struct cg_state        *s,
   };
   state->loop_iter_cleanup = (union scope_cleanup *)loop_cleanup;
   s->code.scope_cleanup = (union scope_cleanup *)loop_cleanup;
-  s->code.loop_state.scope_cleanup_at_loop = (union scope_cleanup *)loop_cleanup;
+  s->code.loop_state.scope_cleanup_at_loop
+      = (union scope_cleanup *)loop_cleanup;
 }
 
 static void emit_for_begin_async(struct cg_state        *s,
@@ -2392,10 +2394,12 @@ static void emit_statement_list(struct cg_state           *s,
   unsigned      first_statement = 0;
   union object *doc = statement_list_leading_docstring(statement_list);
   if (doc != NULL) {
-    union ast_statement *first = statement_list->statements[0];
-    cg_set_lineno(s, first->base.location.line);
-    cg_load_const(s, doc);
-    cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    if (!s->optimize_no_docstrings) {
+      union ast_statement *first = statement_list->statements[0];
+      cg_set_lineno(s, first->base.location.line);
+      cg_load_const(s, doc);
+      cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    }
     first_statement = 1;
   }
   emit_statement_list_with_function_from(s, statement_list,
@@ -2442,7 +2446,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
                            def->async, def->return_type, def->name->string,
                            global_binding);
   union object *doc = statement_list_leading_docstring(def->body);
-  cg_set_function_docstring(s, doc);
+  cg_set_function_docstring(s, s->optimize_no_docstrings ? NULL : doc);
   apply_function_bindings(s, def);
   cg_set_lineno(s, def->base.location.line);
   emit_statement_list_with_function_from(s, def->body, def,
@@ -2506,10 +2510,12 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   union object *doc = statement_list_leading_docstring(class_stmt->body);
   unsigned      first_statement = 0;
   if (doc != NULL) {
-    union ast_statement *first = class_stmt->body->statements[0];
-    cg_set_lineno(s, first->base.location.line);
-    cg_load_const(s, doc);
-    cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    if (!s->optimize_no_docstrings) {
+      union ast_statement *first = class_stmt->body->statements[0];
+      cg_set_lineno(s, first->base.location.line);
+      cg_load_const(s, doc);
+      cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    }
     first_statement = 1;
   }
   cg_set_lineno(s, class_stmt->base.location.line);

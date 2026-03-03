@@ -25,6 +25,9 @@ static void print_usage(FILE *out, const char *prog)
   fprintf(out, "Usage: %s -o <out.pyc> <input.py>\n", prog);
   fprintf(out, "       %s --out <out.pyc> <input.py>\n", prog);
   fprintf(out, "       Use --out - to write bytecode to stdout.\n");
+  fprintf(out, "       %s [-O|-OO] -o <out.pyc> <input.py>\n", prog);
+  fprintf(out, "       -O   disable assert statements\n");
+  fprintf(out, "       -OO  disable assert statements and strip docstrings\n");
   fprintf(out, "       %s -h|--help\n", prog);
 }
 
@@ -32,6 +35,7 @@ int main(int argc, char **argv)
 {
   const char *input_filename = NULL;
   const char *out_filename = NULL;
+  int         optimize_level = 0;
 
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i];
@@ -39,6 +43,16 @@ int main(int argc, char **argv)
     if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
       print_usage(stdout, argv[0]);
       return 0;
+    }
+
+    if (strcmp(arg, "-OO") == 0) {
+      optimize_level = 2;
+      continue;
+    }
+
+    if (strcmp(arg, "-O") == 0) {
+      optimize_level = 1;
+      continue;
     }
 
     if (strcmp(arg, "-o") == 0 || strcmp(arg, "--out") == 0) {
@@ -100,6 +114,8 @@ int main(int argc, char **argv)
 
   struct cg_state cg;
   cg_init(&cg, &objects, &symbol_table, input_filename, &diagnostics);
+  cg.optimize_no_assertions = (optimize_level >= 1);
+  cg.optimize_no_docstrings = (optimize_level >= 2);
 
   struct parser_state parser;
   parser_init(&parser, &objects, &diagnostics);

@@ -3579,12 +3579,20 @@ module_from_statement_array(struct parser_state  *s,
   return module;
 }
 
-static void finish_single_input(struct parser_state *s)
+static void finish_single_input(struct parser_state *s, bool is_single_stmt)
 {
   while (accept(s, T_NEWLINE)) {
   }
   if (peek(s) != T_EOF) {
-    error_expected_tok1(s, T_EOF);
+    if (is_single_stmt && peek(s) != T_INVALID) {
+      diag_begin_error(s->d, scanner_location(&s->scanner));
+      diag_frag(
+          s->d,
+          "multiple statements found while compiling a single statement");
+      diag_end(s->d);
+    } else {
+      error_expected_tok1(s, T_EOF);
+    }
     eat_until_anchor(s);
   }
   remove_anchor(s, T_EOF);
@@ -3622,7 +3630,7 @@ static void parse_single_stmt_body(struct parser_state *s,
   if (peek(s) != T_EOF) {
     parse_statement(s, statements, /*top_level=*/true, /*print_expr=*/true);
   }
-  finish_single_input(s);
+  finish_single_input(s, /*is_single_stmt=*/true);
 }
 
 struct ast_module *parse_single_statement(struct parser_state *s)
@@ -3701,7 +3709,7 @@ struct ast_module *parse_single_expression(struct parser_state *s)
 
   union ast_expression *expression = parse_star_expressions(s, PREC_NAMED);
   expression = reject_starred_expression(s, expression);
-  finish_single_input(s);
+  finish_single_input(s, /*is_single_stmt=*/false);
 
   struct location      location = get_expression_location(expression);
   union ast_statement *ret_stmt

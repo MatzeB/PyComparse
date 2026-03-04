@@ -1269,11 +1269,23 @@ static void scan_escape_sequence(struct scanner_state *s,
     }
     internal_error("scanner: invalid named escape status");
   case 'u':
+    if (!is_unicode) {
+      arena_grow_char(strings, '\\');
+      arena_grow_char(strings, 'u');
+      next_char(s);
+      return;
+    }
     next_char(s);
     expected_hex_digits = 4;
     hex_escape = "\\u";
     goto parse_hex;
   case 'U':
+    if (!is_unicode) {
+      arena_grow_char(strings, '\\');
+      arena_grow_char(strings, 'U');
+      next_char(s);
+      return;
+    }
     next_char(s);
     expected_hex_digits = 8;
     hex_escape = "\\U";

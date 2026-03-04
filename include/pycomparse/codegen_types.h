@@ -80,7 +80,6 @@ struct code_state {
   bool                          in_function;
   bool                          in_async_function;
   bool                          in_class_body;
-  bool                          setup_annotations;
   const char *nullable          qualname_prefix;
   union scope_cleanup *nullable scope_cleanup;
   unsigned                      current_lineno;

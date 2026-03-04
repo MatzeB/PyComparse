@@ -158,7 +158,6 @@ static void emit_comparison_multi(struct cg_state             *s,
 }
 
 static void emit_scope_cleanup(struct cg_state              *s,
-                               struct ast_def *nullable      current_function,
                                union scope_cleanup *nullable stop,
                                bool value_passthrough);
 
@@ -255,34 +254,67 @@ void emit_code_end(struct cg_state *s)
   cg_block_end(s);
 }
 
-static void emit_module_begin(struct cg_state *s)
+static union object *nullable
+statement_leading_docstring(union ast_statement *statement)
 {
-  cg_code_begin(s, /*in_function=*/false);
+  if (ast_statement_type(statement) != AST_STATEMENT_EXPRESSION) return NULL;
+  union ast_expression *expression = statement->expression.expression;
+  if (ast_expression_type(expression) != AST_CONST) return NULL;
+  union object *doc = expression->cnst.object;
+  if (object_type(doc) != OBJECT_STRING) return NULL;
+  return doc;
 }
 
-static union object *emit_module_end(struct cg_state *s)
+static union object *nullable
+statement_list_leading_docstring(struct ast_statement_list *statement_list)
 {
-  emit_code_end(s);
-  return cg_code_end(s, "<module>");
+  if (statement_list->num_statements == 0) return NULL;
+  return statement_leading_docstring(statement_list->statements[0]);
 }
 
+static bool statement_list_has_scope_annotation(
+    const struct ast_statement_list *nullable statements);
 static void emit_statement_list(struct cg_state           *s,
                                 struct ast_statement_list *statement_list);
+static void
+emit_statement_list_skip_first(struct cg_state           *s,
+                               struct ast_statement_list *statement_list);
+
+static void
+emit_nonfunction_statement_list(struct cg_state           *s,
+                                struct ast_statement_list *statement_list)
+{
+  if (statement_list_has_scope_annotation(statement_list)) {
+    cg_op(s, OPCODE_SETUP_ANNOTATIONS, 0);
+  }
+
+  union object *doc = statement_list_leading_docstring(statement_list);
+  if (doc != NULL) {
+    if (!s->optimize_no_docstrings) {
+      union ast_statement *first = statement_list->statements[0];
+      cg_set_lineno(s, first->base.location.line);
+      cg_load_const(s, doc);
+      cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
+    }
+    emit_statement_list_skip_first(s, statement_list);
+  } else {
+    emit_statement_list(s, statement_list);
+  }
+}
 
 union object *emit_module(struct cg_state *s, struct ast_module *module)
 {
-  emit_module_begin(s);
+  cg_code_begin(s, /*in_function=*/false);
   s->code.flags |= module->future_flags;
-  emit_statement_list(s, module->body);
-  return emit_module_end(s);
+  emit_nonfunction_statement_list(s, module->body);
+
+  emit_code_end(s);
+  return cg_code_end(s, "<module>");
 }
 
 static void emit_annotation(struct cg_state *s, union ast_expression *target,
                             union ast_expression *annotation, bool simple)
 {
-  if (!cg_in_function(s)) {
-    s->code.setup_annotations = true;
-  }
   if (cg_unreachable(s)) return;
 
   switch (ast_expression_type(target)) {
@@ -993,14 +1025,12 @@ static void emit_for_end(struct cg_state *s, struct for_while_state *state)
   emit_loop_end(s, state);
 }
 
-static void emit_continue(struct cg_state         *s,
-                          struct ast_def *nullable current_function)
+static void emit_continue(struct cg_state *s)
 {
   struct basic_block *target = s->code.loop_state.continue_block;
   assert(target != NULL);
   unsigned saved_stacksize = s->code.stacksize;
-  emit_scope_cleanup(s, current_function,
-                     s->code.loop_state.scope_cleanup_at_loop,
+  emit_scope_cleanup(s, s->code.loop_state.scope_cleanup_at_loop,
                      /*value_passthrough=*/false);
   if (!cg_unreachable(s)) {
     cg_jump(s, target);
@@ -1008,14 +1038,12 @@ static void emit_continue(struct cg_state         *s,
   s->code.stacksize = saved_stacksize;
 }
 
-static void emit_break(struct cg_state         *s,
-                       struct ast_def *nullable current_function)
+static void emit_break(struct cg_state *s)
 {
   struct basic_block *target = s->code.loop_state.break_block;
   assert(target != NULL);
   unsigned saved_stacksize = s->code.stacksize;
-  emit_scope_cleanup(s, current_function,
-                     s->code.loop_state.scope_cleanup_at_loop,
+  emit_scope_cleanup(s, s->code.loop_state.scope_cleanup_at_loop,
                      /*value_passthrough=*/false);
   if (!cg_unreachable(s)) {
     if (s->code.loop_state.pop_on_break) {
@@ -1232,15 +1260,12 @@ struct binding_scope {
   struct idynarray generator_children;
 };
 
+static void emit_statement_list(struct cg_state           *s,
+                                struct ast_statement_list *statement_list);
 static void
-            emit_statement_list_with_function(struct cg_state           *s,
-                                              struct ast_statement_list *statement_list,
-                                              struct ast_def *nullable   current_function);
-static void emit_statement_list_with_function_from(
-    struct cg_state *s, struct ast_statement_list *statement_list,
-    struct ast_def *nullable current_function, unsigned first_statement);
-static void emit_statement(struct cg_state *s, union ast_statement *statement,
-                           struct ast_def *nullable current_function);
+            emit_statement_list_skip_first(struct cg_state           *s,
+                                           struct ast_statement_list *statement_list);
+static void emit_statement(struct cg_state *s, union ast_statement *statement);
 
 static bool symbol_array_contains(struct idynarray *array,
                                   struct symbol    *symbol)
@@ -1278,7 +1303,6 @@ static bool class_explicitly_binds_class_symbol(struct binding_scope *scope)
 }
 
 static void emit_scope_cleanup(struct cg_state              *s,
-                               struct ast_def *nullable      current_function,
                                union scope_cleanup *nullable stop,
                                bool                          value_passthrough)
 {
@@ -1328,8 +1352,7 @@ static void emit_scope_cleanup(struct cg_state              *s,
            * fallback paths. */
           cg_op_pop1(s, OPCODE_POP_TOP, 0);
         }
-        emit_statement_list_with_function(s, cleanup->finally.finally_body,
-                                          current_function);
+        emit_statement_list(s, cleanup->finally.finally_body);
       }
       break;
     case SCOPE_CLEANUP_WITHIN_FINALLY:
@@ -1369,20 +1392,14 @@ static bool statement_list_has_scope_annotation(
     const struct ast_statement_list *nullable statements);
 
 static void emit_if_constant_branch(struct cg_state *s, struct ast_if *if_stmt,
-                                    struct ast_def *nullable current_function,
-                                    bool                     condition_truth)
+                                    bool condition_truth)
 {
-  if (current_function == NULL
-      && (statement_list_has_scope_annotation(if_stmt->body)
-          || statement_list_has_scope_annotation(if_stmt->else_body))) {
-    s->code.setup_annotations = true;
-  }
   if (condition_truth) {
-    emit_statement_list_with_function(s, if_stmt->body, current_function);
+    emit_statement_list(s, if_stmt->body);
     return;
   }
   if (if_stmt->else_body != NULL) {
-    emit_statement_list_with_function(s, if_stmt->else_body, current_function);
+    emit_statement_list(s, if_stmt->else_body);
   }
 }
 
@@ -2316,72 +2333,20 @@ static void apply_function_bindings(struct cg_state *s, struct ast_def *def)
   }
 }
 
-static void emit_function_closure(struct cg_state            *s,
-                                  struct make_function_state *state,
-                                  struct ast_def             *def)
-{
-  (void)s;
-  const struct ast_scope_bindings *scope = scope_bindings_or_empty(def->scope);
-  unsigned                         num_freevars = scope->num_freevars;
-  if (num_freevars == 0) {
-    return;
-  }
-  state->num_closure_symbols = num_freevars;
-  state->closure_symbols = scope->freevars;
-}
-
-static union object *nullable
-statement_leading_docstring(union ast_statement *statement)
-{
-  if (ast_statement_type(statement) != AST_STATEMENT_EXPRESSION) return NULL;
-  union ast_expression *expression = statement->expression.expression;
-  if (ast_expression_type(expression) != AST_CONST) return NULL;
-  union object *doc = expression->cnst.object;
-  if (object_type(doc) != OBJECT_STRING) return NULL;
-  return doc;
-}
-
-static union object *nullable
-statement_list_leading_docstring(struct ast_statement_list *statement_list)
-{
-  if (statement_list->num_statements == 0) return NULL;
-  return statement_leading_docstring(statement_list->statements[0]);
-}
-
 static void emit_statement_list(struct cg_state           *s,
                                 struct ast_statement_list *statement_list)
 {
-  unsigned      first_statement = 0;
-  union object *doc = statement_list_leading_docstring(statement_list);
-  if (doc != NULL) {
-    if (!s->optimize_no_docstrings) {
-      union ast_statement *first = statement_list->statements[0];
-      cg_set_lineno(s, first->base.location.line);
-      cg_load_const(s, doc);
-      cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
-    }
-    first_statement = 1;
+  for (unsigned i = 0; i < statement_list->num_statements; ++i) {
+    emit_statement(s, statement_list->statements[i]);
   }
-  emit_statement_list_with_function_from(s, statement_list,
-                                         /*current_function=*/NULL,
-                                         first_statement);
 }
 
 static void
-emit_statement_list_with_function(struct cg_state           *s,
-                                  struct ast_statement_list *statement_list,
-                                  struct ast_def *nullable   current_function)
+emit_statement_list_skip_first(struct cg_state           *s,
+                               struct ast_statement_list *statement_list)
 {
-  emit_statement_list_with_function_from(s, statement_list, current_function,
-                                         /*first_statement=*/0);
-}
-
-static void emit_statement_list_with_function_from(
-    struct cg_state *s, struct ast_statement_list *statement_list,
-    struct ast_def *nullable current_function, unsigned first_statement)
-{
-  for (unsigned i = first_statement; i < statement_list->num_statements; ++i) {
-    emit_statement(s, statement_list->statements[i], current_function);
+  for (unsigned i = 1; i < statement_list->num_statements; ++i) {
+    emit_statement(s, statement_list->statements[i]);
   }
 }
 
@@ -2409,12 +2374,20 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   cg_set_function_docstring(s, s->optimize_no_docstrings ? NULL : doc);
   apply_function_bindings(s, def);
   cg_set_lineno(s, def->base.location.line);
-  emit_statement_list_with_function_from(s, def->body, def,
-                                         doc != NULL ? 1u : 0u);
+  if (doc != NULL) {
+    emit_statement_list_skip_first(s, def->body);
+  } else {
+    emit_statement_list(s, def->body);
+  }
   if (def->has_yield) {
     s->code.flags |= CO_GENERATOR;
   }
-  emit_function_closure(s, &state, def);
+  const struct ast_scope_bindings *scope = scope_bindings_or_empty(def->scope);
+  unsigned                         num_freevars = scope->num_freevars;
+  if (num_freevars > 0) {
+    state.num_closure_symbols = num_freevars;
+    state.closure_symbols = scope->freevars;
+  }
 
   if (def->async) {
     if (s->code.flags & CO_GENERATOR) {
@@ -2467,21 +2440,8 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__qualname__"));
 
   apply_class_bindings(s, class_stmt);
-  union object *doc = statement_list_leading_docstring(class_stmt->body);
-  unsigned      first_statement = 0;
-  if (doc != NULL) {
-    if (!s->optimize_no_docstrings) {
-      union ast_statement *first = class_stmt->body->statements[0];
-      cg_set_lineno(s, first->base.location.line);
-      cg_load_const(s, doc);
-      cg_store(s, symbol_table_get_or_insert(s->symbol_table, "__doc__"));
-    }
-    first_statement = 1;
-  }
   cg_set_lineno(s, class_stmt->base.location.line);
-  emit_statement_list_with_function_from(s, class_stmt->body,
-                                         /*current_function=*/NULL,
-                                         first_statement);
+  emit_nonfunction_statement_list(s, class_stmt->body);
   if (class_stmt->needs_class_cell) {
     if (!cg_unreachable(s)) {
       struct symbol *class_symbol
@@ -2526,8 +2486,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   cg_store(s, class_stmt->name);
 }
 
-static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
-                     struct ast_def *nullable current_function)
+static void emit_for(struct cg_state *s, struct ast_for *for_stmt)
 {
   if (cg_unreachable(s)) {
     return;
@@ -2535,11 +2494,10 @@ static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
   struct for_while_state state;
   emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression,
                  for_stmt->async);
-  emit_statement_list_with_function(s, for_stmt->body, current_function);
+  emit_statement_list(s, for_stmt->body);
   emit_for_else(s, &state);
   if (for_stmt->else_body != NULL) {
-    emit_statement_list_with_function(s, for_stmt->else_body,
-                                      current_function);
+    emit_statement_list(s, for_stmt->else_body);
   }
   emit_for_end(s, &state);
 }
@@ -2710,8 +2668,7 @@ static bool finally_body_needs_placeholder_statement_list(
   return false;
 }
 
-static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
-                    struct ast_def *nullable current_function)
+static void emit_if(struct cg_state *s, struct ast_if *if_stmt)
 {
   if (cg_unreachable(s)) {
     return;
@@ -2725,8 +2682,7 @@ static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
     if (condition_constant != NULL) {
       enum object_type condition_type = object_type(condition_constant);
       if (condition_type == OBJECT_TRUE || condition_type == OBJECT_FALSE) {
-        emit_if_constant_branch(s, if_stmt, current_function,
-                                condition_type == OBJECT_TRUE);
+        emit_if_constant_branch(s, if_stmt, condition_type == OBJECT_TRUE);
         return;
       }
     }
@@ -2734,15 +2690,15 @@ static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
 
   struct if_state state;
   emit_if_begin(s, &state, if_stmt->condition);
-  emit_statement_list_with_function(s, if_stmt->body, current_function);
+  emit_statement_list(s, if_stmt->body);
   for (unsigned i = 0; i < if_stmt->num_elifs; ++i) {
     struct ast_if_elif *elif_stmt = &if_stmt->elifs[i];
     emit_if_elif(s, &state, elif_stmt->condition);
-    emit_statement_list_with_function(s, elif_stmt->body, current_function);
+    emit_statement_list(s, elif_stmt->body);
   }
   if (if_stmt->else_body != NULL) {
     emit_if_else(s, &state);
-    emit_statement_list_with_function(s, if_stmt->else_body, current_function);
+    emit_statement_list(s, if_stmt->else_body);
   }
   emit_if_end(s, &state);
 }
@@ -2772,8 +2728,7 @@ emit_nonlocal_statement_node(struct cg_state *s, struct location location,
   }
 }
 
-static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
-                     struct ast_def *nullable current_function)
+static void emit_try(struct cg_state *s, struct ast_try *try_stmt)
 {
   if (cg_unreachable(s)) return;
 
@@ -2830,7 +2785,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
     s->code.scope_cleanup = (union scope_cleanup *)&except_cleanup;
   }
 
-  emit_statement_list_with_function(s, try_stmt->body, current_function);
+  emit_statement_list(s, try_stmt->body);
 
   /* Pop the except SETUP_FINALLY cleanup before entering except handlers. */
   if (num_excepts > 0) {
@@ -2896,8 +2851,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
         s->code.scope_cleanup = &pop_except_cleanup;
       }
 
-      emit_statement_list_with_function(s, except_stmt->body,
-                                        current_function);
+      emit_statement_list(s, except_stmt->body);
 
       /* Restore before emit_except_end emits its own cleanup. */
       s->code.scope_cleanup = pre_handler_pending;
@@ -2920,8 +2874,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
       cg_block_begin(s, try_else_block);
     }
 
-    emit_statement_list_with_function(s, try_stmt->else_body,
-                                      current_function);
+    emit_statement_list(s, try_stmt->else_body);
   }
 
   if (try_stmt->finally_body != NULL) {
@@ -2952,8 +2905,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
     };
     s->code.scope_cleanup = (union scope_cleanup *)&cleanup;
 
-    emit_statement_list_with_function(s, try_stmt->finally_body,
-                                      current_function);
+    emit_statement_list(s, try_stmt->finally_body);
 
     /* Keep the trailing END_FINALLY (and placeholder POP_TOP when present)
      * even when unreachable so line/block metadata stays consistent. */
@@ -2991,8 +2943,7 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
   }
 }
 
-static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
-                       struct ast_def *nullable current_function)
+static void emit_while(struct cg_state *s, struct ast_while *while_stmt)
 {
   if (cg_unreachable(s)) {
     return;
@@ -3004,8 +2955,7 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
     enum object_type condition_type = object_type(condition_constant);
     if (condition_type == OBJECT_FALSE) {
       if (while_stmt->else_body != NULL) {
-        emit_statement_list_with_function(s, while_stmt->else_body,
-                                          current_function);
+        emit_statement_list(s, while_stmt->else_body);
       }
       return;
     }
@@ -3016,7 +2966,7 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
                == AST_STATEMENT_RETURN) {
       /* Match CPython dead-block behavior for `while True: return ...`,
        * including cases with an unreachable `else` block. */
-      emit_statement_list_with_function(s, while_stmt->body, current_function);
+      emit_statement_list(s, while_stmt->body);
       return;
     }
 
@@ -3039,7 +2989,7 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
         .pop_on_break = false,
       };
 
-      emit_statement_list_with_function(s, while_stmt->body, current_function);
+      emit_statement_list(s, while_stmt->body);
 
       s->code.loop_state = saved;
       if (!cg_unreachable(s)) {
@@ -3074,11 +3024,10 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
     .pop_on_break = false,
   };
 
-  emit_statement_list_with_function(s, while_stmt->body, current_function);
+  emit_statement_list(s, while_stmt->body);
   emit_loop_else(s, &state);
   if (while_stmt->else_body != NULL) {
-    emit_statement_list_with_function(s, while_stmt->else_body,
-                                      current_function);
+    emit_statement_list(s, while_stmt->else_body);
   }
   emit_loop_end(s, &state);
 }
@@ -3149,8 +3098,7 @@ static void emit_with_cleanup(struct cg_state                 *s,
   cg_op_pop_push(s, OPCODE_END_FINALLY, 0, /*pop=*/6, /*push=*/0);
 }
 
-static void emit_with(struct cg_state *s, struct ast_with *with,
-                      struct ast_def *nullable current_function)
+static void emit_with(struct cg_state *s, struct ast_with *with)
 {
   if (cg_unreachable(s)) return;
 
@@ -3169,7 +3117,7 @@ static void emit_with(struct cg_state *s, struct ast_with *with,
     }
   }
 
-  emit_statement_list_with_function(s, with->body, current_function);
+  emit_statement_list(s, with->body);
   s->code.scope_cleanup = saved_scope_cleanup;
 
   for (unsigned i = num_items; i-- > 0;) {
@@ -3229,8 +3177,7 @@ static bool is_side_effect_free(union ast_expression *expression)
   return ast_expression_type(expression) == AST_CONST;
 }
 
-static void emit_return(struct cg_state *s, struct ast_return *return_stmt,
-                        struct ast_def *nullable current_function)
+static void emit_return(struct cg_state *s, struct ast_return *return_stmt)
 {
   if (cg_unreachable(s)) return;
 
@@ -3257,7 +3204,7 @@ static void emit_return(struct cg_state *s, struct ast_return *return_stmt,
     }
   }
 
-  emit_scope_cleanup(s, current_function, /*stop=*/NULL,
+  emit_scope_cleanup(s, /*stop=*/NULL,
                      /*value_passthrough=*/use_value_passthrough);
 
   if (tmp != NULL) {
@@ -3294,8 +3241,7 @@ static void emit_yield_from_statement(struct cg_state  *s,
   }
 }
 
-static void emit_statement(struct cg_state *s, union ast_statement *statement,
-                           struct ast_def *nullable current_function)
+static void emit_statement(struct cg_state *s, union ast_statement *statement)
 {
   cg_set_lineno(s, statement->base.location.line);
   switch (ast_statement_type(statement)) {
@@ -3313,13 +3259,13 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_augassign(s, &statement->augassign);
     return;
   case AST_STATEMENT_BREAK:
-    emit_break(s, current_function);
+    emit_break(s);
     return;
   case AST_STATEMENT_CLASS:
     emit_class(s, &statement->class_);
     return;
   case AST_STATEMENT_CONTINUE:
-    emit_continue(s, current_function);
+    emit_continue(s);
     return;
   case AST_STATEMENT_DEF:
     emit_def(s, &statement->def);
@@ -3331,7 +3277,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_expression_statement(s, &statement->expression);
     return;
   case AST_STATEMENT_FOR:
-    emit_for(s, &statement->for_, current_function);
+    emit_for(s, &statement->for_);
     return;
   case AST_STATEMENT_FROM_IMPORT:
     emit_from_import_node(s, &statement->from_import);
@@ -3341,7 +3287,7 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
                                &statement->global);
     return;
   case AST_STATEMENT_IF:
-    emit_if(s, &statement->if_, current_function);
+    emit_if(s, &statement->if_);
     return;
   case AST_STATEMENT_IMPORT:
     emit_import_node(s, &statement->import);
@@ -3356,16 +3302,16 @@ static void emit_statement(struct cg_state *s, union ast_statement *statement,
     emit_raise(s, &statement->raise);
     return;
   case AST_STATEMENT_RETURN:
-    emit_return(s, &statement->return_, current_function);
+    emit_return(s, &statement->return_);
     return;
   case AST_STATEMENT_TRY:
-    emit_try(s, &statement->try_, current_function);
+    emit_try(s, &statement->try_);
     return;
   case AST_STATEMENT_WHILE:
-    emit_while(s, &statement->while_, current_function);
+    emit_while(s, &statement->while_);
     return;
   case AST_STATEMENT_WITH:
-    emit_with(s, &statement->with, current_function);
+    emit_with(s, &statement->with);
     return;
   case AST_STATEMENT_YIELD:
     emit_yield_statement(s, &statement->yield);

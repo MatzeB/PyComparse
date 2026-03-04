@@ -501,12 +501,9 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     s->code.flags &= ~CO_NOFREE;
   }
 
-  unsigned prologue_length = 0;
-  if (s->code.setup_annotations) prologue_length += 2;
-
   // Jump relaxation: First assign minimum offsets necessary, then expand as
   // necessary.
-  unsigned            offset = prologue_length;
+  unsigned            offset = 0;
   struct basic_block *first_block = s->code.first_block;
   for (struct basic_block *block = first_block, *next; block != NULL;
        block = next) {
@@ -566,7 +563,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   do {
     changed = false;
 
-    unsigned offset = prologue_length;
+    unsigned offset = 0;
     for (struct basic_block *block = first_block; block != NULL;
          block = block->next) {
       unsigned offset_adjust_forward = 0;
@@ -585,9 +582,6 @@ union object *cg_code_end(struct cg_state *s, const char *name)
   // Emit code.
   struct arena *arena = object_intern_arena(s->objects);
   arena_grow_begin(arena, /*alignment=*/1);
-  if (s->code.setup_annotations) {
-    cg_op_with_arena(arena, OPCODE_SETUP_ANNOTATIONS, 0);
-  }
 
   for (struct basic_block *block = first_block, *next; block != NULL;
        block = next) {

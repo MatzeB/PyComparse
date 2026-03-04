@@ -59,6 +59,8 @@ union object;
    | CO_FUTURE_ANNOTATIONS)
 #define PyCF_MASK_OBSOLETE (CO_NESTED)
 
+#define PYCOMPARSE_SMALL_INT_MAX ((uint64_t)INT64_MAX)
+
 enum object_type {
   OBJECT_NULL = '0',
   OBJECT_NONE = 'N',

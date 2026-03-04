@@ -10,7 +10,6 @@ extern "C" {
 ASSUME_NONNULL_BEGIN
 
 struct ast_expression_list;
-struct ast_statement_list;
 struct object_intern;
 union ast_expression;
 union ast_statement;

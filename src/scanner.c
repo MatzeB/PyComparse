@@ -50,8 +50,6 @@
 #include "pycomparse/unicode_xid_table.h"
 #include "pycomparse/util.h"
 
-#define UNLIKELY(x) __builtin_expect((x), 0)
-
 #define IDENTIFIER_START_CASES_WITHOUT_B_F_R_U                                \
   'A' : case 'C':                                                             \
   case 'D':                                                                   \
@@ -222,8 +220,8 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 
 static void next_char(struct scanner_state *s)
 {
-  s->c = UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s)
-                                         : (unsigned char)*(s->p++);
+  s->c = PYCOMPARSE_UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s)
+                                                    : (unsigned char)*(s->p++);
 }
 
 static void eat_char(struct scanner_state *s, int c)
@@ -505,8 +503,6 @@ struct bigint_accum {
   uint32_t           capacity;
 };
 
-#define FAST_INT_MAX ((uint64_t)INT64_MAX)
-
 static void bigint_accum_free(struct bigint_accum *accum)
 {
   free(accum->digits);
@@ -618,7 +614,7 @@ static bool end_number_literal(struct scanner_state *s, uint64_t value,
   }
   if (big_value != NULL && big_value->length > 0) {
     s->token.u.object = bigint_accum_intern(s, big_value);
-  } else if (value <= FAST_INT_MAX) {
+  } else if (value <= PYCOMPARSE_SMALL_INT_MAX) {
     s->token.u.object = object_intern_int(s->objects, (int64_t)value);
   } else {
     struct bigint_accum value_as_bigint = { 0 };
@@ -692,7 +688,7 @@ static void scan_hexadecimal_integer(struct scanner_state *s)
       bigint_accum_mul_add(&big_value, 16, digit_value);
       continue;
     }
-    if (value > ((FAST_INT_MAX - digit_value) >> 4)) {
+    if (value > ((PYCOMPARSE_SMALL_INT_MAX - digit_value) >> 4)) {
       use_big_value = true;
       bigint_accum_init_from_u64(&big_value, value);
       bigint_accum_mul_add(&big_value, 16, digit_value);
@@ -746,7 +742,7 @@ static void scan_octal_integer(struct scanner_state *s)
       bigint_accum_mul_add(&big_value, 8, (uint32_t)digit_value);
       continue;
     }
-    if (value > ((FAST_INT_MAX - digit_value) >> 3)) {
+    if (value > ((PYCOMPARSE_SMALL_INT_MAX - digit_value) >> 3)) {
       use_big_value = true;
       bigint_accum_init_from_u64(&big_value, value);
       bigint_accum_mul_add(&big_value, 8, (uint32_t)digit_value);
@@ -794,7 +790,7 @@ static void scan_binary_integer(struct scanner_state *s)
       bigint_accum_mul_add(&big_value, 2, digit_value);
       continue;
     }
-    if (value > ((FAST_INT_MAX - digit_value) >> 1)) {
+    if (value > ((PYCOMPARSE_SMALL_INT_MAX - digit_value) >> 1)) {
       use_big_value = true;
       bigint_accum_init_from_u64(&big_value, value);
       bigint_accum_mul_add(&big_value, 2, digit_value);

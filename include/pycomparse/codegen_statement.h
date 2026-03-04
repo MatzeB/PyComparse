@@ -13,21 +13,16 @@ extern "C" {
 
 ASSUME_NONNULL_BEGIN
 
-struct ast_call;
 struct ast_comparison;
 struct ast_generator_expression;
 struct ast_lambda;
 struct ast_module;
-struct ast_statement_list;
 struct basic_block;
 struct cg_state;
-struct dotted_name;
-struct from_import_item;
 struct parameter;
 struct parameter_shape;
 struct symbol;
 union ast_expression;
-union ast_statement;
 
 struct make_function_state {
   bool                               annotations;
@@ -37,19 +32,6 @@ struct make_function_state {
   unsigned                           num_closure_symbols;
   struct symbol * nonnull * nullable closure_symbols;
   const char                        *qualname;
-};
-
-struct for_while_state {
-  struct basic_block           *else_or_footer;
-  struct loop_state             saved;
-  union scope_cleanup *nullable loop_iter_cleanup;
-  bool                          has_loop_iter_cleanup;
-  bool                          async_for;
-};
-
-struct if_state {
-  struct basic_block *nullable else_or_footer;
-  struct basic_block *nullable footer;
 };
 
 union object *emit_module(struct cg_state *s, struct ast_module *module);

@@ -34,6 +34,19 @@ struct try_state {
   struct basic_block *nullable footer;
 };
 
+struct for_while_state {
+  struct basic_block           *else_or_footer;
+  struct loop_state             saved;
+  union scope_cleanup *nullable loop_iter_cleanup;
+  bool                          has_loop_iter_cleanup;
+  bool                          async_for;
+};
+
+struct if_state {
+  struct basic_block *nullable else_or_footer;
+  struct basic_block *nullable footer;
+};
+
 enum scope_cleanup_kind {
   SCOPE_CLEANUP_LOOP_ITER,
   SCOPE_CLEANUP_POP_BLOCK,
@@ -769,11 +782,6 @@ static void emit_except_end(struct cg_state *s, struct try_state *state,
 static void emit_if_begin(struct cg_state *s, struct if_state *state,
                           union ast_expression *expression)
 {
-  if (cg_unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
-
   struct basic_block *then_block = cg_block_allocate(s);
   struct basic_block *else_or_footer = cg_block_allocate(s);
   emit_condjump_expr(s, expression,
@@ -790,7 +798,6 @@ static void emit_if_elif(struct cg_state *s, struct if_state *state,
                          union ast_expression *expression)
 {
   struct basic_block *else_block = state->else_or_footer;
-  if (else_block == NULL) return;
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
     footer = cg_block_allocate(s);
@@ -813,7 +820,6 @@ static void emit_if_elif(struct cg_state *s, struct if_state *state,
 static void emit_if_else(struct cg_state *s, struct if_state *state)
 {
   struct basic_block *else_block = state->else_or_footer;
-  if (else_block == NULL) return;
   struct basic_block *footer = state->footer;
   if (footer == NULL) {
     footer = cg_block_allocate(s);
@@ -832,7 +838,6 @@ static void emit_if_end(struct cg_state *s, struct if_state *state)
   struct basic_block *footer = state->footer;
   struct basic_block *else_or_footer = state->else_or_footer;
   if (footer == NULL) footer = else_or_footer;
-  if (footer == NULL) return;
   if (!cg_unreachable(s)) {
     cg_jump(s, footer);
   }
@@ -927,10 +932,6 @@ static void emit_for_begin(struct cg_state *s, struct for_while_state *state,
                            union ast_expression *targets,
                            union ast_expression *expression, bool async)
 {
-  if (cg_unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
   if (async) {
     emit_for_begin_async(s, state, targets, expression);
   } else {
@@ -1023,48 +1024,6 @@ static void emit_break(struct cg_state         *s,
     cg_jump(s, target);
   }
   s->code.stacksize = saved_stacksize;
-}
-
-static void emit_while_begin(struct cg_state *s, struct for_while_state *state,
-                             union ast_expression *expression)
-{
-  if (cg_unreachable(s)) {
-    memset(state, 0, sizeof(*state));
-    return;
-  }
-  struct basic_block *header = cg_block_allocate(s);
-  struct basic_block *body = cg_block_allocate(s);
-  struct basic_block *else_block = cg_block_allocate(s);
-  struct basic_block *footer = cg_block_allocate(s);
-
-  cg_jump(s, header);
-  cg_block_begin(s, header);
-
-  emit_condjump_expr(s, expression, /*true_block=*/body,
-                     /*false_block=*/else_block, /*next=*/body);
-
-  cg_block_begin(s, body);
-
-  state->else_or_footer = else_block;
-  state->saved = s->code.loop_state;
-  state->has_loop_iter_cleanup = false;
-  state->loop_iter_cleanup = NULL;
-  s->code.loop_state = (struct loop_state){
-    .continue_block = header,
-    .break_block = footer,
-    .scope_cleanup_at_loop = s->code.scope_cleanup,
-    .pop_on_break = false,
-  };
-}
-
-static void emit_while_else(struct cg_state *s, struct for_while_state *state)
-{
-  emit_loop_else(s, state);
-}
-
-static void emit_while_end(struct cg_state *s, struct for_while_state *state)
-{
-  emit_loop_end(s, state);
 }
 
 static void emit_decorator_calls(struct cg_state *s, unsigned num_decorators)
@@ -2570,6 +2529,9 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
 static void emit_for(struct cg_state *s, struct ast_for *for_stmt,
                      struct ast_def *nullable current_function)
 {
+  if (cg_unreachable(s)) {
+    return;
+  }
   struct for_while_state state;
   emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression,
                  for_stmt->async);
@@ -2751,6 +2713,10 @@ static bool finally_body_needs_placeholder_statement_list(
 static void emit_if(struct cg_state *s, struct ast_if *if_stmt,
                     struct ast_def *nullable current_function)
 {
+  if (cg_unreachable(s)) {
+    return;
+  }
+
   /* Keep symbol analysis unchanged but avoid emitting dead branches for
    * if-statements with compile-time boolean conditions and no elifs. */
   if (if_stmt->num_elifs == 0) {
@@ -3028,6 +2994,10 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt,
 static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
                        struct ast_def *nullable current_function)
 {
+  if (cg_unreachable(s)) {
+    return;
+  }
+
   union object *condition_constant
       = ast_expression_as_constant(while_stmt->condition);
   if (condition_constant != NULL) {
@@ -3080,15 +3050,37 @@ static void emit_while(struct cg_state *s, struct ast_while *while_stmt,
     }
   }
 
-  struct for_while_state state;
-  emit_while_begin(s, &state, while_stmt->condition);
+  struct basic_block *header = cg_block_allocate(s);
+  struct basic_block *body = cg_block_allocate(s);
+  struct basic_block *else_block = cg_block_allocate(s);
+  struct basic_block *footer = cg_block_allocate(s);
+
+  cg_jump(s, header);
+  cg_block_begin(s, header);
+
+  emit_condjump_expr(s, while_stmt->condition, /*true_block=*/body,
+                     /*false_block=*/else_block, /*next=*/body);
+
+  cg_block_begin(s, body);
+
+  struct for_while_state state = {
+    .else_or_footer = else_block,
+    .saved = s->code.loop_state,
+  };
+  s->code.loop_state = (struct loop_state){
+    .continue_block = header,
+    .break_block = footer,
+    .scope_cleanup_at_loop = s->code.scope_cleanup,
+    .pop_on_break = false,
+  };
+
   emit_statement_list_with_function(s, while_stmt->body, current_function);
-  emit_while_else(s, &state);
+  emit_loop_else(s, &state);
   if (while_stmt->else_body != NULL) {
     emit_statement_list_with_function(s, while_stmt->else_body,
                                       current_function);
   }
-  emit_while_end(s, &state);
+  emit_loop_end(s, &state);
 }
 
 static void emit_with_setup(struct cg_state           *s,

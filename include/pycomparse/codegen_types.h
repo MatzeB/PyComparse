@@ -15,9 +15,7 @@ extern "C" {
 
 ASSUME_NONNULL_BEGIN
 
-union object;
 struct diagnostics_state;
-struct ast_statement_list;
 union scope_cleanup;
 
 struct lnotab_mark {

@@ -23,7 +23,7 @@
 #include "pycomparse/token_kinds.h"
 #include "pycomparse/util.h"
 
-#define UNLIKELY(x) __builtin_expect((x), 0)
+#define MAX_NESTING_DEPTH 200
 
 enum precedence {
   PREC_INVALID,
@@ -259,7 +259,7 @@ static void error_expected_tok2(struct parser_state *s, enum token_kind kind0,
 static bool skip_till(struct parser_state *s,
                       enum token_kind      expected_token_kind)
 {
-  if (UNLIKELY(peek(s) != expected_token_kind)) {
+  if (PYCOMPARSE_UNLIKELY(peek(s) != expected_token_kind)) {
     error_expected_tok1(s, expected_token_kind);
 
     add_anchor(s, expected_token_kind);
@@ -2282,8 +2282,6 @@ static const struct postfix_expression_parser postfix_parsers[] = {
     = { .func = parse_floor_div,          .precedence = PREC_TERM       },
   /* clang-format on */
 };
-
-#define MAX_NESTING_DEPTH 200
 
 union ast_expression *parse_expression(struct parser_state *s,
                                        enum precedence      precedence)

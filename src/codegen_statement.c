@@ -68,10 +68,9 @@ struct except_as_scope_cleanup {
 };
 
 struct finally_scope_cleanup {
-  struct scope_cleanup_base           base;
-  bool                                finally_needs_placeholder;
-  struct basic_block *nullable        finally_block;
-  struct ast_statement_list *nullable finally_body;
+  struct scope_cleanup_base    base;
+  bool                         finally_needs_placeholder;
+  struct basic_block *nullable finally_block;
 };
 
 struct with_scope_cleanup {
@@ -1260,11 +1259,6 @@ struct binding_scope {
   struct idynarray generator_children;
 };
 
-static void emit_statement_list(struct cg_state           *s,
-                                struct ast_statement_list *statement_list);
-static void
-            emit_statement_list_skip_first(struct cg_state           *s,
-                                           struct ast_statement_list *statement_list);
 static void emit_statement(struct cg_state *s, union ast_statement *statement);
 
 static bool symbol_array_contains(struct idynarray *array,
@@ -1326,33 +1320,25 @@ static void emit_scope_cleanup(struct cg_state              *s,
       break;
     case SCOPE_CLEANUP_FINALLY:
       cg_op(s, OPCODE_POP_BLOCK, 0);
-
-      if (cleanup->finally.finally_block != NULL) {
-        if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
-          /* Preserve the return value across the finally call by removing the
-           * pre-SETUP_FINALLY placeholder before CALL_FINALLY runs. */
-          cg_op(s, OPCODE_ROT_TWO, 0);
-          cg_op_pop1(s, OPCODE_POP_TOP, 0);
-        }
-        struct basic_block *after_call_finally = cg_block_allocate(s);
-        cg_condjump(s, OPCODE_CALL_FINALLY, cleanup->finally.finally_block,
-                    /*fallthrough=*/after_call_finally);
-        cg_block_begin(s, after_call_finally);
-        if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
-          /* CALL_FINALLY returns with an extra token above/below the preserved
-           * value; rotate and discard it before continuing the return path. */
-          cg_op(s, OPCODE_ROT_TWO, 0);
-          cg_op_pop1(s, OPCODE_POP_TOP, 0);
-        } else if (cleanup->finally.finally_needs_placeholder) {
-          cg_op_pop1(s, OPCODE_POP_TOP, 0);
-        }
-      } else {
-        if (cleanup->finally.finally_needs_placeholder) {
-          /* Keep loop iterator stack tracking stable in synthetic cleanup
-           * fallback paths. */
-          cg_op_pop1(s, OPCODE_POP_TOP, 0);
-        }
-        emit_statement_list(s, cleanup->finally.finally_body);
+      struct basic_block *finally_block = cleanup->finally.finally_block;
+      assert(finally_block != NULL);
+      if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
+        /* Preserve the return value across the finally call by removing the
+         * pre-SETUP_FINALLY placeholder before CALL_FINALLY runs. */
+        cg_op(s, OPCODE_ROT_TWO, 0);
+        cg_op_pop1(s, OPCODE_POP_TOP, 0);
+      }
+      struct basic_block *after_call_finally = cg_block_allocate(s);
+      cg_condjump(s, OPCODE_CALL_FINALLY, finally_block,
+                  /*fallthrough=*/after_call_finally);
+      cg_block_begin(s, after_call_finally);
+      if (value_passthrough && cleanup->finally.finally_needs_placeholder) {
+        /* CALL_FINALLY returns with an extra token above/below the preserved
+         * value; rotate and discard it before continuing the return path. */
+        cg_op(s, OPCODE_ROT_TWO, 0);
+        cg_op_pop1(s, OPCODE_POP_TOP, 0);
+      } else if (cleanup->finally.finally_needs_placeholder) {
+        cg_op_pop1(s, OPCODE_POP_TOP, 0);
       }
       break;
     case SCOPE_CLEANUP_WITHIN_FINALLY:
@@ -1387,9 +1373,6 @@ static void emit_scope_cleanup(struct cg_state              *s,
   }
   s->code.scope_cleanup = saved_cleanup;
 }
-
-static bool statement_list_has_scope_annotation(
-    const struct ast_statement_list *nullable statements);
 
 static void emit_if_constant_branch(struct cg_state *s, struct ast_if *if_stmt,
                                     bool condition_truth)
@@ -2530,9 +2513,6 @@ static void emit_global_statement_node(struct cg_state   *s,
   }
 }
 
-static bool statement_list_has_scope_annotation(
-    const struct ast_statement_list *nullable statements);
-
 static bool
 statement_has_scope_annotation(const union ast_statement *statement)
 {
@@ -2763,7 +2743,6 @@ static void emit_try(struct cg_state *s, struct ast_try *try_stmt)
       },
       .finally_needs_placeholder = finally_needs_placeholder,
       .finally_block = state.finally_block,
-      .finally_body = try_stmt->finally_body,
     };
     s->code.scope_cleanup = (union scope_cleanup *)&finally_cleanup;
   }

@@ -1940,6 +1940,7 @@ static bool scan_indentation(struct scanner_state *s)
   }
 
   unsigned column = 0;
+  bool     saw_blank_or_comment_line = false;
   for (;;) {
     switch (s->c) {
     case '\r':
@@ -1953,6 +1954,7 @@ static bool scan_indentation(struct scanner_state *s)
       // TODO: empty line as NEWLINE in interactive mode
       ++s->line;
       column = 0;
+      saw_blank_or_comment_line = true;
       continue;
     case ' ':
       scan_indentation_spaces(s, &column);
@@ -1975,6 +1977,14 @@ static bool scan_indentation(struct scanner_state *s)
       }
       /* Trailing spaces before EOF are not real indentation. */
       column = 0;
+      if (s->single_input_mode && s->last_line_indent > 0
+          && !saw_blank_or_comment_line) {
+        /* In single-input mode, keep waiting after an indented line until
+         * the user enters another logical line (e.g. a blank line). */
+        s->incomplete_input = true;
+        s->token.kind = T_EOF;
+        return true;
+      }
       if (s->last_line_indent > 0) break;
       s->token.kind = T_EOF;
       return true;

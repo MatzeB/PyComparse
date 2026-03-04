@@ -219,8 +219,13 @@ def run_parser_tests(
         interactive_tests = [
             (
                 "interactive_if_block",
-                "if True:\n    x = 1\n",
-                ["incomplete", "ok"],
+                "if True:\n    x = 1\n\n",
+                ["incomplete", "incomplete", "ok"],
+            ),
+            (
+                "interactive_def_block_matmul",
+                "def foo(a, b):\n    print(a @ b)\n\n",
+                ["incomplete", "incomplete", "ok"],
             ),
             (
                 "interactive_parenthesized_expression",

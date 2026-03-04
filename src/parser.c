@@ -657,7 +657,7 @@ static inline union ast_expression *
 reject_starred_expression(struct parser_state *s, union ast_expression *e)
 {
   enum ast_expression_type type = ast_expression_type(e);
-  if (type == AST_UNEXPR_STAR
+  if (type == AST_UNEXPR_STAR || type == AST_UNEXPR_STAR_STAR
       || (type == AST_EXPRESSION_LIST
           && e->expression_list.has_star_expression)) {
     return error_starred_expression_not_allowed(s, get_expression_location(e));

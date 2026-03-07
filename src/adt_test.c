@@ -115,7 +115,7 @@ static void string_set_free(struct string_set *set)
 static const char *string_set_get_or_insert(struct string_set *set,
                                             const char        *key)
 {
-  unsigned hash = fnv_hash_cstring(key);
+  unsigned hash = hash_cstring(key);
   for (;;) {
     struct hash_set_chain_iteration_state c;
     hash_set_chain_iteration_begin(&c, &set->set, hash);

@@ -22,12 +22,11 @@ struct object_intern_object_bucket {
 static unsigned fnv_hash_mem(enum object_type type, uint32_t length,
                              const void *data)
 {
-  unsigned hash = fnv_hash_init();
-  hash ^= (unsigned)type;
-  hash *= 16777619u;
-  hash ^= length;
-  hash *= 16777619u;
-  return fnv_hash_append(hash, length, data);
+  uint32_t type_as_u32 = (uint32_t)type;
+  unsigned hash = hash_init();
+  hash = hash_append(hash, sizeof(type_as_u32), &type_as_u32);
+  hash = hash_append(hash, sizeof(length), &length);
+  return hash_append(hash, length, data);
 }
 
 static unsigned fnv_hash_int(int64_t value)
@@ -56,7 +55,7 @@ static bool float_equal(const union object *object, double value)
 static unsigned fnv_hash_complex(double real, double imag)
 {
   unsigned hash = fnv_hash_mem(OBJECT_COMPLEX, sizeof(real), &real);
-  return fnv_hash_append(hash, sizeof(imag), &imag);
+  return hash_append(hash, sizeof(imag), &imag);
 }
 
 static bool complex_equal(const union object *object, double real, double imag)

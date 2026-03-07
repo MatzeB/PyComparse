@@ -11,6 +11,71 @@ option(PYCOMPARSE_ENABLE_SANITIZERS
 set(PYCOMPARSE_PGO_MODE "off" CACHE STRING "PGO mode: off, generate, use")
 set_property(CACHE PYCOMPARSE_PGO_MODE PROPERTY STRINGS off generate use)
 set(PYCOMPARSE_PGO_DATA "" CACHE FILEPATH "Path to PGO profile data for use-mode")
+set(PYCOMPARSE_MARCH "auto" CACHE STRING
+    "Target CPU for -march (for example: auto, native, x86-64-v2, x86-64-v3)")
+
+set(PYCOMPARSE_TARGET_IS_X86 FALSE)
+set(PYCOMPARSE_TARGET_IS_X86_64 FALSE)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|X86_64)$")
+  set(PYCOMPARSE_TARGET_IS_X86 TRUE)
+  set(PYCOMPARSE_TARGET_IS_X86_64 TRUE)
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$")
+  set(PYCOMPARSE_TARGET_IS_X86 TRUE)
+endif()
+
+set(PYCOMPARSE_MARCH_USER_SET TRUE)
+if (PYCOMPARSE_MARCH STREQUAL "" OR PYCOMPARSE_MARCH STREQUAL "auto")
+  set(PYCOMPARSE_MARCH_USER_SET FALSE)
+  if (PYCOMPARSE_TARGET_IS_X86_64)
+    set(PYCOMPARSE_EFFECTIVE_MARCH "x86-64-v3")
+  else()
+    set(PYCOMPARSE_EFFECTIVE_MARCH "")
+  endif()
+else()
+  set(PYCOMPARSE_EFFECTIVE_MARCH "${PYCOMPARSE_MARCH}")
+endif()
+
+if (NOT PYCOMPARSE_EFFECTIVE_MARCH STREQUAL "")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=${PYCOMPARSE_EFFECTIVE_MARCH}")
+  message(STATUS "pycomparse -march: ${PYCOMPARSE_EFFECTIVE_MARCH} "
+                 "(PYCOMPARSE_MARCH=${PYCOMPARSE_MARCH})")
+else()
+  message(STATUS "pycomparse -march: compiler default "
+                 "(PYCOMPARSE_MARCH=${PYCOMPARSE_MARCH})")
+endif()
+
+set(PYCOMPARSE_WARN_DEFAULT_X86_64_V3 FALSE)
+set(PYCOMPARSE_X86_64_V3_MISSING_FEATURES "")
+if ((NOT PYCOMPARSE_MARCH_USER_SET)
+    AND PYCOMPARSE_TARGET_IS_X86_64
+    AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|X86_64|i[3-6]86|x86)$"
+    AND EXISTS "/proc/cpuinfo")
+  file(READ "/proc/cpuinfo" PYCOMPARSE_CPUINFO_TEXT)
+  string(REGEX MATCH "flags[ \t]*:[^\n]*"
+         PYCOMPARSE_CPUINFO_FLAGS_LINE "${PYCOMPARSE_CPUINFO_TEXT}")
+  if (NOT PYCOMPARSE_CPUINFO_FLAGS_LINE STREQUAL "")
+    set(PYCOMPARSE_X86_64_V3_REQUIRED_FLAGS
+        avx avx2 bmi1 bmi2 f16c fma movbe popcnt sse4_2 xsave)
+    foreach(PYCOMPARSE_REQ_FLAG IN LISTS PYCOMPARSE_X86_64_V3_REQUIRED_FLAGS)
+      if (NOT PYCOMPARSE_CPUINFO_FLAGS_LINE
+          MATCHES "(^|[ \t:])${PYCOMPARSE_REQ_FLAG}([ \t]|$)")
+        list(APPEND PYCOMPARSE_X86_64_V3_MISSING_LIST
+             "${PYCOMPARSE_REQ_FLAG}")
+      endif()
+    endforeach()
+    foreach(PYCOMPARSE_MISSING_FLAG IN LISTS PYCOMPARSE_X86_64_V3_MISSING_LIST)
+      if (PYCOMPARSE_X86_64_V3_MISSING_FEATURES STREQUAL "")
+        set(PYCOMPARSE_X86_64_V3_MISSING_FEATURES "${PYCOMPARSE_MISSING_FLAG}")
+      else()
+        set(PYCOMPARSE_X86_64_V3_MISSING_FEATURES
+            "${PYCOMPARSE_X86_64_V3_MISSING_FEATURES}, ${PYCOMPARSE_MISSING_FLAG}")
+      endif()
+    endforeach()
+    if (NOT PYCOMPARSE_X86_64_V3_MISSING_FEATURES STREQUAL "")
+      set(PYCOMPARSE_WARN_DEFAULT_X86_64_V3 TRUE)
+    endif()
+  endif()
+endif()
 
 string(TOLOWER "${PYCOMPARSE_PGO_MODE}" PYCOMPARSE_PGO_MODE_LOWER)
 if (NOT PYCOMPARSE_PGO_MODE_LOWER MATCHES "^(off|generate|use)$")
@@ -203,4 +268,20 @@ if (PYCOMPARSE_ENABLE_FUZZER)
     -fsanitize=fuzzer,address,undefined)
   target_link_libraries(fuzz_compile PRIVATE
     ${PYCOMPARSE_ICONV_TARGET} ${PYCOMPARSE_ICONV_LIBRARIES})
+endif()
+
+if (PYCOMPARSE_WARN_DEFAULT_X86_64_V3)
+  message(WARNING
+    "\n"
+    "=====================================================================\n"
+    "pycomparse defaulted to -march=x86-64-v3 (PYCOMPARSE_MARCH=auto),\n"
+    "but this machine appears to miss required x86-64-v3 CPU features:\n"
+    "  ${PYCOMPARSE_X86_64_V3_MISSING_FEATURES}\n"
+    "\n"
+    "This binary may fail with an illegal-instruction error on this host.\n"
+    "Hint: reconfigure with an explicit fallback, for example:\n"
+    "  -DPYCOMPARSE_MARCH=x86-64-v2\n"
+    "or:\n"
+    "  -DPYCOMPARSE_MARCH=native\n"
+    "=====================================================================\n")
 endif()

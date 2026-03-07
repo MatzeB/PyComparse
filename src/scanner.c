@@ -36,6 +36,7 @@
 
 #include "pycomparse/adt/arena.h"
 #include "pycomparse/adt/dynmemory.h"
+#include "pycomparse/adt/hash.h"
 #include "pycomparse/diagnostics.h"
 #include "pycomparse/encoding.h"
 #include "pycomparse/object_intern.h"
@@ -430,12 +431,14 @@ static void scan_line_comment(struct scanner_state *s)
  * `has_non_ascii` indicates whether non-ASCII bytes have already been seen
  * (e.g. from the identifier start character). */
 static void scan_identifier_continue(struct scanner_state *s,
-                                     struct arena *arena, bool has_non_ascii)
+                                     struct arena *arena, bool has_non_ascii,
+                                     unsigned hash)
 {
   for (;;) {
     switch (s->c) {
     case IDENTIFIER_CASES:
       arena_grow_char(arena, (char)s->c);
+      hash = hash_append_byte(hash, (unsigned char)s->c);
       next_char(s);
       continue;
     default:
@@ -447,6 +450,8 @@ static void scan_identifier_continue(struct scanner_state *s,
           has_non_ascii = true;
           for (int i = 0; i < len; i++)
             arena_grow_char(arena, utf8[i]);
+          for (int i = 0; i < len; ++i)
+            hash = hash_append_byte(hash, (unsigned char)utf8[i]);
           next_char(s);
           continue;
         }
@@ -474,14 +479,17 @@ static void scan_identifier_continue(struct scanner_state *s,
       /* NFKC result fits (it's always <= original length for identifiers).
        * Truncate the arena grow region to the normalized length. */
       arena_grow_truncate(arena, (size_t)nfkc_len);
+      raw_len = (size_t)nfkc_len;
     }
     /* If nfkc_normalize returns -1 (shouldn't happen for valid identifiers),
      * fall through and use the raw string. */
+    hash = hash_append(hash_init(), (uint32_t)raw_len, raw);
   }
 
   arena_grow_char(arena, '\0');
   char          *string = arena_grow_finish(arena);
-  struct symbol *symbol = symbol_table_get_or_insert(s->symbol_table, string);
+  struct symbol *symbol
+      = symbol_table_get_or_insert_prehashed(s->symbol_table, string, hash);
   if (symbol->string != string) {
     arena_free_to(arena, string);
   }
@@ -494,10 +502,15 @@ static void scan_identifier(struct scanner_state *s, char first_char,
                             char second_char)
 {
   struct arena *arena = &s->symbol_table->arena;
+  unsigned      hash = hash_init();
   arena_grow_begin(arena, string_alignment);
   arena_grow_char(arena, first_char);
-  if (second_char != 0) arena_grow_char(arena, second_char);
-  scan_identifier_continue(s, arena, /*has_non_ascii=*/false);
+  hash = hash_append_byte(hash, (unsigned char)first_char);
+  if (second_char != 0) {
+    arena_grow_char(arena, second_char);
+    hash = hash_append_byte(hash, (unsigned char)second_char);
+  }
+  scan_identifier_continue(s, arena, /*has_non_ascii=*/false, hash);
 }
 
 struct bigint_accum {
@@ -2504,11 +2517,14 @@ begin_new_line:
         int      len = decode_utf8(s, &cp, utf8);
         if (len && is_xid_start(cp)) {
           struct arena *arena = &s->symbol_table->arena;
+          unsigned      hash = hash_init();
           arena_grow_begin(arena, string_alignment);
-          for (int i = 0; i < len; i++)
+          for (int i = 0; i < len; i++) {
             arena_grow_char(arena, utf8[i]);
+            hash = hash_append_byte(hash, (unsigned char)utf8[i]);
+          }
           next_char(s);
-          scan_identifier_continue(s, arena, /*has_non_ascii=*/true);
+          scan_identifier_continue(s, arena, /*has_non_ascii=*/true, hash);
           return;
         }
         /* Invalid: not a valid UTF-8 sequence or not XID_Start. */

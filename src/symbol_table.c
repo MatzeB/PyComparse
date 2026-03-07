@@ -60,10 +60,10 @@ static void symbol_table_resize(struct symbol_table *symbol_table,
   free(old_buckets);
 }
 
-struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
-                                          const char          *string)
+static struct symbol *
+symbol_table_get_or_insert_impl(struct symbol_table *symbol_table,
+                                const char *string, unsigned hash)
 {
-  unsigned                              hash = fnv_hash_cstring(string);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
   struct symbol_table_bucket *buckets = symbol_table->buckets;
@@ -92,13 +92,27 @@ struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
   }
 }
 
+struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
+                                          const char          *string)
+{
+  unsigned hash = hash_cstring(string);
+  return symbol_table_get_or_insert_impl(symbol_table, string, hash);
+}
+
+struct symbol *
+symbol_table_get_or_insert_prehashed(struct symbol_table *symbol_table,
+                                     const char *string, unsigned hash)
+{
+  return symbol_table_get_or_insert_impl(symbol_table, string, hash);
+}
+
 static void symbol_table_insert_predefined(struct symbol_table *symbol_table,
                                            const char          *string,
                                            uint16_t             token_kind)
 {
   struct symbol *symbol
       = symbol_table_new_symbol(symbol_table, string, token_kind);
-  unsigned hash = fnv_hash_cstring(string);
+  unsigned hash = hash_cstring(string);
   symbol_table_insert_new(symbol_table, symbol, hash);
 }
 

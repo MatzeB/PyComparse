@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 ## Overview
 
-PyParse is a Python bytecode compiler implemented in C. It consists of a scanner (lexer), parser, and bytecode generator that compiles Python source code to Python bytecode objects (.pyc files).
+pycomparse is a Python bytecode compiler implemented in C. It consists of a scanner (lexer), parser, and bytecode generator that compiles Python source code to Python bytecode objects (.pyc files).
 
 ## Build System
 
@@ -16,7 +16,7 @@ ninja --quiet -C build
 ```
 
 The build produces three main executables:
-- `arena_test` - Tests for the arena memory allocator
+- `adt_test` - C unit tests for ADT components
 - `scanner_test` - Tests for the lexical scanner
 - `pycomparse` - Main parser/compiler that converts Python source to bytecode
 
@@ -35,8 +35,8 @@ ninja --quiet -C build
 ```
 
 ### Performance Builds
-For performance profiling/benchmarking, use an optimized CMake build and do
-not rely on the default build type:
+For local profiling/debugging (for example `perf`/`valgrind`), use an optimized
+`Release` CMake build and do not rely on the default build type:
 ```bash
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 ninja --quiet -C build-release
@@ -44,15 +44,28 @@ ninja --quiet -C build-release
 Use `build-release/pycomparse` (or an equivalent `-O3 -DNDEBUG` binary) for
 `perf`/`valgrind` runs.
 
-For PGO + LTO builds, use:
+For benchmark numbers and commit-to-commit performance comparisons, use
+**PGO + LTO** binaries (required), not plain `Release`.
+
+Build PGO + LTO with:
 ```bash
 CMAKE_GENERATOR=Ninja scripts/build_pgo_lto.sh
 ```
-The helper performs:
+The script performs:
 1. Instrumented `Release` build (`PYCOMPARSE_PGO_MODE=generate`, `PYCOMPARSE_ENABLE_LTO=ON`)
 2. Training run (default workload or `--train-cmd`)
 3. Profile merge (`llvm-profdata`)
 4. Final optimized `Release` build (`PYCOMPARSE_PGO_MODE=use`, `PYCOMPARSE_PGO_DATA=...`)
+
+Use the PGO+LTO binary with the benchmark script (requires `cpython-3.8/` to
+be present locally — not tracked in git):
+```bash
+uv run python scripts/benchmark_compile_perf.py \
+  --tested-compiler build-pgo-lto/pycomparse
+```
+
+For pycomparse-vs-pycomparse A/B, set both baseline and tested compiler
+options (see `scripts/benchmark_compile_perf.py --help`).
 
 ### Testing
 ```bash
@@ -64,7 +77,6 @@ includes `test/compile_only/`.  It also runs scanner tokenization checks.
 Use `uv run scripts/test.py parser` or `uv run scripts/test.py scan` to run
 only one suite.
 Use `--compiler <path>` to override the compiler binary.
-Note: scan mode currently has known pre-existing mismatches in this repository.
 
 ### Code Quality
 ```bash
@@ -85,14 +97,13 @@ uv run scripts/test.py
 - User preference: use detailed commit messages with bullet points in the body.
 - User preference: do not mention routine/normal testing activity in commit messages.
 - User preference: keep commit message line length to 80 characters.
-- For Codex: do not use multiple `-m` options with `git commit`; write the
-  commit message via a single message source (for example, an editor or
-  `-F`).
+- Do not use multiple `-m` options with `git commit`; write the commit message
+  via a single message source (for example, an editor or `-F`). (Codex-prone.)
 
 ## Development
 
-- Do NOT use plain `python3` as a reference. It is likely not version 3.8 so 
-  has different behavior what is expected for pycomparse. Use something like 
+- Do NOT use plain `python3` as a reference. It is likely not version 3.8 so
+  has different behavior what is expected for pycomparse. Use something like
   `uv run python` to get a python with the right version.
 - Every commit adding a new feature or fixing an important bug should have a test
   (unless it is especially hard/impossible to test).
@@ -102,65 +113,53 @@ uv run scripts/test.py
 build/pycomparse --out /tmp/output.pyc test/simple.py && uv run python /tmp/output.pyc
 ```
 
-### Compiling and print bytecode for reference compiler
+### Compiling and printing bytecode for reference compiler
 ```bash
-uv run scripts/decode.py /tmp/test.py
+uv run scripts/decode.py test/simple.py
 ```
 
-### Compile and print bytecode for PyComparse
+### Compiling and printing bytecode for PyComparse
 - remember to build first
 ```bash
-build/pycomparse --out /tmp/test.pyc /tmp/test.py && uv run scripts/decode.py /tmp/test.pyc
+build/pycomparse --out /tmp/test.pyc test/simple.py && uv run scripts/decode.py /tmp/test.pyc
 ```
 
 ## Architecture
 
-### Core Components
+Compilation pipeline:
+1. `src/scanner.c` tokenizes source and interns identifiers/literals via
+   `symbol_table` and `object_intern`.
+2. `src/parser.c` parses tokens into an AST
+   (`include/pycomparse/ast*_types.h`).
+3. `src/ast_fold_constants.c` performs constant folding on the AST.
+4. `src/codegen*.c` does scope/binding analysis and emits Python bytecode/code
+   objects.
+5. `src/writer.c` serializes code objects to `.pyc`; `src/diagnostics.c`
+   manages error reporting.
 
-1. **Scanner** (`src/scanner.c`, `include/pycomparse/scanner.h`) - Lexical analysis
-   - Tokenizes Python source code
-   - Handles Python-specific tokens (keywords, operators, literals)
-   - Manages symbol table for identifiers
-
-2. **Parser** (`src/parser.c`, `include/pycomparse/parser.h`) - Syntax analysis and AST generation
-   - Builds Abstract Syntax Tree from tokens
-   - Handles Python grammar rules
-   - Supports expressions, statements, and control flow
-
-3. **AST** (`src/ast.c`, `include/pycomparse/ast.h`) - Abstract Syntax Tree representation
-   - Defines all AST node types in `include/pycomparse/ast_types.h`
-   - Handles expression types (binary ops, calls, comprehensions, etc.)
-   - Statement types (assignments, control flow, function/class definitions)
-
-4. **Code Generator** (`src/codegen*.c`, `include/pycomparse/codegen*.h`) - Bytecode emission
-   - Converts AST to Python bytecode
-   - Manages bytecode optimization and stack tracking
-   - Handles different code contexts (module, function, class)
-
-5. **Object System** (`src/object*.c`, `include/pycomparse/object*.h`) - Python object representation
-   - Implements Python object model in C
-   - Handles strings, numbers, code objects, etc.
-   - Object interning for performance
-
-6. **Symbol Tables** (`src/symbol_table.c`, `include/pycomparse/symbol_table.h`) - Name resolution
-   - Tracks variable scopes and bindings
-   - Manages local vs global variable resolution
-
-### Data Structures
-
-- **ADT Library** (`include/pycomparse/adt/`) - Core data structures (arena allocator, dynamic arrays, hash sets, stacks)
-- **Arena Memory Management** - Custom allocator for efficient memory management
-- **Token System** (`include/pycomparse/tokens.h`, `include/pycomparse/token_kinds.h`) - Token definitions and utilities
+Core support modules:
+- `src/object*.c`, `src/object_intern.c`: object model and intern pools.
+- `src/symbol_table.c`: symbol interning and keyword prepopulation.
+- `src/diagnostics.c`: diagnostic construction, storage, and formatting.
+- `include/pycomparse/adt/`:
+  - `.../arena.h`: bump allocator used throughout parsing/codegen.
+  - `.../idynarray.h`: small-buffer-friendly growable arrays.
+  - `.../hashset.h`: open-addressed hash set.
+  - `.../hash.h`: hashing functions.
+  - `.../stack.h`: lightweight stack.
+  - `.../dynmemory.h`, `.../bitfiddle.h`: low-level utilities.
+- `src/unicode_*.c`: identifier/normalization lookup tables used by scanner.
 
 ## Key Implementation Details
 
 - Uses arena-based memory allocation for performance
-- Implements Python's operator precedence and associativity rules
+- Uses recursive descent parsing with precedence climbing for expressions
+- Uses anchor-token sets for parser error recovery
 - Generates Python 3.8.20 compatible bytecode
-- Supports most Python language constructs (see TODO in README.md for missing features)
 
 ## Test Structure
 
+- `adt_test` - C unit tests for ADT components (`src/adt_test.c`)
 - `test/*.py` - Positive test cases that should compile and run correctly
 - `test/errors/*.py` - Error test cases with expected error output in `.expected` files
-- `test2/` - Additional test files
+- `test/compile_only/` - Tests that must compile successfully but are not executed

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark CPython vs pycomparse compile performance on Python sources."""
+"""Benchmark baseline vs tested compiler compile performance on Python sources."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import statistics
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,15 @@ py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)
 """
 
 FILE_COL_WIDTH = 43
+
+
+@dataclass(frozen=True)
+class CompilerSpec:
+    name: str
+    compiler_kind: str
+    python_cmd: list[str] | None = None
+    compiler_path: Path | None = None
+    env: dict[str, str] | None = None
 
 
 def commandline_option_provided(option: str) -> bool:
@@ -185,7 +195,8 @@ def configure_cpu_affinity(spec: str) -> tuple[str, str | None]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Benchmark compile speed of CPython (uv run python) vs pycomparse. "
+            "Benchmark compile speed of baseline vs tested compilers. "
+            "Defaults to baseline=python and tested=pycomparse. "
             "By default, benchmarks the top N largest files in cpython-3.8/Lib."
         )
     )
@@ -206,34 +217,63 @@ def parse_args() -> argparse.Namespace:
         help="Number of largest files to benchmark from --lib-root (default: 20).",
     )
     parser.add_argument(
-        "--tested",
-        "--parser-test",
-        dest="tested",
+        "--tested-compiler",
+        dest="tested_compiler",
         default="build-release/pycomparse",
         help=(
-            "Path to tested compiler executable "
-            "(default: build-release/pycomparse). "
-            "Alias: --parser-test."
+            "Path to tested pycomparse compiler executable when "
+            "--tested-compiler-kind=pycomparse "
+            "(default: build-release/pycomparse)."
         ),
     )
     parser.add_argument(
-        "--baseline",
-        "--cpython-cmd",
-        dest="baseline",
+        "--tested-compiler-kind",
+        choices=("python", "pycomparse"),
+        default="pycomparse",
+        help="Compiler kind for tested side (default: pycomparse).",
+    )
+    parser.add_argument(
+        "--tested-python-cmd",
         default="uv run python",
-        help='Baseline compiler command (default: "uv run python"). Alias: --cpython-cmd.',
+        help=(
+            "Python command for tested side when "
+            '--tested-compiler-kind=python (default: "uv run python").'
+        ),
+    )
+    parser.add_argument(
+        "--baseline-python-cmd",
+        dest="baseline_python_cmd",
+        default="uv run python",
+        help=(
+            "Baseline Python command when --baseline-compiler-kind=python "
+            '(default: "uv run python").'
+        ),
+    )
+    parser.add_argument(
+        "--baseline-compiler-kind",
+        choices=("python", "pycomparse"),
+        default="python",
+        help="Compiler kind for baseline side (default: python).",
+    )
+    parser.add_argument(
+        "--baseline-compiler",
+        default="",
+        help=(
+            "Path to baseline pycomparse compiler executable when "
+            "--baseline-compiler-kind=pycomparse."
+        ),
     )
     parser.add_argument(
         "--warmup",
         type=int,
         default=2,
-        help="Warmup runs per engine per file (default: 2).",
+        help="Warmup runs per compiler per file (default: 2).",
     )
     parser.add_argument(
         "--repeats",
         type=int,
         default=20,
-        help="Measured runs per engine per file (default: 20).",
+        help="Measured runs per compiler per file (default: 20).",
     )
     parser.add_argument(
         "--work-dir",
@@ -277,10 +317,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def cpython_env(cpython_cmd: list[str]) -> dict[str, str]:
+def python_cmd_env(python_cmd: list[str]) -> dict[str, str]:
     env = os.environ.copy()
     # Adjust for AI sandboxes blocking $HOME/.cache/uv
-    if len(cpython_cmd) >= 2 and cpython_cmd[0] == "uv" and cpython_cmd[1] == "run":
+    if len(python_cmd) >= 2 and python_cmd[0] == "uv" and python_cmd[1] == "run":
         env.setdefault("UV_CACHE_DIR", "/tmp/.uvcache")
     return env
 
@@ -294,20 +334,23 @@ def find_top_n_largest_py_files(lib_root: Path, top_n: int) -> list[Path]:
     return candidates[:top_n]
 
 
-def run_cpython_compile(
-    cpython_cmd: list[str], env: dict[str, str], source: Path, out_pyc: Path
+def compiler_compile_command(compiler: CompilerSpec, source: Path, out_pyc: Path) -> list[str]:
+    if compiler.compiler_kind == "python":
+        assert compiler.python_cmd is not None
+        return compiler.python_cmd + ["-c", COMPILE_WITH_CPYTHON, str(source), str(out_pyc)]
+    assert compiler.compiler_path is not None
+    return [str(compiler.compiler_path), "--out", str(out_pyc), str(source)]
+
+
+def run_compiler_compile(
+    compiler: CompilerSpec, source: Path, out_pyc: Path
 ) -> subprocess.CompletedProcess[bytes]:
-    cmd = cpython_cmd + ["-c", COMPILE_WITH_CPYTHON, str(source), str(out_pyc)]
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-
-
-def run_pycomparse_compile(source: Path, out_pyc: Path, parser_test: Path) -> int:
-    proc = subprocess.run(
-        [str(parser_test), "--out", str(out_pyc), str(source)],
+    return subprocess.run(
+        compiler_compile_command(compiler, source, out_pyc),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=compiler.env,
     )
-    return proc.returncode
 
 
 def shell_join(parts: list[str]) -> str:
@@ -316,37 +359,24 @@ def shell_join(parts: list[str]) -> str:
 
 def benchmark_with_hyperfine(
     *,
-    engine: str,
+    compiler_name: str,
+    compiler: CompilerSpec,
     source: Path,
     out_pyc: Path,
-    parser_test: Path,
-    cpython_cmd: list[str],
-    cpython_env_vars: dict[str, str],
     warmup: int,
     repeats: int,
     work_dir: Path,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    if engine == "cpython":
-        preflight = run_cpython_compile(cpython_cmd, cpython_env_vars, source, out_pyc)
-        if preflight.returncode != 0:
-            return (
-                None,
-                preflight.stderr.decode("utf-8", errors="replace"),
-            )
-        cmd = shell_join(
-            cpython_cmd + ["-c", COMPILE_WITH_CPYTHON, str(source), str(out_pyc)]
-        )
-    else:
-        code = run_pycomparse_compile(source, out_pyc, parser_test)
-        if code != 0:
-            return None, f"pycomparse exited with code {code}"
-        cmd = (
-            f"{shlex.quote(str(parser_test))} --out {shlex.quote(str(out_pyc))} "
-            f"{shlex.quote(str(source))}"
-        )
+    preflight = run_compiler_compile(compiler, source, out_pyc)
+    if preflight.returncode != 0:
+        stderr_text = preflight.stderr.decode("utf-8", errors="replace").strip()
+        if not stderr_text:
+            stderr_text = f"{compiler.name} exited with code {preflight.returncode}"
+        return None, stderr_text
+    cmd = shell_join(compiler_compile_command(compiler, source, out_pyc))
 
     safe_name = str(source).replace("/", "_")
-    export_json = work_dir / f"hyperfine_{engine}_{safe_name}.json"
+    export_json = work_dir / f"hyperfine_{compiler_name}_{safe_name}.json"
     hyperfine_cmd = [
         "hyperfine",
         "--warmup",
@@ -361,7 +391,7 @@ def benchmark_with_hyperfine(
         hyperfine_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=cpython_env_vars,
+        env=compiler.env,
     )
     if proc.returncode != 0:
         stderr_text = proc.stderr.decode("utf-8", errors="replace")
@@ -409,41 +439,24 @@ def parse_callgrind_summary(callgrind_out: Path) -> tuple[int | None, str | None
 
 def benchmark_with_callgrind(
     *,
-    engine: str,
+    compiler_name: str,
+    compiler: CompilerSpec,
     source: Path,
     out_pyc: Path,
-    parser_test: Path,
-    cpython_cmd: list[str],
-    cpython_env_vars: dict[str, str],
     work_dir: Path,
 ) -> tuple[dict[str, Any] | None, str | None]:
     safe_name = str(source).replace("/", "_")
-    callgrind_out = work_dir / f"callgrind_{engine}_{safe_name}.out"
-    if engine == "cpython":
-        cmd = [
-            "valgrind",
-            "--tool=callgrind",
-            f"--callgrind-out-file={callgrind_out}",
-            *cpython_cmd,
-            "-c",
-            COMPILE_WITH_CPYTHON,
-            str(source),
-            str(out_pyc),
-        ]
-        env = cpython_env_vars
-    else:
-        cmd = [
-            "valgrind",
-            "--tool=callgrind",
-            f"--callgrind-out-file={callgrind_out}",
-            str(parser_test),
-            "--out",
-            str(out_pyc),
-            str(source),
-        ]
-        env = None
+    callgrind_out = work_dir / f"callgrind_{compiler_name}_{safe_name}.out"
+    cmd = [
+        "valgrind",
+        "--tool=callgrind",
+        f"--callgrind-out-file={callgrind_out}",
+        *compiler_compile_command(compiler, source, out_pyc),
+    ]
 
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    proc = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=compiler.env
+    )
     if proc.returncode != 0:
         stderr_text = proc.stderr.decode("utf-8", errors="replace")
         stdout_text = proc.stdout.decode("utf-8", errors="replace")
@@ -466,23 +479,17 @@ def benchmark_with_callgrind(
 
 
 def time_one_run(
-    engine: str,
+    compiler: CompilerSpec,
     source: Path,
     out_pyc: Path,
-    parser_test: Path,
-    cpython_cmd: list[str],
-    cpython_env_vars: dict[str, str],
 ) -> tuple[float, str | None]:
     start = time.perf_counter_ns()
 
-    if engine == "cpython":
-        proc = run_cpython_compile(cpython_cmd, cpython_env_vars, source, out_pyc)
-        ok = proc.returncode == 0
-        err = proc.stderr.decode("utf-8", errors="replace") if not ok else None
-    else:
-        code = run_pycomparse_compile(source, out_pyc, parser_test)
-        ok = code == 0
-        err = f"pycomparse exited with code {code}" if not ok else None
+    proc = run_compiler_compile(compiler, source, out_pyc)
+    ok = proc.returncode == 0
+    err = proc.stderr.decode("utf-8", errors="replace") if not ok else None
+    if not ok and not err.strip():
+        err = f"{compiler.name} exited with code {proc.returncode}"
 
     elapsed_ms = (time.perf_counter_ns() - start) / 1_000_000.0
     return elapsed_ms, err
@@ -528,14 +535,14 @@ def truncate_middle(text: str, width: int) -> str:
 def write_tsv(path: Path, results: list[dict[str, Any]], metric_unit: str = "ms") -> None:
     unit_suffix = metric_unit.lower()
 
-    def metric(result: dict[str, Any], engine: str, key: str) -> str:
-        value = result.get(engine, {}).get(key)
+    def metric(result: dict[str, Any], compiler_name: str, key: str) -> str:
+        value = result.get(compiler_name, {}).get(key)
         if isinstance(value, (int, float)):
             return f"{float(value):.6f}"
         return ""
 
-    def error_text(result: dict[str, Any], engine: str) -> str:
-        value = result.get(engine, {}).get("error")
+    def error_text(result: dict[str, Any], compiler_name: str) -> str:
+        value = result.get(compiler_name, {}).get("error")
         if not isinstance(value, str):
             return ""
         return value.replace("\r", "\\r").replace("\n", "\\n")
@@ -547,21 +554,21 @@ def write_tsv(path: Path, results: list[dict[str, Any]], metric_unit: str = "ms"
                 "file",
                 "size_bytes",
                 "status",
-                f"cpython_min_{unit_suffix}",
-                f"cpython_median_{unit_suffix}",
-                f"cpython_mean_{unit_suffix}",
-                f"cpython_max_{unit_suffix}",
-                f"pycomparse_min_{unit_suffix}",
-                f"pycomparse_median_{unit_suffix}",
-                f"pycomparse_mean_{unit_suffix}",
-                f"pycomparse_max_{unit_suffix}",
-                "ratio_cpython_over_pycomparse",
-                "cpython_error",
-                "pycomparse_error",
+                f"baseline_min_{unit_suffix}",
+                f"baseline_median_{unit_suffix}",
+                f"baseline_mean_{unit_suffix}",
+                f"baseline_max_{unit_suffix}",
+                f"tested_min_{unit_suffix}",
+                f"tested_median_{unit_suffix}",
+                f"tested_mean_{unit_suffix}",
+                f"tested_max_{unit_suffix}",
+                "ratio_baseline_over_tested",
+                "baseline_error",
+                "tested_error",
             ]
         )
         for result in results:
-            ratio = result.get("ratio_cpython_over_pycomparse")
+            ratio = result.get("ratio_baseline_over_tested")
             if isinstance(ratio, (int, float)):
                 ratio_text = f"{float(ratio):.6f}"
             else:
@@ -571,17 +578,17 @@ def write_tsv(path: Path, results: list[dict[str, Any]], metric_unit: str = "ms"
                     result.get("file", ""),
                     result.get("size_bytes", ""),
                     result.get("status", ""),
-                    metric(result, "cpython", "min_ms"),
-                    metric(result, "cpython", "median_ms"),
-                    metric(result, "cpython", "mean_ms"),
-                    metric(result, "cpython", "max_ms"),
-                    metric(result, "pycomparse", "min_ms"),
-                    metric(result, "pycomparse", "median_ms"),
-                    metric(result, "pycomparse", "mean_ms"),
-                    metric(result, "pycomparse", "max_ms"),
+                    metric(result, "baseline", "min_ms"),
+                    metric(result, "baseline", "median_ms"),
+                    metric(result, "baseline", "mean_ms"),
+                    metric(result, "baseline", "max_ms"),
+                    metric(result, "tested", "min_ms"),
+                    metric(result, "tested", "median_ms"),
+                    metric(result, "tested", "mean_ms"),
+                    metric(result, "tested", "max_ms"),
                     ratio_text,
-                    error_text(result, "cpython"),
-                    error_text(result, "pycomparse"),
+                    error_text(result, "baseline"),
+                    error_text(result, "tested"),
                 ]
             )
 
@@ -589,18 +596,18 @@ def write_tsv(path: Path, results: list[dict[str, Any]], metric_unit: str = "ms"
 def print_file_row(
     rel_file: str,
     size_bytes: int,
-    cpython_median_ms: float,
-    pycomparse_median_ms: float,
+    baseline_median_ms: float,
+    tested_median_ms: float,
     baseline_plus_minus: str | None = None,
     tested_plus_minus: str | None = None,
 ) -> None:
-    ratio = safe_ratio(cpython_median_ms, pycomparse_median_ms)
+    ratio = safe_ratio(baseline_median_ms, tested_median_ms)
     ratio_text = "inf" if ratio is None else f"{ratio:.2f}"
     file_display = truncate_middle(rel_file, FILE_COL_WIDTH)
-    row = f"{file_display:{FILE_COL_WIDTH}} {size_bytes:>12,} {cpython_median_ms:12.2f}"
+    row = f"{file_display:{FILE_COL_WIDTH}} {size_bytes:>12,} {baseline_median_ms:12.2f}"
     if baseline_plus_minus is not None and tested_plus_minus is not None:
         row += f" {baseline_plus_minus:>9}"
-    row += f" {pycomparse_median_ms:14.2f}"
+    row += f" {tested_median_ms:14.2f}"
     if baseline_plus_minus is not None and tested_plus_minus is not None:
         row += f" {tested_plus_minus:>9}"
     row += f" {ratio_text:>11}"
@@ -608,14 +615,14 @@ def print_file_row(
 
 
 def print_file_row_callgrind(
-    rel_file: str, size_bytes: int, cpython_ir: float, pycomparse_ir: float
+    rel_file: str, size_bytes: int, baseline_ir: float, tested_ir: float
 ) -> None:
-    ratio = safe_ratio(cpython_ir, pycomparse_ir)
+    ratio = safe_ratio(baseline_ir, tested_ir)
     ratio_text = "inf" if ratio is None else f"{ratio:.2f}"
     file_display = truncate_middle(rel_file, FILE_COL_WIDTH)
     row = (
         f"{file_display:{FILE_COL_WIDTH}} {size_bytes:>12,} "
-        f"{int(cpython_ir):>12,} {int(pycomparse_ir):>14,} {ratio_text:>11}"
+        f"{int(baseline_ir):>12,} {int(tested_ir):>14,} {ratio_text:>11}"
     )
     print(row)
 
@@ -623,16 +630,57 @@ def print_file_row_callgrind(
 def main() -> int:
     args = parse_args()
 
-    parser_test = Path(args.tested)
-    if not parser_test.is_file():
-        print(f"error: tested executable not found: {parser_test}", file=sys.stderr)
-        return 2
+    baseline_kind = args.baseline_compiler_kind
+    tested_kind = args.tested_compiler_kind
 
-    cpython_cmd = shlex.split(args.baseline)
-    if not cpython_cmd:
-        print("error: --baseline is empty", file=sys.stderr)
-        return 2
-    cpython_env_vars = cpython_env(cpython_cmd)
+    baseline_cmd: list[str] | None = None
+    baseline_compiler: Path | None = None
+    if baseline_kind == "python":
+        baseline_cmd = shlex.split(args.baseline_python_cmd)
+        if not baseline_cmd:
+            print("error: --baseline-python-cmd is empty", file=sys.stderr)
+            return 2
+    else:
+        if not args.baseline_compiler:
+            print(
+                "error: --baseline-compiler is required when "
+                "--baseline-compiler-kind=pycomparse",
+                file=sys.stderr,
+            )
+            return 2
+        baseline_compiler = Path(args.baseline_compiler)
+        if not baseline_compiler.is_file():
+            print(f"error: baseline compiler not found: {baseline_compiler}", file=sys.stderr)
+            return 2
+
+    tested_cmd: list[str] | None = None
+    tested_compiler: Path | None = None
+    if tested_kind == "python":
+        tested_cmd = shlex.split(args.tested_python_cmd)
+        if not tested_cmd:
+            print("error: --tested-python-cmd is empty", file=sys.stderr)
+            return 2
+    else:
+        tested_compiler = Path(args.tested_compiler)
+        if not tested_compiler.is_file():
+            print(f"error: tested compiler not found: {tested_compiler}", file=sys.stderr)
+            return 2
+
+    baseline = CompilerSpec(
+        name="baseline",
+        compiler_kind=baseline_kind,
+        python_cmd=baseline_cmd,
+        compiler_path=baseline_compiler,
+        env=python_cmd_env(baseline_cmd) if baseline_cmd is not None else None,
+    )
+    tested = CompilerSpec(
+        name="tested",
+        compiler_kind=tested_kind,
+        python_cmd=tested_cmd,
+        compiler_path=tested_compiler,
+        env=python_cmd_env(tested_cmd) if tested_cmd is not None else None,
+    )
+
     hyperfine_path = shutil.which("hyperfine")
     callgrind_path = shutil.which("valgrind")
     if args.runner == "hyperfine" and hyperfine_path is None:
@@ -702,9 +750,17 @@ def main() -> int:
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    def describe_compiler(spec: CompilerSpec) -> str:
+        if spec.compiler_kind == "python":
+            assert spec.python_cmd is not None
+            return shell_join(spec.python_cmd)
+        assert spec.compiler_path is not None
+        return str(spec.compiler_path)
+
     print("Benchmark configuration:")
-    print(f"  tested:      {parser_test}")
-    print(f"  baseline:    {' '.join(cpython_cmd)}")
+    print(f"  baseline:    {describe_compiler(baseline)}")
+    print(f"  tested:      {describe_compiler(tested)}")
+    print(f"  kinds:       baseline={baseline_kind}, tested={tested_kind}")
     print(f"  affinity:    {affinity}")
     if runner == "callgrind":
         print("  warmup:      ignored (callgrind)")
@@ -718,18 +774,18 @@ def main() -> int:
 
     if runner == "hyperfine":
         header = (
-            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} {'':>9} "
-            f"{'pycomparse(ms)':>14} {'':>9} {'speedup':>11}"
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'baseline(ms)':>12} {'':>9} "
+            f"{'tested(ms)':>14} {'':>9} {'speedup':>11}"
         )
     elif runner == "callgrind":
         header = (
-            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(Ir)':>12} "
-            f"{'pycomparse(Ir)':>14} {'speedup':>11}"
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'baseline(Ir)':>12} "
+            f"{'tested(Ir)':>14} {'speedup':>11}"
         )
     else:
         header = (
-            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} "
-            f"{'pycomparse(ms)':>14} {'speedup':>11}"
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'baseline(ms)':>12} "
+            f"{'tested(ms)':>14} {'speedup':>11}"
         )
     print(header)
     print("-" * len(header))
@@ -740,64 +796,56 @@ def main() -> int:
     for source in sources:
         size_bytes = source.stat().st_size
         safe_name = str(source).replace("/", "_")
-        ref_pyc = work_dir / f"cpython{safe_name}.pyc"
-        pyc_pyc = work_dir / f"pycomparse{safe_name}.pyc"
+        baseline_pyc = work_dir / f"baseline{safe_name}.pyc"
+        tested_pyc = work_dir / f"tested{safe_name}.pyc"
 
         file_result: dict[str, Any] = {
             "file": str(source),
             "size_bytes": size_bytes,
-            "cpython": {},
-            "pycomparse": {},
+            "baseline": {},
+            "tested": {},
             "status": "ok",
         }
 
-        for engine, out_pyc in (("cpython", ref_pyc), ("pycomparse", pyc_pyc)):
+        for compiler_name, compiler, out_pyc in (
+            ("baseline", baseline, baseline_pyc),
+            ("tested", tested, tested_pyc),
+        ):
             if runner == "hyperfine":
                 summary, err = benchmark_with_hyperfine(
-                    engine=engine,
+                    compiler_name=compiler_name,
+                    compiler=compiler,
                     source=source,
                     out_pyc=out_pyc,
-                    parser_test=parser_test,
-                    cpython_cmd=cpython_cmd,
-                    cpython_env_vars=cpython_env_vars,
                     warmup=effective_warmup,
                     repeats=effective_repeats,
                     work_dir=work_dir,
                 )
                 if err is not None:
-                    file_result[engine] = {"error": err}
+                    file_result[compiler_name] = {"error": err}
                     file_result["status"] = "failed"
                     break
                 assert summary is not None
-                file_result[engine] = summary
+                file_result[compiler_name] = summary
             elif runner == "callgrind":
                 summary, err = benchmark_with_callgrind(
-                    engine=engine,
+                    compiler_name=compiler_name,
+                    compiler=compiler,
                     source=source,
                     out_pyc=out_pyc,
-                    parser_test=parser_test,
-                    cpython_cmd=cpython_cmd,
-                    cpython_env_vars=cpython_env_vars,
                     work_dir=work_dir,
                 )
                 if err is not None:
-                    file_result[engine] = {"error": err}
+                    file_result[compiler_name] = {"error": err}
                     file_result["status"] = "failed"
                     break
                 assert summary is not None
-                file_result[engine] = summary
+                file_result[compiler_name] = summary
             else:
                 for _ in range(effective_warmup):
-                    _, err = time_one_run(
-                        engine,
-                        source,
-                        out_pyc,
-                        parser_test,
-                        cpython_cmd,
-                        cpython_env_vars,
-                    )
+                    _, err = time_one_run(compiler, source, out_pyc)
                     if err is not None:
-                        file_result[engine] = {"error": err}
+                        file_result[compiler_name] = {"error": err}
                         file_result["status"] = "failed"
                         break
                 if file_result["status"] == "failed":
@@ -805,16 +853,9 @@ def main() -> int:
 
                 samples: list[float] = []
                 for _ in range(effective_repeats):
-                    elapsed_ms, err = time_one_run(
-                        engine,
-                        source,
-                        out_pyc,
-                        parser_test,
-                        cpython_cmd,
-                        cpython_env_vars,
-                    )
+                    elapsed_ms, err = time_one_run(compiler, source, out_pyc)
                     if err is not None:
-                        file_result[engine] = {"error": err}
+                        file_result[compiler_name] = {"error": err}
                         file_result["status"] = "failed"
                         break
                     samples.append(elapsed_ms)
@@ -824,31 +865,31 @@ def main() -> int:
 
                 summary = summarize_samples(samples)
                 summary["samples_ms"] = samples
-                file_result[engine] = summary
+                file_result[compiler_name] = summary
 
         if file_result["status"] == "ok":
-            cpython_median = file_result["cpython"]["median_ms"]
-            pycomparse_median = file_result["pycomparse"]["median_ms"]
+            baseline_median = file_result["baseline"]["median_ms"]
+            tested_median = file_result["tested"]["median_ms"]
             baseline_plus_minus = None
             tested_plus_minus = None
             if runner == "hyperfine":
-                baseline_plus_minus = format_plus_minus(file_result["cpython"])
-                tested_plus_minus = format_plus_minus(file_result["pycomparse"])
+                baseline_plus_minus = format_plus_minus(file_result["baseline"])
+                tested_plus_minus = format_plus_minus(file_result["tested"])
             if runner == "callgrind":
                 print_file_row_callgrind(
-                    str(source), size_bytes, cpython_median, pycomparse_median
+                    str(source), size_bytes, baseline_median, tested_median
                 )
             else:
                 print_file_row(
                     str(source),
                     size_bytes,
-                    cpython_median,
-                    pycomparse_median,
+                    baseline_median,
+                    tested_median,
                     baseline_plus_minus=baseline_plus_minus,
                     tested_plus_minus=tested_plus_minus,
                 )
-            file_result["ratio_cpython_over_pycomparse"] = safe_ratio(
-                cpython_median, pycomparse_median
+            file_result["ratio_baseline_over_tested"] = safe_ratio(
+                baseline_median, tested_median
             )
         else:
             failed += 1
@@ -871,17 +912,17 @@ def main() -> int:
 
     ok_results = [r for r in results if r.get("status") == "ok"]
     if ok_results:
-        total_cpython = sum(r["cpython"]["median_ms"] for r in ok_results)
-        total_pycomparse = sum(r["pycomparse"]["median_ms"] for r in ok_results)
+        total_baseline = sum(r["baseline"]["median_ms"] for r in ok_results)
+        total_tested = sum(r["tested"]["median_ms"] for r in ok_results)
         print()
         print("Totals (sum of per-file medians):")
         if runner == "callgrind":
-            print(f"  cpython:    {int(total_cpython):,} Ir")
-            print(f"  pycomparse: {int(total_pycomparse):,} Ir")
+            print(f"  baseline:   {int(total_baseline):,} Ir")
+            print(f"  tested:     {int(total_tested):,} Ir")
         else:
-            print(f"  cpython:    {total_cpython:.2f} ms")
-            print(f"  pycomparse: {total_pycomparse:.2f} ms")
-        total_ratio = safe_ratio(total_cpython, total_pycomparse)
+            print(f"  baseline:   {total_baseline:.2f} ms")
+            print(f"  tested:     {total_tested:.2f} ms")
+        total_ratio = safe_ratio(total_baseline, total_tested)
         if total_ratio is None:
             print("  ratio:      infx")
         else:
@@ -890,8 +931,16 @@ def main() -> int:
     if args.json_out:
         payload: dict[str, Any] = {
             "config": {
-                "tested": str(parser_test),
-                "baseline": cpython_cmd,
+                "baseline_compiler_kind": baseline_kind,
+                "baseline_python_cmd": baseline.python_cmd or [],
+                "baseline_compiler": (
+                    str(baseline.compiler_path) if baseline.compiler_path is not None else ""
+                ),
+                "tested_compiler_kind": tested_kind,
+                "tested_python_cmd": tested.python_cmd or [],
+                "tested_compiler": (
+                    str(tested.compiler_path) if tested.compiler_path is not None else ""
+                ),
                 "warmup": args.warmup,
                 "repeats": args.repeats,
                 "effective_warmup": effective_warmup,

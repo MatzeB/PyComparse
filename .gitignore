@@ -3,3 +3,4 @@ __pycache__
 /stuff
 /.lvimrc
 /build-*
+/cpython-3.8

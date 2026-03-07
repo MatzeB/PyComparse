@@ -27,6 +27,161 @@ py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)
 FILE_COL_WIDTH = 43
 
 
+def commandline_option_provided(option: str) -> bool:
+    for arg in sys.argv[1:]:
+        if arg == option or arg.startswith(option + "="):
+            return True
+    return False
+
+
+def parse_cpu_set_spec(spec: str) -> set[int]:
+    cpus: set[int] = set()
+    for raw_part in spec.split(","):
+        part = raw_part.strip()
+        if not part:
+            raise ValueError(f"invalid CPU set: {spec!r}")
+        if "-" in part:
+            begin_s, end_s = part.split("-", 1)
+            if not begin_s.isdigit() or not end_s.isdigit():
+                raise ValueError(f"invalid CPU range: {part!r}")
+            begin = int(begin_s)
+            end = int(end_s)
+            if end < begin:
+                raise ValueError(f"invalid CPU range (end < begin): {part!r}")
+            cpus.update(range(begin, end + 1))
+            continue
+        if not part.isdigit():
+            raise ValueError(f"invalid CPU id: {part!r}")
+        cpus.add(int(part))
+    if not cpus:
+        raise ValueError(f"invalid CPU set: {spec!r}")
+    return cpus
+
+
+def parse_lscpu_online_core_maxmhz() -> list[tuple[int, int | None, float]]:
+    try:
+        output = subprocess.check_output(
+            ["lscpu", "-p=CPU,ONLINE,CORE,MAXMHZ"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+
+    result: list[tuple[int, int | None, float]] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 4:
+            continue
+        cpu_s, online_s, core_s, maxmhz_s = parts[0], parts[1], parts[2], parts[3]
+        if not cpu_s.isdigit():
+            continue
+        cpu = int(cpu_s)
+        online = online_s.lower() in {"y", "yes", "1", "true"}
+        if not online:
+            continue
+        try:
+            max_mhz = float(maxmhz_s)
+        except ValueError:
+            max_mhz = 0.0
+        try:
+            core = int(core_s)
+        except ValueError:
+            core = None
+        result.append((cpu, core, max_mhz))
+    return result
+
+
+def choose_auto_affinity_cpu(allowed_cpus: set[int]) -> int:
+    assert allowed_cpus
+    cpu_info = [
+        (cpu, core, max_mhz)
+        for cpu, core, max_mhz in parse_lscpu_online_core_maxmhz()
+        if cpu in allowed_cpus
+    ]
+    if cpu_info:
+        max_mhz = max(max_mhz for _, _, max_mhz in cpu_info)
+        fastest = [
+            (cpu, core)
+            for cpu, core, mhz in cpu_info
+            if mhz >= max_mhz - 1e-6
+        ]
+        cpu0_core = None
+        for cpu, core in fastest:
+            if cpu == 0:
+                cpu0_core = core
+                break
+        if cpu0_core is None:
+            for cpu, core, _ in cpu_info:
+                if cpu == 0:
+                    cpu0_core = core
+                    break
+
+        core_to_primary_cpu: dict[int | None, int] = {}
+        for cpu, core, _ in cpu_info:
+            current = core_to_primary_cpu.get(core)
+            if current is None or cpu < current:
+                core_to_primary_cpu[core] = cpu
+
+        def sort_key(item: tuple[int, int | None]) -> tuple[int, int, int, int]:
+            cpu, core = item
+            shares_cpu0_core = int(cpu0_core is not None and core == cpu0_core)
+            primary_cpu = core_to_primary_cpu.get(core, cpu)
+            non_primary = int(cpu != primary_cpu)
+            is_cpu0 = int(cpu == 0)
+            return (shares_cpu0_core, non_primary, is_cpu0, cpu)
+
+        fastest.sort(key=sort_key)
+        return fastest[0][0]
+
+    sorted_allowed = sorted(allowed_cpus)
+    for cpu in sorted_allowed:
+        if cpu != 0:
+            return cpu
+    return sorted_allowed[0]
+
+
+def configure_cpu_affinity(spec: str) -> tuple[str, str | None]:
+    normalized = spec.strip().lower()
+    if normalized in {"off", "none", "disable", "disabled"}:
+        return "off", None
+
+    if not hasattr(os, "sched_setaffinity") or not hasattr(os, "sched_getaffinity"):
+        return "off", "CPU affinity is unsupported on this platform; continuing unpinned"
+
+    try:
+        allowed_cpus = set(os.sched_getaffinity(0))
+    except OSError as err:
+        return "off", f"could not query current CPU affinity: {err}"
+    if not allowed_cpus:
+        return "off", "no allowed CPUs in current affinity mask; continuing unpinned"
+
+    if normalized == "auto":
+        cpus = {choose_auto_affinity_cpu(allowed_cpus)}
+        mode = "auto"
+    else:
+        try:
+            cpus = parse_cpu_set_spec(spec)
+        except ValueError as err:
+            return "off", str(err)
+        if not cpus.issubset(allowed_cpus):
+            unavailable = sorted(cpus - allowed_cpus)
+            return (
+                "off",
+                f"requested CPUs not allowed in current affinity mask: {unavailable}",
+            )
+        mode = "manual"
+
+    try:
+        os.sched_setaffinity(0, cpus)
+    except OSError as err:
+        return "off", f"failed to set CPU affinity to {sorted(cpus)}: {err}"
+    return f"{mode}:{','.join(str(cpu) for cpu in sorted(cpus))}", None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -102,11 +257,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--runner",
-        choices=("auto", "hyperfine", "internal"),
+        choices=("auto", "hyperfine", "internal", "callgrind"),
         default="auto",
         help=(
             "Timing backend. 'auto' uses hyperfine if installed, "
-            "otherwise internal timer (default: auto)."
+            "otherwise internal timer (default: auto). "
+            "Use 'callgrind' for instruction-count benchmarking."
+        ),
+    )
+    parser.add_argument(
+        "--cpu-affinity",
+        default="auto",
+        help=(
+            "CPU affinity for this benchmark process. Default: auto "
+            "(pick one online high-frequency CPU). "
+            "Use 'off' to disable, or pass a CPU set like '2' or '2,4-5'."
         ),
     )
     return parser.parse_args()
@@ -224,6 +389,82 @@ def benchmark_with_hyperfine(
     return summary, None
 
 
+def parse_callgrind_summary(callgrind_out: Path) -> tuple[int | None, str | None]:
+    try:
+        lines = callgrind_out.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as err:
+        return None, f"failed to read callgrind output {callgrind_out}: {err}"
+
+    for line in lines:
+        if not line.startswith("summary:"):
+            continue
+        value = line.split(":", 1)[1].strip()
+        try:
+            return int(value), None
+        except ValueError:
+            return None, f"invalid callgrind summary value in {callgrind_out}: {value!r}"
+
+    return None, f"missing callgrind summary in {callgrind_out}"
+
+
+def benchmark_with_callgrind(
+    *,
+    engine: str,
+    source: Path,
+    out_pyc: Path,
+    parser_test: Path,
+    cpython_cmd: list[str],
+    cpython_env_vars: dict[str, str],
+    work_dir: Path,
+) -> tuple[dict[str, Any] | None, str | None]:
+    safe_name = str(source).replace("/", "_")
+    callgrind_out = work_dir / f"callgrind_{engine}_{safe_name}.out"
+    if engine == "cpython":
+        cmd = [
+            "valgrind",
+            "--tool=callgrind",
+            f"--callgrind-out-file={callgrind_out}",
+            *cpython_cmd,
+            "-c",
+            COMPILE_WITH_CPYTHON,
+            str(source),
+            str(out_pyc),
+        ]
+        env = cpython_env_vars
+    else:
+        cmd = [
+            "valgrind",
+            "--tool=callgrind",
+            f"--callgrind-out-file={callgrind_out}",
+            str(parser_test),
+            "--out",
+            str(out_pyc),
+            str(source),
+        ]
+        env = None
+
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    if proc.returncode != 0:
+        stderr_text = proc.stderr.decode("utf-8", errors="replace")
+        stdout_text = proc.stdout.decode("utf-8", errors="replace")
+        return None, (stderr_text + "\n" + stdout_text).strip()
+
+    ir, err = parse_callgrind_summary(callgrind_out)
+    if err is not None or ir is None:
+        return None, err
+
+    ir_value = float(ir)
+    summary = {
+        "min_ms": ir_value,
+        "median_ms": ir_value,
+        "mean_ms": ir_value,
+        "max_ms": ir_value,
+        "samples_ms": [ir_value],
+        "unit": "Ir",
+    }
+    return summary, None
+
+
 def time_one_run(
     engine: str,
     source: Path,
@@ -284,7 +525,9 @@ def truncate_middle(text: str, width: int) -> str:
     return f"{text[:head]}…{text[-tail:]}"
 
 
-def write_tsv(path: Path, results: list[dict[str, Any]]) -> None:
+def write_tsv(path: Path, results: list[dict[str, Any]], metric_unit: str = "ms") -> None:
+    unit_suffix = metric_unit.lower()
+
     def metric(result: dict[str, Any], engine: str, key: str) -> str:
         value = result.get(engine, {}).get(key)
         if isinstance(value, (int, float)):
@@ -304,14 +547,14 @@ def write_tsv(path: Path, results: list[dict[str, Any]]) -> None:
                 "file",
                 "size_bytes",
                 "status",
-                "cpython_min_ms",
-                "cpython_median_ms",
-                "cpython_mean_ms",
-                "cpython_max_ms",
-                "pycomparse_min_ms",
-                "pycomparse_median_ms",
-                "pycomparse_mean_ms",
-                "pycomparse_max_ms",
+                f"cpython_min_{unit_suffix}",
+                f"cpython_median_{unit_suffix}",
+                f"cpython_mean_{unit_suffix}",
+                f"cpython_max_{unit_suffix}",
+                f"pycomparse_min_{unit_suffix}",
+                f"pycomparse_median_{unit_suffix}",
+                f"pycomparse_mean_{unit_suffix}",
+                f"pycomparse_max_{unit_suffix}",
                 "ratio_cpython_over_pycomparse",
                 "cpython_error",
                 "pycomparse_error",
@@ -364,12 +607,21 @@ def print_file_row(
     print(row)
 
 
+def print_file_row_callgrind(
+    rel_file: str, size_bytes: int, cpython_ir: float, pycomparse_ir: float
+) -> None:
+    ratio = safe_ratio(cpython_ir, pycomparse_ir)
+    ratio_text = "inf" if ratio is None else f"{ratio:.2f}"
+    file_display = truncate_middle(rel_file, FILE_COL_WIDTH)
+    row = (
+        f"{file_display:{FILE_COL_WIDTH}} {size_bytes:>12,} "
+        f"{int(cpython_ir):>12,} {int(pycomparse_ir):>14,} {ratio_text:>11}"
+    )
+    print(row)
+
+
 def main() -> int:
     args = parse_args()
-
-    if args.warmup < 0 or args.repeats <= 0:
-        print("error: --warmup must be >= 0 and --repeats must be > 0", file=sys.stderr)
-        return 2
 
     parser_test = Path(args.tested)
     if not parser_test.is_file():
@@ -382,6 +634,7 @@ def main() -> int:
         return 2
     cpython_env_vars = cpython_env(cpython_cmd)
     hyperfine_path = shutil.which("hyperfine")
+    callgrind_path = shutil.which("valgrind")
     if args.runner == "hyperfine" and hyperfine_path is None:
         print("error: --runner hyperfine requested but hyperfine is not installed")
         return 2
@@ -389,6 +642,43 @@ def main() -> int:
         runner = "hyperfine" if hyperfine_path is not None else "internal"
     else:
         runner = args.runner
+    if runner == "callgrind" and callgrind_path is None:
+        print("error: --runner callgrind requested but valgrind is not installed")
+        return 2
+
+    affinity_request = args.cpu_affinity.strip().lower()
+    manual_affinity_requested = affinity_request not in {
+        "auto",
+        "off",
+        "none",
+        "disable",
+        "disabled",
+    }
+    affinity, affinity_warning = configure_cpu_affinity(args.cpu_affinity)
+    if affinity_warning is not None:
+        if manual_affinity_requested:
+            print(f"error: {affinity_warning}", file=sys.stderr)
+            return 2
+        print(f"warning: {affinity_warning}", file=sys.stderr)
+
+    effective_warmup = args.warmup
+    effective_repeats = args.repeats
+    if runner == "callgrind":
+        effective_warmup = 0
+        effective_repeats = 1
+        if commandline_option_provided("--warmup"):
+            print(
+                "warning: --warmup is ignored with --runner callgrind",
+                file=sys.stderr,
+            )
+        if commandline_option_provided("--repeats"):
+            print(
+                "warning: --repeats is ignored with --runner callgrind",
+                file=sys.stderr,
+            )
+    elif args.warmup < 0 or args.repeats <= 0:
+        print("error: --warmup must be >= 0 and --repeats must be > 0", file=sys.stderr)
+        return 2
 
     if args.sources:
         sources = [Path(s) for s in args.sources]
@@ -415,20 +705,31 @@ def main() -> int:
     print("Benchmark configuration:")
     print(f"  tested:      {parser_test}")
     print(f"  baseline:    {' '.join(cpython_cmd)}")
-    print(f"  warmup:      {args.warmup}")
-    print(f"  repeats:     {args.repeats}")
+    print(f"  affinity:    {affinity}")
+    if runner == "callgrind":
+        print("  warmup:      ignored (callgrind)")
+        print("  repeats:     ignored (callgrind)")
+    else:
+        print(f"  warmup:      {effective_warmup}")
+        print(f"  repeats:     {effective_repeats}")
     print(f"  runner:      {runner}")
     print(f"  files:       {len(sources)}")
     print()
 
-    header = (
-        f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} "
-        f"{'pycomparse(ms)':>14} {'speedup':>11}"
-    )
     if runner == "hyperfine":
         header = (
             f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} {'':>9} "
             f"{'pycomparse(ms)':>14} {'':>9} {'speedup':>11}"
+        )
+    elif runner == "callgrind":
+        header = (
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(Ir)':>12} "
+            f"{'pycomparse(Ir)':>14} {'speedup':>11}"
+        )
+    else:
+        header = (
+            f"{'file':{FILE_COL_WIDTH}} {'size(bytes)':>12} {'cpython(ms)':>12} "
+            f"{'pycomparse(ms)':>14} {'speedup':>11}"
         )
     print(header)
     print("-" * len(header))
@@ -459,8 +760,24 @@ def main() -> int:
                     parser_test=parser_test,
                     cpython_cmd=cpython_cmd,
                     cpython_env_vars=cpython_env_vars,
-                    warmup=args.warmup,
-                    repeats=args.repeats,
+                    warmup=effective_warmup,
+                    repeats=effective_repeats,
+                    work_dir=work_dir,
+                )
+                if err is not None:
+                    file_result[engine] = {"error": err}
+                    file_result["status"] = "failed"
+                    break
+                assert summary is not None
+                file_result[engine] = summary
+            elif runner == "callgrind":
+                summary, err = benchmark_with_callgrind(
+                    engine=engine,
+                    source=source,
+                    out_pyc=out_pyc,
+                    parser_test=parser_test,
+                    cpython_cmd=cpython_cmd,
+                    cpython_env_vars=cpython_env_vars,
                     work_dir=work_dir,
                 )
                 if err is not None:
@@ -470,7 +787,7 @@ def main() -> int:
                 assert summary is not None
                 file_result[engine] = summary
             else:
-                for _ in range(args.warmup):
+                for _ in range(effective_warmup):
                     _, err = time_one_run(
                         engine,
                         source,
@@ -487,7 +804,7 @@ def main() -> int:
                     break
 
                 samples: list[float] = []
-                for _ in range(args.repeats):
+                for _ in range(effective_repeats):
                     elapsed_ms, err = time_one_run(
                         engine,
                         source,
@@ -517,14 +834,19 @@ def main() -> int:
             if runner == "hyperfine":
                 baseline_plus_minus = format_plus_minus(file_result["cpython"])
                 tested_plus_minus = format_plus_minus(file_result["pycomparse"])
-            print_file_row(
-                str(source),
-                size_bytes,
-                cpython_median,
-                pycomparse_median,
-                baseline_plus_minus=baseline_plus_minus,
-                tested_plus_minus=tested_plus_minus,
-            )
+            if runner == "callgrind":
+                print_file_row_callgrind(
+                    str(source), size_bytes, cpython_median, pycomparse_median
+                )
+            else:
+                print_file_row(
+                    str(source),
+                    size_bytes,
+                    cpython_median,
+                    pycomparse_median,
+                    baseline_plus_minus=baseline_plus_minus,
+                    tested_plus_minus=tested_plus_minus,
+                )
             file_result["ratio_cpython_over_pycomparse"] = safe_ratio(
                 cpython_median, pycomparse_median
             )
@@ -553,8 +875,12 @@ def main() -> int:
         total_pycomparse = sum(r["pycomparse"]["median_ms"] for r in ok_results)
         print()
         print("Totals (sum of per-file medians):")
-        print(f"  cpython:    {total_cpython:.2f} ms")
-        print(f"  pycomparse: {total_pycomparse:.2f} ms")
+        if runner == "callgrind":
+            print(f"  cpython:    {int(total_cpython):,} Ir")
+            print(f"  pycomparse: {int(total_pycomparse):,} Ir")
+        else:
+            print(f"  cpython:    {total_cpython:.2f} ms")
+            print(f"  pycomparse: {total_pycomparse:.2f} ms")
         total_ratio = safe_ratio(total_cpython, total_pycomparse)
         if total_ratio is None:
             print("  ratio:      infx")
@@ -568,16 +894,24 @@ def main() -> int:
                 "baseline": cpython_cmd,
                 "warmup": args.warmup,
                 "repeats": args.repeats,
+                "effective_warmup": effective_warmup,
+                "effective_repeats": effective_repeats,
                 "work_dir": str(work_dir),
                 "runner": runner,
+                "cpu_affinity": affinity,
+                "cpu_affinity_request": args.cpu_affinity,
+                "metric_unit": "Ir" if runner == "callgrind" else "ms",
                 "hyperfine_path": hyperfine_path or "",
+                "callgrind_path": callgrind_path or "",
             },
             "results": results,
         }
         Path(args.json_out).write_text(json.dumps(payload, indent=2) + "\n")
         print(f"\nWrote JSON results to: {args.json_out}")
     if args.tsv_out:
-        write_tsv(Path(args.tsv_out), results)
+        write_tsv(
+            Path(args.tsv_out), results, metric_unit="Ir" if runner == "callgrind" else "ms"
+        )
         print(f"Wrote TSV results to: {args.tsv_out}")
 
     if failed > 0:

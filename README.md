@@ -1,107 +1,145 @@
 # PyComparse
 
 PyComparse is a Python front-end and bytecode compiler written in C.
-It scans and parses Python source, then emits `.pyc` bytecode executable by CPython.
-PyComparse currently targets Python 3.8 syntax and bytecode.
-The parser uses recursive descent with precedence climbing for expressions, and the implementation style is straightforward and performance-focused.
+It scans and parses Python source, then emits `.pyc` bytecode executable by
+CPython.
 
-This project is also an experiment in heavy AI-assisted coding 🤖.
+The project currently targets Python `3.8` syntax and bytecode.
+This project is also an experiment in heavy AI-assisted coding.
+
+Current benchmark suites show `>5x` compile-time speedup vs CPython; see the
+[homepage benchmark section](https://matzeb.github.io/PyComparse/#benchmarks).
 
 ## Status
 
-- Scanner, parser, and code generator for complete Python 3.8 language parity
-- Successfully handles files from the Python 3.8 standard library and test
-  suite, except tests that depend on exact line-number table details and tests
-  that fail when running from precompiled `.pyc` files.
+- Scanner, parser, and code generator cover Python 3.8 language behavior.
+- Handles Python 3.8 standard library and test suite inputs broadly, with
+  known gaps listed below.
+
+## Key Implementation Details
+
+- Arena-based memory allocation is used throughout parsing/codegen paths.
+- Parsing uses recursive descent with precedence climbing for expressions.
+- Parser error recovery with anchor-token sets.
+- Output is Python 3.8.20-compatible bytecode (`.pyc`).
 
 ### Known Limitations
 
-- Constant folding currently supports a subset of operations: `+`, `-`, `*`
-  for integers below 63 bits and floats, string concatenation/multiplication,
-  and dead-code elimination during code generation.
-- Line number tables do not always agree with CPython (TODO).
-- Maximum stack computation results overestimate in some circumstances (TODO).
+- Constant folding supports a subset of operations (`+`, `-`, `*` for
+  restricted integer/float ranges, string concat/multiply, and some dead-code
+  elimination paths).
+- Maximum stack computation can overestimate for some control-flow patterns.
 
 ## Quick Start
 
 Requirements:
 
-- CMake 3.11+
-- A C99 compiler
-- Python 3.8 (for running integration tests), or a working `uv` setup that can provision Python 3.8
+- CMake `3.11+`
+- C99 compiler
+- Python 3.8 for tests (or `uv` configured to provide Python 3.8)
 
 Configure and build:
 
 ```sh
-cmake -S . -B build
-cmake --build build -j
+cmake -S . -B build -G Ninja
+ninja -C build
 ```
 
 Compile and run a sample input:
 
 ```sh
-./build/scanner_test
-./build/pycomparse --out /tmp/test.pyc test/hello.py
-uv python /tmp/test.pyc
+build/pycomparse --out /tmp/test.pyc test/hello.py
+uv run python /tmp/test.pyc
 ```
 
 ## Development
 
-### Build Configuration
+### Common Build Modes
 
-CMake options currently available:
-
-- `-DPYCOMPARSE_ENABLE_LTO=ON` to enable LTO/IPO (if supported by toolchain)
-- `-DPYCOMPARSE_ENABLE_SANITIZERS=ON` to enable AddressSanitizer, UBSan, and
-  nullability checks (requires Clang)
-- `-DPYCOMPARSE_PGO_MODE=off|generate|use`
-- `-DPYCOMPARSE_PGO_DATA=/path/to/profile-data` when `PYCOMPARSE_PGO_MODE=use`
-- `-DCMAKE_DISABLE_FIND_PACKAGE_Iconv=TRUE` builds without iconv
-
-For a full PGO+LTO build flow:
+Debug/sanitizer-friendly:
 
 ```sh
-scripts/build_pgo_lto.sh
-```
-
-For a sanitizer build:
-
-```sh
-cmake -S . -B build-asan -G Ninja -DCMAKE_C_COMPILER=clang \
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DPYCOMPARSE_ENABLE_SANITIZERS=ON
-ninja --quiet -C build-asan
-uv run scripts/test.py parser --compiler build-asan/pycomparse
+ninja -C build
 ```
 
-### Testing
+Release build for local profiling:
 
-Run the integration test script:
+```sh
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja -C build-release
+```
+
+PGO+LTO benchmark build:
+
+```sh
+CMAKE_GENERATOR=Ninja scripts/build_pgo_lto.sh
+```
+
+### Notable CMake Options
+
+- `-DPYCOMPARSE_ENABLE_LTO=ON`
+- `-DPYCOMPARSE_ENABLE_SANITIZERS=ON` (Clang required)
+- `-DPYCOMPARSE_PGO_MODE=off|generate|use`
+- `-DPYCOMPARSE_PGO_DATA=/path/to/profile-data` (for `use`)
+- `-DPYCOMPARSE_MARCH=auto|native|x86-64-v2|x86-64-v3|...`
+- `-DCMAKE_DISABLE_FIND_PACKAGE_Iconv=TRUE`
+
+## Testing
+
+Run all parser + scanner integration tests:
+
+```sh
+uv run scripts/test.py
+```
+
+Run parser-only:
 
 ```sh
 uv run scripts/test.py parser
 ```
 
-By default it uses `build/pycomparse`. Override with:
-
-```sh
-uv run scripts/test.py parser --compiler build2/pycomparse
-```
-
-Run scanner tokenization tests with:
+Run scanner-only:
 
 ```sh
 uv run scripts/test.py scan
 ```
-### Project Layout
 
-- `src/`: C source files
-- `include/pycomparse/`: public headers
-- `include/pycomparse/adt/`: ADT/utility headers (arena, dynarray, hashset, stack)
-- `test/`: runtime/error/compile-only tests
-- `scripts/`: helper scripts
+Override compiler binary:
+
+```sh
+uv run scripts/test.py parser --compiler build/pycomparse
+```
+
+## Benchmarking
+
+Run compile-time benchmarks on a PGO+LTO binary:
+
+```sh
+uv run python scripts/benchmark_compile_perf.py \
+  --tested-compiler build-pgo-lto/pycomparse
+```
+
+For homepage-style benchmark data generation, see `benchy.sh` on the
+`homepage-site` branch.
+
+## Project Layout and Compilation Pipeline
+
+- `src/scanner.c`: tokenization and identifier/literal interning.
+- `src/parser.c`: AST construction.
+- `src/ast_fold_constants.c`: AST constant folding.
+- `src/codegen*.c`: scope/binding analysis and bytecode emission.
+- `src/writer.c`: `.pyc` serialization.
+- `src/diagnostics.c`: diagnostic construction and formatting.
+- `include/pycomparse/`: public headers.
+- `include/pycomparse/adt/`: core ADT/utility headers (arena, dynarrays,
+  hashset/hash, stack, low-level helpers).
+- `test/`: runtime, error, and compile-only tests.
+- `scripts/`: build, test, and benchmark helper scripts.
 
 ## Authors
 
-- Matthias Braun <matze@braunis.de> - design, structure, and initial implementation
+- Matthias Braun <matze@braunis.de>
 - Codex
 - Claude

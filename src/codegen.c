@@ -53,7 +53,6 @@ static void code_index_cache_insert_raw(struct code_index_cache *cache,
                                         const void *key, unsigned hash,
                                         uint32_t index)
 {
-  hash_set_increment_num_elements(&cache->set);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &cache->set, hash);
   for (;; hash_set_chain_iteration_next(&c)) {
@@ -62,6 +61,7 @@ static void code_index_cache_insert_raw(struct code_index_cache *cache,
       bucket->key = key;
       bucket->hash = hash;
       bucket->index = index;
+      hash_set_increment_num_elements(&cache->set);
       return;
     }
   }

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pycomparse/adt/hash.h"
 #include "pycomparse/object_intern_types.h"
 #include "pycomparse/object_types.h"
 #include "pycomparse/util.h"
@@ -18,21 +19,10 @@ struct object_intern_object_bucket {
   unsigned               hash;
 };
 
-static unsigned fnv_hash_append(unsigned hash, uint32_t length,
-                                const void *data)
-{
-  const char *bytes = (const char *)data;
-  for (uint32_t i = 0; i < length; ++i) {
-    hash ^= (unsigned char)bytes[i];
-    hash *= 16777619u;
-  }
-  return hash;
-}
-
 static unsigned fnv_hash_mem(enum object_type type, uint32_t length,
                              const void *data)
 {
-  unsigned hash = 2166136261u;
+  unsigned hash = fnv_hash_init();
   hash ^= (unsigned)type;
   hash *= 16777619u;
   hash ^= length;
@@ -82,8 +72,7 @@ static unsigned fnv_hash_big_int(uint32_t        num_pydigits,
                                  const uint16_t *pydigits)
 {
   return fnv_hash_mem(OBJECT_BIG_INT,
-                      (uint32_t)(num_pydigits * sizeof(pydigits[0])),
-                      pydigits);
+                      num_pydigits * (uint32_t)sizeof(pydigits[0]), pydigits);
 }
 
 static bool big_int_equal(const union object *object, uint32_t num_pydigits,
@@ -119,7 +108,6 @@ static void object_intern_insert_string_bucket(struct object_intern *s,
                                                union object         *string,
                                                unsigned              hash)
 {
-  hash_set_increment_num_elements(&s->string_set);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->string_set, hash);
   struct object_intern_string_bucket *buckets = s->string_buckets;
@@ -128,6 +116,7 @@ static void object_intern_insert_string_bucket(struct object_intern *s,
     if (bucket->object == NULL) {
       bucket->object = string;
       bucket->hash = hash;
+      hash_set_increment_num_elements(&s->string_set);
       return;
     }
   }
@@ -159,7 +148,6 @@ static void object_intern_insert_object_bucket(struct object_intern *s,
                                                union object         *object,
                                                unsigned              hash)
 {
-  hash_set_increment_num_elements(&s->object_set);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->object_set, hash);
   struct object_intern_object_bucket *buckets = s->object_buckets;
@@ -168,6 +156,7 @@ static void object_intern_insert_object_bucket(struct object_intern *s,
     if (bucket->object == NULL) {
       bucket->object = object;
       bucket->hash = hash;
+      hash_set_increment_num_elements(&s->object_set);
       return;
     }
   }
@@ -269,10 +258,6 @@ union object *object_intern_string(struct object_intern *s,
                                    const char *chars)
 {
   assert(type == OBJECT_STRING || type == OBJECT_BYTES);
-  unsigned new_size = hash_set_should_resize(&s->string_set);
-  if (UNLIKELY(new_size != 0)) {
-    object_intern_resize_strings(s, new_size);
-  }
 
   unsigned hash = fnv_hash_mem(type, length, chars);
   struct hash_set_chain_iteration_state c;
@@ -294,6 +279,10 @@ union object *object_intern_string(struct object_intern *s,
     }
   }
 
+  unsigned new_size = hash_set_should_resize(&s->string_set);
+  if (UNLIKELY(new_size != 0)) {
+    object_intern_resize_strings(s, new_size);
+  }
   union object *string = object_new_string(&s->arena, type, length, chars);
   object_intern_insert_string_bucket(s, string, hash);
   return string;
@@ -309,8 +298,6 @@ union object *object_intern_cstring(struct object_intern *s,
 
 union object *object_intern_float(struct object_intern *s, double value)
 {
-  object_intern_ensure_object_set(s);
-
   unsigned                              hash = fnv_hash_float(value);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->object_set, hash);
@@ -325,6 +312,7 @@ union object *object_intern_float(struct object_intern *s, double value)
     }
   }
 
+  object_intern_ensure_object_set(s);
   union object *result = object_new_float(&s->arena, value);
   object_intern_insert_object_bucket(s, result, hash);
   return result;
@@ -333,8 +321,6 @@ union object *object_intern_float(struct object_intern *s, double value)
 union object *object_intern_complex(struct object_intern *s, double real,
                                     double imag)
 {
-  object_intern_ensure_object_set(s);
-
   unsigned                              hash = fnv_hash_complex(real, imag);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->object_set, hash);
@@ -349,6 +335,7 @@ union object *object_intern_complex(struct object_intern *s, double real,
     }
   }
 
+  object_intern_ensure_object_set(s);
   union object *result = object_new_complex(&s->arena, real, imag);
   object_intern_insert_object_bucket(s, result, hash);
   return result;
@@ -357,8 +344,6 @@ union object *object_intern_complex(struct object_intern *s, double real,
 union object *object_intern_int(struct object_intern *s, int64_t value)
 {
   assert(value != INT64_MIN);
-  object_intern_ensure_object_set(s);
-
   unsigned                              hash = fnv_hash_int(value);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->object_set, hash);
@@ -373,6 +358,7 @@ union object *object_intern_int(struct object_intern *s, int64_t value)
     }
   }
 
+  object_intern_ensure_object_set(s);
   union object *result = object_new_int(&s->arena, value);
   object_intern_insert_object_bucket(s, result, hash);
   return result;
@@ -390,8 +376,6 @@ union object *object_intern_big_int(struct object_intern   *s,
     return object_intern_int(s, 0);
   }
 
-  object_intern_ensure_object_set(s);
-
   unsigned hash = fnv_hash_big_int(num_pydigits, pydigits);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &s->object_set, hash);
@@ -407,6 +391,7 @@ union object *object_intern_big_int(struct object_intern   *s,
     }
   }
 
+  object_intern_ensure_object_set(s);
   union object *result = object_new_big_int(&s->arena, num_pydigits, pydigits);
   object_intern_insert_object_bucket(s, result, hash);
   return result;
@@ -423,8 +408,6 @@ union object *object_intern_tuple_end(struct object_intern *s,
                                       bool                  may_free_arena)
 {
   union object *tuple_obj = object_new_tuple_end(tuple);
-
-  object_intern_ensure_object_set(s);
 
   unsigned hash = fnv_hash_tuple_like(OBJECT_TUPLE, tuple_obj);
   struct hash_set_chain_iteration_state c;
@@ -444,6 +427,7 @@ union object *object_intern_tuple_end(struct object_intern *s,
     }
   }
 
+  object_intern_ensure_object_set(s);
   object_intern_insert_object_bucket(s, tuple_obj, hash);
   return tuple_obj;
 }
@@ -453,8 +437,6 @@ union object *object_intern_tuple_end_as_frozenset(struct object_intern *s,
                                                    bool may_free_arena)
 {
   union object *obj = object_new_tuple_end(tuple);
-
-  object_intern_ensure_object_set(s);
 
   unsigned hash = fnv_hash_tuple_like(OBJECT_FROZENSET, obj);
   struct hash_set_chain_iteration_state c;
@@ -474,6 +456,7 @@ union object *object_intern_tuple_end_as_frozenset(struct object_intern *s,
     }
   }
 
+  object_intern_ensure_object_set(s);
   obj->type = OBJECT_FROZENSET;
   object_intern_insert_object_bucket(s, obj, hash);
   return obj;

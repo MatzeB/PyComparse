@@ -1,5 +1,6 @@
 #include "pycomparse/symbol_table.h"
 
+#include "pycomparse/adt/hash.h"
 #include "pycomparse/symbol_table_types.h"
 #include "pycomparse/symbol_types.h"
 #include "pycomparse/token_kinds.h"
@@ -9,16 +10,6 @@ struct symbol_table_bucket {
   struct symbol *symbol;
   unsigned       hash;
 };
-
-static unsigned fnv_hash_string(const char *string)
-{
-  unsigned hash = 2166136261;
-  for (const char *p = string; *p != '\0'; ++p) {
-    hash ^= (unsigned char)*p;
-    hash *= 16777619;
-  }
-  return hash;
-}
 
 static struct symbol *
 symbol_table_new_symbol(struct symbol_table *symbol_table, const char *string,
@@ -36,7 +27,6 @@ static struct symbol *
 symbol_table_insert_new(struct symbol_table *symbol_table,
                         struct symbol *symbol, unsigned hash)
 {
-  hash_set_increment_num_elements(&symbol_table->set);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
   struct symbol_table_bucket *buckets = symbol_table->buckets;
@@ -45,6 +35,7 @@ symbol_table_insert_new(struct symbol_table *symbol_table,
     if (bucket->symbol == NULL) {
       bucket->symbol = symbol;
       bucket->hash = hash;
+      hash_set_increment_num_elements(&symbol_table->set);
       return symbol;
     }
   }
@@ -72,19 +63,20 @@ static void symbol_table_resize(struct symbol_table *symbol_table,
 struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
                                           const char          *string)
 {
-  unsigned new_size = hash_set_should_resize(&symbol_table->set);
-  if (UNLIKELY(new_size != 0)) {
-    symbol_table_resize(symbol_table, new_size);
-  }
-
-  unsigned hash = fnv_hash_string(string);
-
+  unsigned                              hash = fnv_hash_cstring(string);
   struct hash_set_chain_iteration_state c;
   hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
   struct symbol_table_bucket *buckets = symbol_table->buckets;
-  for (;; hash_set_chain_iteration_next(&c)) {
+  for (;;) {
     struct symbol_table_bucket *bucket = &buckets[c.index];
     if (bucket->symbol == NULL) {
+      unsigned new_size = hash_set_should_resize(&symbol_table->set);
+      if (UNLIKELY(new_size != 0)) {
+        symbol_table_resize(symbol_table, new_size);
+        hash_set_chain_iteration_begin(&c, &symbol_table->set, hash);
+        buckets = symbol_table->buckets;
+        continue;
+      }
       // not found: create a new entry.
       struct symbol *symbol
           = symbol_table_new_symbol(symbol_table, string, T_IDENTIFIER);
@@ -96,6 +88,7 @@ struct symbol *symbol_table_get_or_insert(struct symbol_table *symbol_table,
                && strcmp(bucket->symbol->string, string) == 0) {
       return bucket->symbol;
     }
+    hash_set_chain_iteration_next(&c);
   }
 }
 
@@ -105,7 +98,7 @@ static void symbol_table_insert_predefined(struct symbol_table *symbol_table,
 {
   struct symbol *symbol
       = symbol_table_new_symbol(symbol_table, string, token_kind);
-  unsigned hash = fnv_hash_string(string);
+  unsigned hash = fnv_hash_cstring(string);
   symbol_table_insert_new(symbol_table, symbol, hash);
 }
 

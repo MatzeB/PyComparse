@@ -108,6 +108,7 @@ endif()
 set(PYCOMPARSE_SOURCES
   include/pycomparse/adt/arena.h
   include/pycomparse/adt/dynmemory.h
+  include/pycomparse/adt/hash.h
   include/pycomparse/adt/stack.h
   include/pycomparse/ast.h
   include/pycomparse/ast_fold_constants.h
@@ -157,11 +158,10 @@ set(PYCOMPARSE_SOURCES
   src/writer.c
 )
 
-add_executable(arena_test
-  src/arena_test.c
-  include/pycomparse/adt/arena.h
+add_executable(adt_test
+  src/adt_test.c
 )
-target_include_directories(arena_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
+target_include_directories(adt_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
 add_executable(scanner_test
   ${PYCOMPARSE_SOURCES}
@@ -185,7 +185,7 @@ if (PYCOMPARSE_ENABLE_LTO)
   set_property(TARGET pycomparse PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 if (PYCOMPARSE_ENABLE_LTO)
-  set_property(TARGET arena_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set_property(TARGET adt_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 
 option(PYCOMPARSE_ENABLE_FUZZER

@@ -58,7 +58,7 @@ static void append_mem(struct unparse_state *s, const char *chars,
                        size_t length)
 {
   if (length == 0) return;
-  memcpy(arena_grow(s->arena, (unsigned)length), chars, length);
+  memcpy(arena_grow(s->arena, length), chars, length);
 }
 
 static void append_cstring(struct unparse_state *s, const char *cstring)
@@ -178,8 +178,8 @@ static void append_big_int_pydigits(struct unparse_state        *s,
     internal_error("integer too large to unparse");
   }
 
-  unsigned  output_offset = arena_grow_current_size(s->arena);
-  char     *scratch = (char *)arena_grow(s->arena, (unsigned)scratch_size);
+  size_t    output_offset = arena_grow_current_size(s->arena);
+  char     *scratch = (char *)arena_grow(s->arena, scratch_size);
   char     *decimal_rev = scratch;
   uintptr_t digits_unaligned = (uintptr_t)(scratch + max_decimal_digits);
   uintptr_t digits_aligned
@@ -187,7 +187,7 @@ static void append_big_int_pydigits(struct unparse_state        *s,
   uint16_t *digits = (uint16_t *)digits_aligned;
   memcpy(digits, big_int->pydigits, digits_size);
 
-  unsigned decimal_length = 0;
+  size_t decimal_length = 0;
   while (num_pydigits > 0) {
     uint32_t carry = 0;
     for (uint32_t i = num_pydigits; i-- > 0;) {
@@ -202,7 +202,7 @@ static void append_big_int_pydigits(struct unparse_state        *s,
   }
   assert(decimal_length > 0);
 
-  for (unsigned i = 0, e = decimal_length / 2; i < e; ++i) {
+  for (size_t i = 0, e = decimal_length / 2; i < e; ++i) {
     char tmp = decimal_rev[i];
     decimal_rev[i] = decimal_rev[decimal_length - 1 - i];
     decimal_rev[decimal_length - 1 - i] = tmp;
@@ -986,7 +986,10 @@ union object *ast_unparse_expression(struct object_intern *intern,
 
   arena_grow_begin(state.arena, /*alignment=*/1);
   unparse_expression_prec(&state, expression, UNPARSE_PREC_ROOT);
-  unsigned length = arena_grow_current_size(state.arena);
-  char    *chars = arena_grow_finish(state.arena);
-  return object_intern_string(intern, OBJECT_STRING, length, chars);
+  size_t length = arena_grow_current_size(state.arena);
+  if (length > UINT32_MAX) {
+    internal_error("unparsed expression too long");
+  }
+  char *chars = arena_grow_finish(state.arena);
+  return object_intern_string(intern, OBJECT_STRING, (uint32_t)length, chars);
 }

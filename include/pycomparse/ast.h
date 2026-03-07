@@ -111,7 +111,7 @@ ast_expression_as_constant(union ast_expression *expression);
 
 struct location get_expression_location(union ast_expression *expression);
 
-union object *nullable ast_tuple_compute_constant(
+union object *nullable ast_tuple_as_constant(
     struct object_intern *intern, struct ast_expression_list *tuple);
 
 ASSUME_NONNULL_END

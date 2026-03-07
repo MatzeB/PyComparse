@@ -1,6 +1,7 @@
 #include "pycomparse/codegen.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,13 @@ static unsigned pointer_hash(const void *key)
   x *= 0xc2b2ae35u;
   x ^= x >> 16;
   return (unsigned)x;
+}
+
+static unsigned arena_grow_current_size_as_unsigned(const struct arena *arena)
+{
+  size_t size = arena_grow_current_size(arena);
+  assert(size <= UINT_MAX);
+  return (unsigned)size;
 }
 
 static void code_index_cache_insert_raw(struct code_index_cache *cache,
@@ -224,7 +232,8 @@ void cg_set_lineno(struct cg_state *s, unsigned lineno)
   }
   struct lnotab_mark *mark = &s->code.lnotab_marks[length];
   mark->block = s->code.current_block;
-  mark->offset_in_block = arena_grow_current_size(&s->code.opcodes);
+  mark->offset_in_block
+      = arena_grow_current_size_as_unsigned(&s->code.opcodes);
   mark->lineno = lineno;
   s->code.lnotab_marks_length = length + 1;
 }
@@ -260,7 +269,7 @@ struct basic_block *cg_block_end(struct cg_state *s)
     s->code.last_block = block;
   }
 
-  block->code_length = arena_grow_current_size(&s->code.opcodes);
+  block->code_length = arena_grow_current_size_as_unsigned(&s->code.opcodes);
   block->code_bytes = arena_grow_finish(&s->code.opcodes);
   return block;
 }
@@ -587,7 +596,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
        block = next) {
     next = block->next;
     unsigned offset = block->offset;
-    assert(offset == arena_grow_current_size(arena));
+    assert(offset == arena_grow_current_size_as_unsigned(arena));
 
     unsigned code_length = block->code_length;
     void    *dst = arena_grow(arena, code_length);
@@ -641,7 +650,7 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     }
   }
 
-  unsigned code_length = arena_grow_current_size(arena);
+  uint32_t code_length = (uint32_t)arena_grow_current_size_as_unsigned(arena);
   char    *code_bytes = arena_grow_finish(arena);
 
   union object *code = object_intern_string(s->objects, OBJECT_BYTES,
@@ -700,8 +709,9 @@ union object *cg_code_end(struct cg_state *s, const char *name)
     prev_offset = abs_offset;
     prev_lineno = lineno;
   }
-  unsigned lnotab_length = arena_grow_current_size(arena);
-  char    *lnotab_bytes = arena_grow_finish(arena);
+  uint32_t lnotab_length
+      = (uint32_t)arena_grow_current_size_as_unsigned(arena);
+  char *lnotab_bytes = arena_grow_finish(arena);
 
   union object *lnotab = object_intern_string(s->objects, OBJECT_BYTES,
                                               lnotab_length, lnotab_bytes);

@@ -464,13 +464,16 @@ static void scan_identifier_continue(struct scanner_state *s,
 
   /* NFKC normalize non-ASCII identifiers (PEP 3131). */
   if (has_non_ascii) {
-    unsigned raw_len = arena_grow_current_size(arena);
-    char    *raw = arena_grow_current_base(arena);
+    size_t raw_len = arena_grow_current_size(arena);
+    char  *raw = arena_grow_current_base(arena);
+    if (raw_len > INT_MAX) {
+      internal_error("identifier too long for normalization");
+    }
     int nfkc_len = nfkc_normalize((uint8_t *)raw, (int)raw_len, (int)raw_len);
     if (nfkc_len >= 0) {
       /* NFKC result fits (it's always <= original length for identifiers).
        * Truncate the arena grow region to the normalized length. */
-      arena_grow_truncate(arena, (unsigned)nfkc_len);
+      arena_grow_truncate(arena, (size_t)nfkc_len);
     }
     /* If nfkc_normalize returns -1 (shouldn't happen for valid identifiers),
      * fall through and use the raw string. */
@@ -1709,7 +1712,7 @@ static bool scan_string_plain_span(struct scanner_state *s,
     return false;
   }
 
-  char *dst = (char *)arena_grow(strings, (unsigned)span_size);
+  char *dst = (char *)arena_grow(strings, span_size);
   memcpy(dst, start, span_size);
 
   s->p = cursor;
@@ -1881,7 +1884,11 @@ finish_string:;
   size_t           length = arena_grow_current_size(strings);
   char            *chars = (char *)arena_grow_finish(strings);
   enum object_type type = flags.unicode ? OBJECT_STRING : OBJECT_BYTES;
-  union object *object = object_intern_string(s->objects, type, length, chars);
+  if (length > UINT32_MAX) {
+    internal_error("string literal too long");
+  }
+  union object *object
+      = object_intern_string(s->objects, type, (uint32_t)length, chars);
   if (object->string.chars != chars) {
     arena_free_to(strings, chars);
   }

@@ -618,7 +618,7 @@ static union ast_expression *parse_star_expressions(struct parser_state *s,
         /*allow_starred=*/true);
     assert(ast_expression_type(expression) == AST_EXPRESSION_LIST);
     expression->expression_list.as_constant
-        = ast_tuple_compute_constant(s->objects, &expression->expression_list);
+        = ast_tuple_as_constant(s->objects, &expression->expression_list);
   }
   return expression;
 }
@@ -1304,7 +1304,7 @@ static union ast_expression *parse_l_paren(struct parser_state *s)
     expression->expression_list.base.location = location;
     expression->expression_list.num_expressions = 0;
     expression->expression_list.as_constant
-        = ast_tuple_compute_constant(s->objects, &expression->expression_list);
+        = ast_tuple_as_constant(s->objects, &expression->expression_list);
     return expression;
   }
 
@@ -1841,7 +1841,7 @@ static inline union ast_expression *parse_augassign_rhs(struct parser_state *s)
                                        /*allow_starred=*/false);
     assert(ast_expression_type(rhs) == AST_EXPRESSION_LIST);
     rhs->expression_list.as_constant
-        = ast_tuple_compute_constant(s->objects, &rhs->expression_list);
+        = ast_tuple_as_constant(s->objects, &rhs->expression_list);
   }
   return rhs;
 }

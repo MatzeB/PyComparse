@@ -123,8 +123,8 @@ struct location get_expression_location(union ast_expression *expression)
   internal_error("invalid expression type");
 }
 
-union object *ast_tuple_compute_constant(struct object_intern       *intern,
-                                         struct ast_expression_list *tuple)
+union object *ast_tuple_as_constant(struct object_intern       *intern,
+                                    struct ast_expression_list *tuple)
 {
   /* Check that all arguments are constant or give up. */
   unsigned num_expressions = tuple->num_expressions;

@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pycomparse/adt/bitfiddle.h"
-
 #define ADT_HAVE_ASAN 0
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -37,14 +35,14 @@ extern "C" {
 
 struct block_header {
   struct block_header *_Nullable prev;
-  unsigned block_size;
+  size_t block_size;
 };
 
 struct arena {
   struct block_header *_Nullable block;
-  unsigned allocated;
-  unsigned limit;
-  unsigned grow;
+  size_t   allocated;
+  size_t   limit;
+  size_t   grow;
   unsigned grow_alignment;
 };
 
@@ -81,14 +79,36 @@ static inline void arena_init(struct arena *arena)
   memset(arena, 0, sizeof(*arena));
 }
 
-static __attribute__((noinline)) void
-arena_allocate_block_(struct arena *arena, unsigned size)
+static inline __attribute__((const)) size_t ceil_po2_size_(size_t x)
 {
-  const unsigned default_block_size = 16 * 1024;
-  unsigned block_size = size < default_block_size - sizeof(struct block_header)
-                            ? default_block_size
-                            : ceil_po2(size + sizeof(struct block_header));
-  void    *memory = malloc(block_size);
+  if (x <= 1) {
+    return x;
+  }
+  size_t result = 1;
+  while (result < x) {
+    if (result > ~(size_t)0 / 2) {
+      abort();
+    }
+    result <<= 1;
+  }
+  return result;
+}
+
+static __attribute__((noinline)) void
+arena_allocate_block_(struct arena *arena, size_t size)
+{
+  const size_t default_block_size = 16 * 1024;
+  assert(default_block_size > sizeof(struct block_header));
+  size_t min_payload = default_block_size - sizeof(struct block_header);
+  if (size > ~(size_t)0 - sizeof(struct block_header)) {
+    abort();
+  }
+  size_t requested_block_size = size + sizeof(struct block_header);
+  size_t block_size = size < min_payload
+                          ? default_block_size
+                          : ceil_po2_size_(requested_block_size);
+
+  void *memory = malloc(block_size);
   if (memory == NULL) abort();
   struct block_header *header = (struct block_header *)memory;
   header->prev = arena->block;
@@ -106,15 +126,16 @@ static inline void arena_align_(struct arena *arena, unsigned alignment)
   assert(alignment > 0);
   assert((alignment & (alignment - 1)) == 0 && "alignment must be power of 2");
   assert(alignment <= arena_max_alignment);
-  unsigned mask = ~(alignment - 1);
-  arena->allocated = (arena->allocated + alignment - 1) & mask;
+  assert(arena->allocated <= ~(size_t)0 - ((size_t)alignment - 1u));
+  size_t mask = ~((size_t)alignment - 1u);
+  arena->allocated = (arena->allocated + (size_t)alignment - 1u) & mask;
 }
 
 static __attribute__((noinline)) void *
 arena_allocate_slow_(struct arena *arena, size_t size, unsigned alignment)
 {
-  assert(size <= UINT_MAX - (alignment - 1));
-  unsigned required_size = (unsigned)size + alignment - 1;
+  assert(size <= ~(size_t)0 - ((size_t)alignment - 1u));
+  size_t required_size = size + (size_t)alignment - 1u;
 
   if (arena->block == NULL
       || required_size > arena->limit - arena->allocated) {
@@ -126,7 +147,7 @@ arena_allocate_slow_(struct arena *arena, size_t size, unsigned alignment)
     arena_align_(arena, alignment);
   }
   void *result = (char *)arena->block + arena->allocated;
-  arena->allocated += (unsigned)size;
+  arena->allocated += size;
   arena_unpoison_alloc_(result, size);
   return result;
 }
@@ -134,7 +155,7 @@ arena_allocate_slow_(struct arena *arena, size_t size, unsigned alignment)
 static __attribute__((noinline)) void
 arena_grow_begin_slow_(struct arena *arena, unsigned alignment)
 {
-  unsigned required_size = alignment - 1;
+  size_t required_size = (size_t)alignment - 1u;
   if (arena->block == NULL
       || required_size > arena->limit - arena->allocated) {
     arena_allocate_block_(arena, required_size);
@@ -147,12 +168,11 @@ arena_grow_begin_slow_(struct arena *arena, unsigned alignment)
 static inline void *arena_allocate(struct arena *arena, size_t size,
                                    unsigned alignment)
 {
-  assert(size < UINT_MAX / 2);
   assert(arena->grow == 0);
   assert(alignment <= arena_max_alignment);
-  assert(size <= UINT_MAX - (alignment - 1));
+  assert(size <= ~(size_t)0 - ((size_t)alignment - 1u));
 
-  unsigned required_size = (unsigned)size + alignment - 1;
+  size_t required_size = size + (size_t)alignment - 1u;
   if (UNLIKELY(arena->block == NULL
                || required_size > arena->limit - arena->allocated)) {
     return arena_allocate_slow_(arena, size, alignment);
@@ -193,14 +213,14 @@ static inline void arena_free_to(struct arena *arena, const void *free_up_to)
     assert(block != NULL && "address must be part of arena");
   }
 
-  const unsigned free_offset
-      = (unsigned)((const char *)free_up_to - (const char *)block);
+  size_t free_offset
+      = (size_t)((const char *)free_up_to - (const char *)block);
   assert(free_offset <= arena->allocated);
   arena_poison_freed_((char *)block + free_offset,
                       arena->allocated - free_offset);
 
   arena->block = block;
-  arena->allocated = (const char *)free_up_to - (const char *)block;
+  arena->allocated = (size_t)((const char *)free_up_to - (const char *)block);
   arena->limit = block->block_size;
 }
 
@@ -210,7 +230,7 @@ static inline void arena_grow_begin(struct arena *arena, unsigned alignment)
   assert(alignment > 0);
   assert(alignment <= arena_max_alignment);
 
-  unsigned required_size = alignment - 1;
+  size_t required_size = (size_t)alignment - 1u;
   if (UNLIKELY(arena->block == NULL
                || required_size > arena->limit - arena->allocated)) {
     arena_grow_begin_slow_(arena, alignment);
@@ -221,13 +241,13 @@ static inline void arena_grow_begin(struct arena *arena, unsigned alignment)
   arena->grow_alignment = alignment;
 }
 
-static inline unsigned arena_grow_current_size(const struct arena *arena)
+static inline size_t arena_grow_current_size(const struct arena *arena)
 {
   assert(arena->grow != 0);
   return arena->grow - arena->allocated;
 }
 
-static inline void arena_grow_truncate(struct arena *arena, unsigned size)
+static inline void arena_grow_truncate(struct arena *arena, size_t size)
 {
   assert(arena->grow != 0);
   assert(size <= arena_grow_current_size(arena));
@@ -241,10 +261,11 @@ static inline void *arena_grow_current_base(const struct arena *arena)
 }
 
 static __attribute__((noinline)) void
-new_block_while_growing_(struct arena *arena, unsigned size)
+new_block_while_growing_(struct arena *arena, size_t size)
 {
   const void *old_begin = arena_grow_current_base(arena);
-  unsigned    current_size = arena_grow_current_size(arena);
+  size_t      current_size = arena_grow_current_size(arena);
+  assert(current_size <= ~(size_t)0 - size);
   arena_allocate_block_(arena, current_size + size);
   arena_align_(arena, arena->grow_alignment);
   void *new_begin = arena_grow_current_base(arena);
@@ -253,7 +274,7 @@ new_block_while_growing_(struct arena *arena, unsigned size)
   arena->grow = arena->allocated + current_size;
 }
 
-static inline void *arena_grow(struct arena *arena, unsigned size)
+static inline void *arena_grow(struct arena *arena, size_t size)
 {
   assert(arena->grow != 0);
   if (UNLIKELY(size >= arena->limit - arena->grow)) {

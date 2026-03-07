@@ -1001,7 +1001,7 @@ static union ast_expression *fold_expression(struct constant_fold_state *s,
         result->expression_list.as_constant = NULL;
       } else {
         result->expression_list.as_constant
-            = ast_tuple_compute_constant(s->intern, &result->expression_list);
+            = ast_tuple_as_constant(s->intern, &result->expression_list);
       }
     }
     break;

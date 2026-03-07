@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -euo pipefail
 
 # PGO+LTO optimized pycomparse build
@@ -22,8 +23,8 @@ mapfile -d "" SOURCES < <(
 )
 
 uv run scripts/benchmark_compile_perf.py \
-  --baseline="${CPYTHON_3_8}" \
-  --tested="${PYCOMPARSE}" \
+  --baseline-python-cmd="${CPYTHON_3_8}" \
+  --tested-compiler="${PYCOMPARSE}" \
   --runner=hyperfine \
   --warmup=1 \
   --repeats=10 \
@@ -43,8 +44,8 @@ uv run scripts/generate_large_python_files.py \
   --pattern=functions
 
 uv run scripts/benchmark_compile_perf.py \
-  --baseline="${CPYTHON_3_8}" \
-  --tested="${PYCOMPARSE}" \
+  --baseline-python-cmd="${CPYTHON_3_8}" \
+  --tested-compiler="${PYCOMPARSE}" \
   --runner=hyperfine \
   --warmup=1 \
   --repeats=10 \
@@ -52,3 +53,5 @@ uv run scripts/benchmark_compile_perf.py \
   --json-out="${RESULTS}/bench-synthetic-large.json" \
   --tsv-out="${RESULTS}/bench-synthetic-large.tsv" \
   "${SYNTHETIC_LARGE}"/*
+
+echo "DEST=${DEST}"

@@ -1,14 +1,14 @@
 const BENCHMARK = {
-  revision: "08e5bf1",
+  revision: "b58f86b",
   python: "3.8.20",
   suites: [
     {
       name: "CPython Lib suite",
-      source: "bench_results/bench-all.json",
+      source: "bench_results/bench-all-b58f86b.json",
     },
     {
       name: "Synthetic large suite",
-      source: "bench_results/bench-synthetic-large.json",
+      source: "bench_results/bench-synthetic-large-b58f86b.json",
     },
   ],
 };
@@ -96,6 +96,20 @@ function getNestedNumber(obj, key) {
     return NaN;
   }
   return Number(obj[key]);
+}
+
+function getBaselineResult(row) {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+  return row.cpython || row.baseline || null;
+}
+
+function getTestedResult(row) {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+  return row.pycomparse || row.tested || null;
 }
 
 function toggleSort(state, key) {
@@ -188,10 +202,12 @@ async function loadSuiteSummary(suite) {
   const details = [];
 
   for (const row of results) {
-    const cpythonMedian = getNestedNumber(row.cpython, "median_ms");
-    const pycomparseMedian = getNestedNumber(row.pycomparse, "median_ms");
-    const cpythonStddev = getNestedNumber(row.cpython, "stddev_ms");
-    const pycomparseStddev = getNestedNumber(row.pycomparse, "stddev_ms");
+    const baselineResult = getBaselineResult(row);
+    const testedResult = getTestedResult(row);
+    const cpythonMedian = getNestedNumber(baselineResult, "median_ms");
+    const pycomparseMedian = getNestedNumber(testedResult, "median_ms");
+    const cpythonStddev = getNestedNumber(baselineResult, "stddev_ms");
+    const pycomparseStddev = getNestedNumber(testedResult, "stddev_ms");
     let speedup = null;
     if (
       row.status === "ok" &&
@@ -217,8 +233,8 @@ async function loadSuiteSummary(suite) {
 
     if (row.status === "ok") {
       ok += 1;
-      cpythonMs += Number((row.cpython && row.cpython.median_ms) || 0);
-      pycomparseMs += Number((row.pycomparse && row.pycomparse.median_ms) || 0);
+      cpythonMs += Number((baselineResult && baselineResult.median_ms) || 0);
+      pycomparseMs += Number((testedResult && testedResult.median_ms) || 0);
     } else {
       fail += 1;
     }

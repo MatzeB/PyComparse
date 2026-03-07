@@ -1,0 +1,7 @@
+file	size_bytes	status	baseline_min_ms	baseline_median_ms	baseline_mean_ms	baseline_max_ms	tested_min_ms	tested_median_ms	tested_mean_ms	tested_max_ms	ratio_baseline_over_tested	baseline_error	tested_error
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_many_functions_10mb.py	10485844	ok	1861.793611	1873.156901	1872.831893	1881.231447	266.309143	267.040011	267.076465	268.106201	7.014518		
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_many_functions_1mb.py	1048628	ok	199.708464	200.866506	201.197552	203.456400	26.029850	26.632353	26.758348	27.533268	7.542199		
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_many_functions_5mb.py	5242968	ok	933.379980	940.882702	941.000789	951.255937	130.632599	131.240831	131.428280	132.195359	7.169131		
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_statements_10mb.py	10485781	ok	2627.127669	2648.857351	2648.626915	2669.035269	216.022890	217.568719	218.301663	221.353227	12.174808		
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_statements_1mb.py	1048583	ok	280.437252	286.036434	285.404675	288.532589	21.947780	22.776602	22.876987	24.349044	12.558346		
+/tmp/perf-1LeHr9p3t/synthetic_large/huge_statements_5mb.py	5242927	ok	1334.317270	1347.746183	1353.060377	1408.881836	108.970725	109.793333	110.092929	112.348012	12.275301		

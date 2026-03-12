@@ -23,10 +23,8 @@ enum parser_single_result {
 };
 
 void parser_init(struct parser_state *s, struct object_intern *objects,
-                 struct diagnostics_state *diagnostics);
+                 struct diagnostics_state *diagnostics, uint32_t flags);
 void parser_free(struct parser_state *s);
-
-void parser_set_flags(struct parser_state *s, uint32_t flags);
 
 struct ast_module        *parse_module(struct parser_state *s);
 struct ast_module        *parse_single_statement(struct parser_state *s);

@@ -3717,19 +3717,16 @@ struct ast_module *parse_single_expression(struct parser_state *s)
 }
 
 void parser_init(struct parser_state *s, struct object_intern *objects,
-                 struct diagnostics_state *diagnostics)
+                 struct diagnostics_state *diagnostics, uint32_t flags)
 {
   memset(s, 0, sizeof(*s));
   arena_init(&s->ast);
   s->objects = objects;
   s->d = diagnostics;
   s->top_level_future_imports_allowed = true;
-  memset(s->anchor_set, 0, sizeof(s->anchor_set));
-}
-
-void parser_set_flags(struct parser_state *s, uint32_t flags)
-{
   s->future_flags = flags & PyCF_MASK;
+  s->in_function = (flags & PYCOMPARSE_TOPLEVEL_FUNCTION) != 0;
+  memset(s->anchor_set, 0, sizeof(s->anchor_set));
 }
 
 void parser_free(struct parser_state *s)

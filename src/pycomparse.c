@@ -33,6 +33,11 @@ static void print_usage(FILE *out, const char *prog)
   fprintf(out, "       -O   disable assert statements\n");
   fprintf(out, "       -OO  disable assert statements and strip docstrings\n");
   fprintf(out,
+          "       --toplevel-function  treat the top level as a function\n");
+  fprintf(out, "         (allows return/yield at module scope)\n");
+  fprintf(out, "       --barry-as-flufl  enable PEP 401 diamond operator (!=  "
+               "->  <>)\n");
+  fprintf(out,
           "       --interactive-test reads stdin line-by-line and emits\n");
   fprintf(out,
           "         `incomplete`, `error` or `ok: <path>` after each line.\n");
@@ -82,7 +87,7 @@ static bool write_module_to_file(const char *out_filename, union object *code)
 static enum parser_single_result
 compile_single_buffer(const char *source, size_t source_len,
                       const char *source_name, const char *out_filename,
-                      int optimize_level)
+                      int optimize_level, uint32_t parser_flags)
 {
   struct symbol_table symbol_table;
   symbol_table_init(&symbol_table);
@@ -101,7 +106,7 @@ compile_single_buffer(const char *source, size_t source_len,
   cg.optimize_no_docstrings = (optimize_level >= 2);
 
   struct parser_state parser;
-  parser_init(&parser, &objects, &diagnostics);
+  parser_init(&parser, &objects, &diagnostics, parser_flags);
   scanner_init_from_buffer(&parser.scanner, source, source_len, source_name,
                            &symbol_table, &objects, &strings, &diagnostics,
                            /*is_utf8=*/false);
@@ -141,7 +146,7 @@ compile_single_buffer(const char *source, size_t source_len,
 }
 
 static int run_interactive_test_mode(const char *out_prefix,
-                                     int         optimize_level)
+                                     int optimize_level, uint32_t parser_flags)
 {
   char   line[4096];
   char  *source = NULL;
@@ -175,8 +180,9 @@ static int run_interactive_test_mode(const char *out_prefix,
       return 1;
     }
 
-    enum parser_single_result result = compile_single_buffer(
-        source, source_len, "<stdin>", output_path, optimize_level);
+    enum parser_single_result result
+        = compile_single_buffer(source, source_len, "<stdin>", output_path,
+                                optimize_level, parser_flags);
     if (result == PARSER_SINGLE_INCOMPLETE) {
       puts("incomplete");
       continue;
@@ -209,8 +215,9 @@ static int run_interactive_test_mode(const char *out_prefix,
       return 1;
     }
 
-    enum parser_single_result result = compile_single_buffer(
-        source, source_len, "<stdin>", output_path, optimize_level);
+    enum parser_single_result result
+        = compile_single_buffer(source, source_len, "<stdin>", output_path,
+                                optimize_level, parser_flags);
     if (result == PARSER_SINGLE_INCOMPLETE) {
       puts("incomplete");
     } else if (result == PARSER_SINGLE_ERROR) {
@@ -231,6 +238,7 @@ int main(int argc, char **argv)
   const char *out_filename = NULL;
   const char *interactive_out_prefix = "/tmp/pycomparse-interactive";
   bool        interactive_test_mode = false;
+  uint32_t    parser_flags = 0;
   int         optimize_level = 0;
 
   for (int i = 1; i < argc; ++i) {
@@ -253,6 +261,16 @@ int main(int argc, char **argv)
 
     if (strcmp(arg, "--interactive-test") == 0) {
       interactive_test_mode = true;
+      continue;
+    }
+
+    if (strcmp(arg, "--toplevel-function") == 0) {
+      parser_flags |= PYCOMPARSE_TOPLEVEL_FUNCTION;
+      continue;
+    }
+
+    if (strcmp(arg, "--barry-as-flufl") == 0) {
+      parser_flags |= CO_FUTURE_BARRY_AS_BDFL;
       continue;
     }
 
@@ -318,7 +336,8 @@ int main(int argc, char **argv)
       print_usage(stderr, argv[0]);
       return 1;
     }
-    return run_interactive_test_mode(interactive_out_prefix, optimize_level);
+    return run_interactive_test_mode(interactive_out_prefix, optimize_level,
+                                     parser_flags);
   }
 
   if (input_filename == NULL || out_filename == NULL) {
@@ -350,7 +369,7 @@ int main(int argc, char **argv)
   cg.optimize_no_docstrings = (optimize_level >= 2);
 
   struct parser_state parser;
-  parser_init(&parser, &objects, &diagnostics);
+  parser_init(&parser, &objects, &diagnostics, parser_flags);
   scanner_init(&parser.scanner, input, input_filename, &symbol_table, &objects,
                &strings, &diagnostics);
 

@@ -23,19 +23,19 @@ struct parser_state {
   struct diagnostics_state *d;
   struct symbol *nullable   private_class_name;
   bool *nullable            current_function_has_yield;
+  unsigned                  await_tracking_depth;
+  unsigned                  loop_depth;
+  int                       nesting_depth;
+  uint32_t                  future_flags;
   bool                      in_function;
   bool                      in_async_function;
-  unsigned                  await_tracking_depth;
   bool                      parsed_await_expression;
   bool                      parsing_annotation;
-  uint32_t                  future_flags;
   bool                      top_level_future_imports_allowed;
   bool                      top_level_seen_any_statement;
-  unsigned                  loop_depth;
   bool                      single_input_mode;
   bool                      incomplete_input;
 
-  int      nesting_depth;
   uint16_t anchor_set[NUM_TOKENS];
 };
 

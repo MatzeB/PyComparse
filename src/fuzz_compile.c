@@ -37,7 +37,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   diag_init(&diagnostics, "<fuzz>");
   object_intern_init(&objects);
   cg_init(&cg, &objects, &symbol_table, "<fuzz>", &diagnostics);
-  parser_init(&parser, &objects, &diagnostics);
+  parser_init(&parser, &objects, &diagnostics, /*flags=*/0);
   scanner_init(&parser.scanner, input, "<fuzz>", &symbol_table, &objects,
                &strings, &diagnostics);
 

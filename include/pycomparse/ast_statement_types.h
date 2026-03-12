@@ -65,10 +65,10 @@ struct ast_class {
   struct symbol                            *name;
   struct ast_call                          *call;
   struct ast_statement_list                *body;
-  unsigned                                  num_decorators;
   union ast_expression * nonnull * nullable decorators;
-  bool                                      needs_class_cell;
   struct ast_scope_bindings *nullable       scope;
+  unsigned                                  num_decorators;
+  bool                                      needs_class_cell;
 };
 
 struct ast_continue {

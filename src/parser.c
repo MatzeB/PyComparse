@@ -82,16 +82,12 @@ static inline union object *peek_get_object(struct parser_state *s,
                                             enum token_kind      token_kind)
 {
   (void)token_kind;
-  assert(token_kind == T_STRING || token_kind == T_INTEGER
-         || token_kind == T_FLOAT || token_kind == T_FSTRING_START
-         || token_kind == T_FSTRING_FRAGMENT || token_kind == T_FSTRING_END);
+  assert(token_kind == T_STRING || token_kind == T_FSTRING
+         || token_kind == T_INTEGER || token_kind == T_FLOAT
+         || token_kind == T_FSTRING_START || token_kind == T_FSTRING_FRAGMENT
+         || token_kind == T_FSTRING_END);
   assert(peek(s) == token_kind);
   return s->scanner.token.u.object;
-}
-
-static inline bool peek_string_is_fstring(const struct parser_state *s)
-{
-  return peek(s) == T_STRING && s->scanner.token.string_is_fstring;
 }
 
 static inline bool accept(struct parser_state *s, enum token_kind token_kind)
@@ -1460,14 +1456,16 @@ static union object *concat_strings(struct parser_state *s,
 static union ast_expression *parse_string(struct parser_state *s)
 {
   struct location location = scanner_location(&s->scanner);
-  bool saw_fstring = (peek(s) == T_FSTRING_START) || peek_string_is_fstring(s);
+  bool saw_fstring = (peek(s) == T_FSTRING_START) || peek(s) == T_FSTRING;
   union object *string;
   // fast-path: single string literal
-  if (peek(s) == T_STRING) {
-    saw_fstring = peek_string_is_fstring(s);
-    string = peek_get_object(s, T_STRING);
-    eat(s, T_STRING);
-    if (!saw_fstring && peek(s) != T_STRING && peek(s) != T_FSTRING_START) {
+  if (peek(s) == T_STRING || peek(s) == T_FSTRING) {
+    enum token_kind str_kind = peek(s);
+    saw_fstring = (str_kind == T_FSTRING);
+    string = peek_get_object(s, str_kind);
+    eat(s, str_kind);
+    if (!saw_fstring && peek(s) != T_STRING && peek(s) != T_FSTRING
+        && peek(s) != T_FSTRING_START) {
       return ast_const_new(s, string, location);
     }
   } else {
@@ -1498,10 +1496,11 @@ static union ast_expression *parse_string(struct parser_state *s)
                  sizeof(inline_storage_elements));
 
   for (;;) {
-    if (peek(s) == T_STRING) {
-      saw_fstring |= peek_string_is_fstring(s);
-      string = peek_get_object(s, T_STRING);
-      eat(s, T_STRING);
+    if (peek(s) == T_STRING || peek(s) == T_FSTRING) {
+      enum token_kind str_kind = peek(s);
+      saw_fstring |= (str_kind == T_FSTRING);
+      string = peek_get_object(s, str_kind);
+      eat(s, str_kind);
       if (object_string_length(string) > 0) {
         *idynarray_append(&strings, union object *) = string;
         combined_length += object_string_length(string);
@@ -1698,6 +1697,7 @@ static union ast_expression *parse_true(struct parser_state *s)
   case T_INTEGER:                                                             \
   case T_None:                                                                \
   case T_STRING:                                                              \
+  case T_FSTRING:                                                             \
   case T_True:                                                                \
   case T_await:                                                               \
   case T_lambda:                                                              \
@@ -1761,6 +1761,7 @@ static union ast_expression *parse_prefix_expression(struct parser_state *s)
   case T_None:
     return parse_none(s);
   case T_STRING:
+  case T_FSTRING:
   case T_FSTRING_START:
     return parse_string(s);
   case T_True:

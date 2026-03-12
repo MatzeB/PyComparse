@@ -1906,8 +1906,7 @@ finish_string:;
     arena_free_to(strings, chars);
   }
   s->token.u.object = object;
-  s->token.kind = kind;
-  s->token.string_is_fstring = (kind == T_STRING && flags.format);
+  s->token.kind = (kind == T_STRING && flags.format) ? T_FSTRING : kind;
 }
 
 static void scan_eof(struct scanner_state *s)
@@ -2063,7 +2062,6 @@ static bool scan_indentation(struct scanner_state *s)
 void scanner_next_token(struct scanner_state *s)
 {
 begin_new_line:
-  s->token.string_is_fstring = false;
   if (s->at_begin_of_line) {
     if (scan_indentation(s)) {
       return;
@@ -2836,6 +2834,7 @@ void print_token(FILE *out, const struct token *token)
   case T_FSTRING_START:
   case T_FSTRING_FRAGMENT:
   case T_FSTRING_END:
+  case T_FSTRING:
   case T_STRING: {
     union object *object = token->u.object;
     if (kind == T_STRING) {
@@ -2844,6 +2843,8 @@ void print_token(FILE *out, const struct token *token)
       } else {
         fputs("\"", out);
       }
+    } else if (kind == T_FSTRING) {
+      fputs("f\"", out);
     } else {
       fputs(token_kind_name(kind), out);
       fputs(" \"", out);

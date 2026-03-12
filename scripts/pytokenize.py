@@ -483,7 +483,7 @@ def _emit_fstring_content(content, start_line, raw):
     if saw_field:
         _emit(line, f'f-string end "{rendered}"')
     else:
-        _emit(line, f'"{rendered}"')
+        _emit(line, f'f"{rendered}"')
 
 
 def _emit_string_token(raw, start_line, end_line):

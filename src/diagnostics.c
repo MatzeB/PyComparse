@@ -79,6 +79,7 @@ void diag_token(struct diagnostics_state *s, struct token *token)
     break;
   }
   case T_STRING:
+  case T_FSTRING:
   case T_FSTRING_START:
   case T_FSTRING_FRAGMENT:
   case T_FSTRING_END:
@@ -182,6 +183,7 @@ static void print_token_elem(FILE *out, uint16_t kind, const union object *obj)
 {
   switch ((enum token_kind)kind) {
   case T_STRING:
+  case T_FSTRING:
   case T_FSTRING_START:
   case T_FSTRING_FRAGMENT:
   case T_FSTRING_END: {
@@ -191,6 +193,8 @@ static void print_token_elem(FILE *out, uint16_t kind, const union object *obj)
       } else {
         fputc('"', out);
       }
+    } else if (kind == T_FSTRING) {
+      fputs("f\"", out);
     } else {
       fputs(token_kind_name((enum token_kind)kind), out);
       fputs(" \"", out);

@@ -30,12 +30,12 @@ struct symbol;
 
 struct ast_scope_bindings {
   unsigned                           num_globals;
-  struct symbol * nonnull * nullable globals;
   unsigned                           num_locals;
-  struct symbol * nonnull * nullable locals;
   unsigned                           num_cellvars;
-  struct symbol * nonnull * nullable cellvars;
   unsigned                           num_freevars;
+  struct symbol * nonnull * nullable globals;
+  struct symbol * nonnull * nullable locals;
+  struct symbol * nonnull * nullable cellvars;
   struct symbol * nonnull * nullable freevars;
 };
 

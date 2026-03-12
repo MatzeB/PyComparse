@@ -15,6 +15,15 @@ struct symbol;
 struct ast_call;
 struct parameter;
 
+/* Flag bits stored in ast_statement_base.flags */
+#define STATEMENT_ANNOTATION_SIMPLE      0x01u
+#define STATEMENT_DEF_ASYNC              0x01u
+#define STATEMENT_DEF_HAS_YIELD          0x02u
+#define STATEMENT_EXPRESSION_PRINT       0x01u
+#define STATEMENT_FOR_ASYNC              0x01u
+#define STATEMENT_CLASS_NEEDS_CLASS_CELL 0x01u
+#define STATEMENT_WITH_ASYNC             0x01u
+
 struct dotted_name {
   unsigned               num_symbols;
   struct symbol *nonnull symbols[];
@@ -33,7 +42,6 @@ struct ast_statement_list {
 struct ast_statement_annotation {
   struct ast_statement_base      base;
   union ast_expression          *target;
-  bool                           simple;
   union ast_expression          *annotation;
   union ast_expression *nullable value;
 };
@@ -68,7 +76,6 @@ struct ast_class {
   union ast_expression * nonnull * nullable decorators;
   struct ast_scope_bindings *nullable       scope;
   unsigned                                  num_decorators;
-  bool                                      needs_class_cell;
 };
 
 struct ast_continue {
@@ -78,8 +85,6 @@ struct ast_continue {
 struct ast_def {
   struct ast_statement_base                 base;
   struct symbol                            *name;
-  bool                                      async;
-  bool                                      has_yield;
   struct parameter_shape                    parameter_shape;
   union ast_expression *nullable            return_type;
   struct ast_statement_list                *body;
@@ -96,13 +101,11 @@ struct ast_del {
 
 struct ast_expression_statement {
   struct ast_statement_base base;
-  bool                      print;
   union ast_expression     *expression;
 };
 
 struct ast_for {
   struct ast_statement_base           base;
-  bool                                async;
   union ast_expression               *targets;
   union ast_expression               *expression;
   struct ast_statement_list          *body;
@@ -201,7 +204,6 @@ struct ast_with_item {
 
 struct ast_with {
   struct ast_statement_base      base;
-  bool                           async;
   unsigned                       num_items;
   struct ast_with_item *nullable items;
   struct ast_statement_list     *body;

@@ -20,11 +20,6 @@ struct diagnostics_state;
 struct symbol_table;
 union object;
 
-struct token_string {
-  size_t      length;
-  const char *chars;
-};
-
 struct token {
   uint16_t kind;
   union {

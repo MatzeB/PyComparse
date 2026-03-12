@@ -11,14 +11,14 @@ extern "C" {
 
 ASSUME_NONNULL_BEGIN
 
-struct object_base {
-  char type;
-};
-
 struct object_array {
   uint32_t                          length;
   uint32_t                          capacity;
   union object * nonnull * nullable items;
+};
+
+struct object_base {
+  char type;
 };
 
 struct object_code {

@@ -23,6 +23,7 @@ struct ast_expression_base {
 
 struct ast_statement_base {
   struct ast_node_base base;
+  uint8_t              flags;
   struct location      location;
 };
 

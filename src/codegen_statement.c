@@ -1854,7 +1854,8 @@ static void analyze_statement_collect(struct binding_scope *scope,
     analyze_expression(scope, statement->annotation.annotation);
     analyze_assignment_target(scope, statement->annotation.target,
                               /*bind=*/statement->annotation.value != NULL
-                                  || statement->annotation.simple);
+                                  || (statement->annotation.base.flags
+                                      & STATEMENT_ANNOTATION_SIMPLE));
     if (statement->annotation.value != NULL) {
       analyze_expression(scope, statement->annotation.value);
     }
@@ -2149,7 +2150,8 @@ static void analyze_class_bindings(struct cg_state               *s,
   resolve_uses(&scope, /*check_class_binds=*/false);
 
   class_stmt->scope = scope_bindings_from_scope(s, &scope);
-  class_stmt->needs_class_cell = scope.class_needs_class_cell;
+  if (scope.class_needs_class_cell)
+    class_stmt->base.flags |= STATEMENT_CLASS_NEEDS_CLASS_CELL;
 
   binding_scope_free(&scope);
 }
@@ -2264,7 +2266,7 @@ static void apply_class_bindings(struct cg_state  *s,
 {
   const struct ast_scope_bindings *scope
       = scope_bindings_or_empty(class_stmt->scope);
-  if (class_stmt->needs_class_cell) {
+  if (class_stmt->base.flags & STATEMENT_CLASS_NEEDS_CLASS_CELL) {
     struct symbol *class_symbol
         = symbol_table_get_or_insert(s->symbol_table, "__class__");
     cg_declare(s, class_symbol, SYMBOL_CELL);
@@ -2351,7 +2353,8 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   struct make_function_state state;
   bool global_binding = cg_symbol_is_global(s, def->name);
   emit_make_function_begin(s, &state, &def->parameter_shape, def->parameters,
-                           def->async, def->return_type, def->name->string,
+                           (def->base.flags & STATEMENT_DEF_ASYNC) != 0,
+                           def->return_type, def->name->string,
                            global_binding);
   union object *doc = statement_list_leading_docstring(def->body);
   cg_set_function_docstring(s, s->optimize_no_docstrings ? NULL : doc);
@@ -2362,7 +2365,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
   } else {
     emit_statement_list(s, def->body);
   }
-  if (def->has_yield) {
+  if (def->base.flags & STATEMENT_DEF_HAS_YIELD) {
     s->code.flags |= CO_GENERATOR;
   }
   const struct ast_scope_bindings *scope = scope_bindings_or_empty(def->scope);
@@ -2372,7 +2375,7 @@ static void emit_def(struct cg_state *s, struct ast_def *def)
     state.closure_symbols = scope->freevars;
   }
 
-  if (def->async) {
+  if (def->base.flags & STATEMENT_DEF_ASYNC) {
     if (s->code.flags & CO_GENERATOR) {
       s->code.flags = (s->code.flags & ~CO_GENERATOR) | CO_ASYNC_GENERATOR;
     } else {
@@ -2425,7 +2428,7 @@ static void emit_class(struct cg_state *s, struct ast_class *class_stmt)
   apply_class_bindings(s, class_stmt);
   cg_set_lineno(s, class_stmt->base.location.line);
   emit_nonfunction_statement_list(s, class_stmt->body);
-  if (class_stmt->needs_class_cell) {
+  if (class_stmt->base.flags & STATEMENT_CLASS_NEEDS_CLASS_CELL) {
     if (!cg_unreachable(s)) {
       struct symbol *class_symbol
           = symbol_table_get_or_insert(s->symbol_table, "__class__");
@@ -2476,7 +2479,7 @@ static void emit_for(struct cg_state *s, struct ast_for *for_stmt)
   }
   struct for_while_state state;
   emit_for_begin(s, &state, for_stmt->targets, for_stmt->expression,
-                 for_stmt->async);
+                 (for_stmt->base.flags & STATEMENT_FOR_ASYNC) != 0);
   emit_statement_list(s, for_stmt->body);
   emit_for_else(s, &state);
   if (for_stmt->else_body != NULL) {
@@ -3092,7 +3095,8 @@ static void emit_with(struct cg_state *s, struct ast_with *with)
     for (unsigned i = 0; i < num_items; ++i) {
       struct ast_with_item *item = &with->items[i];
       emit_with_setup(s, &cleanups[i], item->expression, item->as_location,
-                      item->target, with->async);
+                      item->target,
+                      (with->base.flags & STATEMENT_WITH_ASYNC) != 0);
     }
   }
 
@@ -3113,7 +3117,7 @@ static void emit_annotation_stmt(struct cg_state                 *s,
     emit_assign(s, 1, targets, annotation->value);
   }
   emit_annotation(s, annotation->target, annotation->annotation,
-                  annotation->simple);
+                  (annotation->base.flags & STATEMENT_ANNOTATION_SIMPLE) != 0);
 }
 
 static void emit_augassign(struct cg_state *s, struct ast_augassign *augassign)
@@ -3128,7 +3132,11 @@ static void emit_expression_statement(struct cg_state                 *s,
 {
   if (!cg_unreachable(s)) {
     emit_expression(s, expr->expression);
-    cg_op_pop1(s, expr->print ? OPCODE_PRINT_EXPR : OPCODE_POP_TOP, 0);
+    cg_op_pop1(s,
+               (expr->base.flags & STATEMENT_EXPRESSION_PRINT)
+                   ? OPCODE_PRINT_EXPR
+                   : OPCODE_POP_TOP,
+               0);
   }
 }
 

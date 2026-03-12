@@ -2382,9 +2382,9 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
         = ast_allocate_statement(s, struct ast_statement_annotation,
                                  AST_STATEMENT_ANNOTATION, location);
     statement->annotation.target = expression;
-    statement->annotation.simple
-        = ast_expression_type(expression) == AST_IDENTIFIER
-          && !starts_with_lparen;
+    if (ast_expression_type(expression) == AST_IDENTIFIER
+        && !starts_with_lparen)
+      statement->annotation.base.flags |= STATEMENT_ANNOTATION_SIMPLE;
     statement->annotation.annotation = annotation;
     statement->annotation.value = value;
     return statement;
@@ -2416,7 +2416,8 @@ static union ast_statement *parse_expression_statement(struct parser_state *s,
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_expression_statement, AST_STATEMENT_EXPRESSION, location);
   statement->expression.expression = expression;
-  statement->expression.print = print_expr;
+  if (print_expr)
+    statement->expression.base.flags |= STATEMENT_EXPRESSION_PRINT;
   return statement;
 }
 
@@ -3072,8 +3073,8 @@ static union ast_statement *parse_def(struct parser_state   *s,
       = ast_allocate_statement_(s, sizeof(struct ast_def) + parameters_size,
                                 AST_STATEMENT_DEF, location);
   statement->def.name = name;
-  statement->def.async = async;
-  statement->def.has_yield = has_yield;
+  if (async) statement->def.base.flags |= STATEMENT_DEF_ASYNC;
+  if (has_yield) statement->def.base.flags |= STATEMENT_DEF_HAS_YIELD;
   statement->def.parameter_shape = parameter_shape;
   if (num_parameters > 0) {
     memcpy(statement->def.parameters, idynarray_data(&parameters),
@@ -3168,7 +3169,7 @@ static union ast_statement *parse_for(struct parser_state *s, bool async)
 
   union ast_statement *statement
       = ast_allocate_statement(s, struct ast_for, AST_STATEMENT_FOR, location);
-  statement->for_.async = async;
+  if (async) statement->for_.base.flags |= STATEMENT_FOR_ASYNC;
   statement->for_.targets = targets;
   statement->for_.expression = expression;
   statement->for_.body = body;
@@ -3404,7 +3405,7 @@ static union ast_statement *parse_with(struct parser_state *s, bool async)
 
   union ast_statement *statement = ast_allocate_statement(
       s, struct ast_with, AST_STATEMENT_WITH, location);
-  statement->with.async = async;
+  if (async) statement->with.base.flags |= STATEMENT_WITH_ASYNC;
   statement->with.num_items = num_items;
   statement->with.items = items_arr;
   statement->with.body = body;

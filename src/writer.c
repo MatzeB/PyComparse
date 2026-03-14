@@ -11,6 +11,14 @@
 #include "pycomparse/opcodes.h"
 #include "pycomparse/util.h"
 
+#ifdef _WIN32
+#define fputc_singlethread_fast(c, f)         _fputc_nolock(c, f)
+#define fwrite_singlethread_fast(p, sz, n, f) fwrite(p, sz, n, f)
+#else
+#define fputc_singlethread_fast(c, f)         fputc_unlocked(c, f)
+#define fwrite_singlethread_fast(p, sz, n, f) fwrite_unlocked(p, sz, n, f)
+#endif
+
 enum write_types {
   OBJECT_ASCII = 'a',
   OBJECT_SHORT_ASCII = 'z',
@@ -23,12 +31,12 @@ struct writer_state {
 
 static void write_char(struct writer_state *s, char value)
 {
-  fputc(value, s->out);
+  fputc_singlethread_fast(value, s->out);
 }
 
 static void write_uint8(struct writer_state *s, uint8_t value)
 {
-  fputc(value, s->out);
+  fputc_singlethread_fast(value, s->out);
 }
 
 static void write_uint64(struct writer_state *s, uint64_t value)
@@ -132,7 +140,7 @@ static void write_string(struct writer_state        *s,
     write_char(s, type);
     write_uint32(s, length);
   }
-  fwrite(chars, 1, length, s->out);
+  fwrite_singlethread_fast(chars, 1, length, s->out);
 }
 
 static void write_float(struct writer_state       *s,

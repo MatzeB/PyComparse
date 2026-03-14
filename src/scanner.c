@@ -221,14 +221,19 @@ static int __attribute__((noinline)) refill_buffer(struct scanner_state *s)
 
 static void next_char(struct scanner_state *s)
 {
-  s->c = PYCOMPARSE_UNLIKELY(s->p >= s->buffer_end) ? refill_buffer(s)
-                                                    : (unsigned char)*(s->p++);
+  int c;
+  if (PYCOMPARSE_UNLIKELY(s->p >= s->buffer_end)) {
+    c = refill_buffer(s);
+  } else {
+    c = (unsigned char)*(s->p++);
+  }
+  s->c = c;
 }
 
 static void eat_char(struct scanner_state *s, int c)
 {
-  (void)c;
   assert(s->c == c);
+  (void)c;
   next_char(s);
 }
 
@@ -2611,7 +2616,9 @@ void scanner_init(struct scanner_state *s, FILE *input, const char *filename,
     return;
   }
 #endif
-  s->c = refill_buffer(s);
+
+  next_char(s);
+  /* Skip BOM in UTF-8 encoding */
   if (s->c == 0xEF && s->p + 1 < s->buffer_end
       && (unsigned char)s->p[0] == 0xBB && (unsigned char)s->p[1] == 0xBF) {
     next_char(s);

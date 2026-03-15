@@ -1,0 +1,7 @@
+{
+  "compile_args": ["--barry-as-flufl"],
+  "run": false,
+  "code_assertions": {
+    "flags_all": ["CO_FUTURE_BARRY_AS_BDFL"]
+  }
+}

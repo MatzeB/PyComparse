@@ -61,7 +61,8 @@ uv run scripts/test.py
 ```
 This runner executes parser integration tests in `test/`, compares output with
 reference Python execution, checks expected diagnostics in `test/errors/`, and
-includes `test/compile_only/`.  It also runs scanner tokenization checks.
+includes manifest-driven parser tests in `test/options/`.  It also runs
+scanner tokenization checks.
 Use `uv run scripts/test.py parser` or `uv run scripts/test.py scan` to run
 only one suite.
 Use `--compiler <path>` to override the compiler binary.
@@ -150,4 +151,7 @@ Core support modules:
 - `adt_test` - C unit tests for ADT components (`src/adt_test.c`)
 - `test/*.py` - Positive test cases that should compile and run correctly
 - `test/errors/*.py` - Error test cases with expected error output in `.expected` files
-- `test/compile_only/` - Tests that must compile successfully but are not executed
+- `test/scanner_only/` - Scanner/tokenizer fixtures that are not parser/runtime
+  tests
+- `test/options/` - Parser tests with sidecars for non-default compiler flags,
+  compile-only cases, or code-object assertions

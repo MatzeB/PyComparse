@@ -1,0 +1,6 @@
+{
+  "run": false,
+  "code_assertions": {
+    "flags_all": ["CO_FUTURE_BARRY_AS_BDFL"]
+  }
+}

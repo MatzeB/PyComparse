@@ -1,9 +1,0 @@
-def func(a, b):
-    if (a > b or
-        b == a):
-        return False
-class X:
-    def __repr__(self):
-        return "hello"
-    def __init__(self):
-        pass

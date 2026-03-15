@@ -104,6 +104,7 @@ compile_single_buffer(const char *source, size_t source_len,
   cg_init(&cg, &objects, &symbol_table, source_name, &diagnostics);
   cg.optimize_no_assertions = (optimize_level >= 1);
   cg.optimize_no_docstrings = (optimize_level >= 2);
+  cg.toplevel_function = (parser_flags & PYCOMPARSE_TOPLEVEL_FUNCTION) != 0;
 
   struct parser_state parser;
   parser_init(&parser, &objects, &diagnostics, parser_flags);
@@ -367,6 +368,7 @@ int main(int argc, char **argv)
   cg_init(&cg, &objects, &symbol_table, input_filename, &diagnostics);
   cg.optimize_no_assertions = (optimize_level >= 1);
   cg.optimize_no_docstrings = (optimize_level >= 2);
+  cg.toplevel_function = (parser_flags & PYCOMPARSE_TOPLEVEL_FUNCTION) != 0;
 
   struct parser_state parser;
   parser_init(&parser, &objects, &diagnostics, parser_flags);

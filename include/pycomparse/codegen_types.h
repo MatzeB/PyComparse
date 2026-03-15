@@ -101,6 +101,7 @@ struct cg_state {
 
   bool optimize_no_assertions; /* -O: skip assert statements */
   bool optimize_no_docstrings; /* -OO: strip docstrings */
+  bool toplevel_function;
 };
 
 ASSUME_NONNULL_END

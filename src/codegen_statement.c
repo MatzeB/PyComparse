@@ -278,6 +278,9 @@ static void emit_statement_list(struct cg_state           *s,
 static void
 emit_statement_list_skip_first(struct cg_state           *s,
                                struct ast_statement_list *statement_list);
+static void
+analyze_and_apply_toplevel_function_bindings(struct cg_state   *s,
+                                             struct ast_module *module);
 
 static void
 emit_nonfunction_statement_list(struct cg_state           *s,
@@ -303,9 +306,21 @@ emit_nonfunction_statement_list(struct cg_state           *s,
 
 union object *emit_module(struct cg_state *s, struct ast_module *module)
 {
-  cg_code_begin(s, /*in_function=*/false);
+  bool toplevel_function = s->toplevel_function;
+  cg_code_begin(s, toplevel_function);
   s->code.flags |= module->future_flags;
-  emit_nonfunction_statement_list(s, module->body);
+  if (toplevel_function) {
+    analyze_and_apply_toplevel_function_bindings(s, module);
+    union object *doc = statement_list_leading_docstring(module->body);
+    cg_set_function_docstring(s, s->optimize_no_docstrings ? NULL : doc);
+    if (doc != NULL) {
+      emit_statement_list_skip_first(s, module->body);
+    } else {
+      emit_statement_list(s, module->body);
+    }
+  } else {
+    emit_nonfunction_statement_list(s, module->body);
+  }
 
   emit_code_end(s);
   return cg_code_end(s, "<module>");
@@ -2316,6 +2331,37 @@ static void apply_function_bindings(struct cg_state *s, struct ast_def *def)
   for (unsigned i = 0; i < scope->num_cellvars; ++i) {
     cg_promote_to_cell(s, scope->cellvars[i]);
   }
+}
+
+static void
+analyze_and_apply_toplevel_function_bindings(struct cg_state   *s,
+                                             struct ast_module *module)
+{
+  struct binding_scope scope;
+  binding_scope_init(&scope, s, /*parent=*/NULL, /*def=*/NULL,
+                     /*is_class=*/false, /*is_comprehension=*/false);
+  analyze_statement_list_collect(&scope, module->body);
+  analyze_children_bindings(s, &scope);
+  resolve_nonlocals(s, &scope, /*error_location=*/NULL);
+  resolve_uses(&scope, /*check_class_binds=*/true);
+
+  for (unsigned i = 0; i < idynarray_length(&scope.globals, struct symbol *);
+       ++i) {
+    struct symbol **globals = idynarray_data(&scope.globals);
+    cg_declare(s, globals[i], SYMBOL_GLOBAL);
+  }
+  for (unsigned i = 0; i < idynarray_length(&scope.locals, struct symbol *);
+       ++i) {
+    struct symbol **locals = idynarray_data(&scope.locals);
+    cg_declare(s, locals[i], SYMBOL_LOCAL);
+  }
+  for (unsigned i = 0; i < idynarray_length(&scope.cellvars, struct symbol *);
+       ++i) {
+    struct symbol **cellvars = idynarray_data(&scope.cellvars);
+    cg_promote_to_cell(s, cellvars[i]);
+  }
+
+  binding_scope_free(&scope);
 }
 
 static void emit_statement_list(struct cg_state           *s,

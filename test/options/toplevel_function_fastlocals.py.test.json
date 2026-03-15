@@ -1,0 +1,17 @@
+{
+  "compile_args": ["--toplevel-function"],
+  "code_assertions": {
+    "flags_all": ["CO_OPTIMIZED", "CO_NEWLOCALS"],
+    "opnames_include": ["STORE_FAST", "LOAD_FAST"],
+    "opnames_exclude": ["STORE_NAME", "LOAD_NAME"],
+    "varnames_include": ["x", "y", "inner"],
+    "cellvars_include": ["y"],
+    "nested": {
+      "inner": {
+        "opnames_include": ["LOAD_DEREF"],
+        "opnames_exclude": ["LOAD_GLOBAL"],
+        "freevars_include": ["y"]
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md
 
 This file provides guidance to coding agents when working with code in this repository.
 
@@ -6,66 +6,54 @@ This file provides guidance to coding agents when working with code in this repo
 
 pycomparse is a Python bytecode compiler implemented in C. It consists of a scanner (lexer), parser, and bytecode generator that compiles Python source code to Python bytecode objects (.pyc files).
 
-## Build System
-
-This project uses CMake and Ninja for building:
-
-```bash
-cmake -S . -B build -G Ninja
-ninja --quiet -C build
-```
-
-The build produces three main executables:
-- `adt_test` - C unit tests for ADT components
-- `scanner_test` - Tests for the lexical scanner
-- `pycomparse` - Main parser/compiler that converts Python source to bytecode
-
 ## Development Commands
-
-### Setup
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPYCOMPARSE_ENABLE_SANITIZERS=On
-```
 
 ### Building
 
 ```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPYCOMPARSE_ENABLE_SANITIZERS=On
 ninja --quiet -C build
 ```
 
+The build produces three main executables:
+- `pycomparse` - Main parser/compiler that converts Python source to bytecode
+- `adt_test` - C unit tests for ADT components
+- `scanner_test` - Tests for the lexical scanner
+
 ### Performance Builds
-For local profiling/debugging (for example `perf`/`valgrind`), use an optimized
-`Release` CMake build and do not rely on the default build type:
-```bash
-cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-ninja --quiet -C build-release
-```
-Use `build-release/pycomparse` (or an equivalent `-O3 -DNDEBUG` binary) for
-`perf`/`valgrind` runs.
 
-For benchmark numbers and commit-to-commit performance comparisons, use
-**PGO + LTO** binaries (required), not plain `Release`.
+> **IMPORTANT for AI agents**: Always use a PGO+LTO binary (built with
+> `scripts/build_pgo_lto.py`) for *all* performance work: hyperfine,
+> callgrind, perf, valgrind.  Never use `build/pycomparse` or
+> `build-release/pycomparse` — those lack PGO+LTO and produce misleading
+> numbers.
 
-Build PGO + LTO with:
-```bash
-CMAKE_GENERATOR=Ninja scripts/build_pgo_lto.sh
-```
-The script performs:
-1. Instrumented `Release` build (`PYCOMPARSE_PGO_MODE=generate`, `PYCOMPARSE_ENABLE_LTO=ON`)
-2. Training run (default workload or `--train-cmd`)
-3. Profile merge (`llvm-profdata`)
-4. Final optimized `Release` build (`PYCOMPARSE_PGO_MODE=use`, `PYCOMPARSE_PGO_DATA=...`)
+Use `scripts/build_pgo_lto.py -o NAME` to build PGO+LTO binaries.
 
-Use the PGO+LTO binary with the benchmark script (requires `cpython-3.8/` to
-be present locally — not tracked in git):
 ```bash
+# Build current working tree (including uncommitted changes)
+scripts/build_pgo_lto.py -o pycomparse-current
+
+# Build specific revisions under chosen names
+scripts/build_pgo_lto.py main   -o pycomparse-baseline
+scripts/build_pgo_lto.py HEAD   -o pycomparse-head
+
+# Benchmark vs reference Python (requires cpython-3.8/ locally)
 uv run python scripts/benchmark_compile_perf.py \
-  --tested-compiler build-pgo-lto/pycomparse
-```
+  --python-compiler python='uv run python' \
+  --compiler current=./pycomparse-current
 
-For pycomparse-vs-pycomparse A/B, set both baseline and tested compiler
-options (see `scripts/benchmark_compile_perf.py --help`).
+# pycomparse-vs-pycomparse wall-clock A/B (top 20 largest stdlib files)
+uv run python scripts/benchmark_compile_perf.py \
+  --compiler baseline=./pycomparse-baseline \
+  --compiler current=./pycomparse-current
+
+# Same but instruction counts via callgrind
+uv run python scripts/benchmark_compile_perf.py \
+  --compiler baseline=./pycomparse-baseline \
+  --compiler current=./pycomparse-current \
+  --runner callgrind
+```
 
 ### Testing
 ```bash
@@ -81,6 +69,7 @@ Use `--compiler <path>` to override the compiler binary.
 ### Code Quality
 ```bash
 ./scripts/format.sh    # Format all C source files with clang-format
+./scripts/format_lint_py.sh # Format and lint Python scripts with ruff
 ```
 
 After each series of code changes, run formatting and then run the full test
@@ -103,7 +92,7 @@ uv run scripts/test.py
 ## Development
 
 - Do NOT use plain `python3` as a reference. It is likely not version 3.8 so
-  has different behavior what is expected for pycomparse. Use something like
+  has different behavior than what is expected for pycomparse. Use something like
   `uv run python` to get a python with the right version.
 - Every commit adding a new feature or fixing an important bug should have a test
   (unless it is especially hard/impossible to test).
@@ -119,7 +108,6 @@ uv run scripts/decode.py test/simple.py
 ```
 
 ### Compiling and printing bytecode for PyComparse
-- remember to build first
 ```bash
 build/pycomparse --out /tmp/test.pyc test/simple.py && uv run scripts/decode.py /tmp/test.pyc
 ```

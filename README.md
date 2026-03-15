@@ -118,7 +118,8 @@ Run compile-time benchmarks on a PGO+LTO binary:
 
 ```sh
 uv run python scripts/benchmark_compile_perf.py \
-  --tested-compiler build-pgo-lto/pycomparse
+  --python-compiler python='uv run python' \
+  --compiler current=build-pgo-lto/pycomparse
 ```
 
 For homepage-style benchmark data generation, see `benchy.sh` on the

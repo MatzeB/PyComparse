@@ -55,13 +55,11 @@ def is_python38() -> bool:
 def print_python_hint() -> None:
     version = sys.version.split()[0]
     print(
-        f"error: scripts/runpy.py requires Python 3.8 "
-        f"(found: {version})",
+        f"error: scripts/runpy.py requires Python 3.8 (found: {version})",
         file=sys.stderr,
     )
     print(
-        "hint: run with 'uv run --no-project python -B "
-        "scripts/runpy.py ...'",
+        "hint: run with 'uv run --no-project python -B scripts/runpy.py ...'",
         file=sys.stderr,
     )
 
@@ -213,10 +211,9 @@ class CompilerMetaFinder(importlib.abc.MetaPathFinder):
         spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
         if spec is None or spec.origin is None:
             return spec
-        if (
-            isinstance(spec.loader, importlib.machinery.SourceFileLoader)
-            and spec.origin.endswith(".py")
-        ):
+        if isinstance(
+            spec.loader, importlib.machinery.SourceFileLoader
+        ) and spec.origin.endswith(".py"):
             loader = CompilerSourceLoader(
                 fullname,
                 spec.origin,

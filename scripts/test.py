@@ -331,7 +331,9 @@ def run_parser_tests(
             report_ok(f"{label} (interactive)")
 
         optimize_dir = repo_root / "test" / "optimize"
-        optimize_tests = sorted(optimize_dir.glob("*.py")) if optimize_dir.exists() else []
+        optimize_tests = (
+            sorted(optimize_dir.glob("*.py")) if optimize_dir.exists() else []
+        )
 
         for test_file in optimize_tests:
             total_tests += 1
@@ -375,7 +377,9 @@ def run_parser_tests(
                 cat_file(run_err)
                 continue
 
-            ref_cmd = ["python3", rel] if opt_flag is None else ["python3", opt_flag, rel]
+            ref_cmd = (
+                ["python3", rel] if opt_flag is None else ["python3", opt_flag, rel]
+            )
             with reference.open("wb") as reference_file, ref_err.open(
                 "wb"
             ) as ref_err_file:
@@ -408,9 +412,7 @@ def run_parser_tests(
 def expand_input_patterns(repo_root: Path, inputs: list[str]) -> list[Path]:
     if not inputs:
         test_dir = repo_root / "test"
-        return sorted(
-            list(test_dir.glob("*.py")) + list(test_dir.glob("*.py.raw"))
-        )
+        return sorted(list(test_dir.glob("*.py")) + list(test_dir.glob("*.py.raw")))
 
     expanded: list[Path] = []
     for raw in inputs:

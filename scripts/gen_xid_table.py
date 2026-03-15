@@ -168,7 +168,6 @@ static inline int is_xid_start(uint32_t cp)
 """
         )
 
-
     subprocess.run(
         [
             "clang-format",

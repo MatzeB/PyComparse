@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-import dis, marshal, struct, sys, time, types
+import dis
+import marshal
+import struct
+import sys
+import time
+import types
+
 
 def show_pyc_file(fp):
     magic = fp.read(4)
-    zero = fp.read(4)
+    fp.read(4)
     moddate = fp.read(4)
-    modtime = time.asctime(time.localtime(struct.unpack('I', moddate)[0]))
-    print("magic %s" % (hex(int.from_bytes(magic, 'little'))))
-    print("moddate %s (%s)" % (hex(int.from_bytes(moddate, 'little')), modtime))
-    source_size = int.from_bytes(fp.read(4), 'little')
+    modtime = time.asctime(time.localtime(struct.unpack("I", moddate)[0]))
+    print("magic %s" % (hex(int.from_bytes(magic, "little"))))
+    print("moddate %s (%s)" % (hex(int.from_bytes(moddate, "little")), modtime))
+    source_size = int.from_bytes(fp.read(4), "little")
     print(f"source size {source_size}")
     code = marshal.load(fp)
     show_code(code)
-     
-def show_code(code, indent=''):
+
+
+def show_code(code, indent=""):
     print(f"{indent}code")
-    indent += '   '
+    indent += "   "
     print(f"{indent}argcount {code.co_argcount}")
     print(f"{indent}nlocals {code.co_nlocals}")
     print(f"{indent}stacksize {code.co_stacksize}")
@@ -24,8 +31,8 @@ def show_code(code, indent=''):
     dis.disassemble(code)
     print(f"{indent}consts")
     for const in code.co_consts:
-        if type(const) == types.CodeType:
-            show_code(const, indent+'   ')
+        if isinstance(const, types.CodeType):
+            show_code(const, indent + "   ")
         else:
             print(f"   {indent}{const!r}")
     print(f"{indent}names {code.co_names}")
@@ -36,15 +43,17 @@ def show_code(code, indent=''):
     print(f"{indent}name {code.co_name}")
     print(f"{indent}firstlineno {code.co_firstlineno}")
     show_hex("lnotab", code.co_lnotab, indent=indent)
-     
+
+
 def show_hex(label, h, indent):
-    h = hex(int.from_bytes(h, 'little'))
+    h = hex(int.from_bytes(h, "little"))
     if len(h) < 60:
         print(f"{indent}{label} {h}")
     else:
         print(f"{indent}{label}")
         for i in range(0, len(h), 60):
-            print(f"{indent}   {h[i:i+60]}")
+            print(f"{indent}   {h[i : i + 60]}")
+
 
 def _main() -> None:
     argv = sys.argv
@@ -61,7 +70,9 @@ def _main() -> None:
 
     if len(argv) == 1:
         if mode is not None:
-            code = compile(sys.stdin.read(), "<stdin>", mode, dont_inherit=True, optimize=-1)
+            code = compile(
+                sys.stdin.read(), "<stdin>", mode, dont_inherit=True, optimize=-1
+            )
             show_code(code)
         else:
             show_pyc_file(sys.stdin.buffer)
@@ -77,6 +88,7 @@ def _main() -> None:
         else:
             with open(filename, "rb") as fp:
                 show_pyc_file(fp)
+
 
 if __name__ == "__main__":
     _main()

@@ -499,7 +499,6 @@ static inline int nfkc_normalize(uint8_t *buf, int len, int buf_capacity)
 """
         )
 
-
     subprocess.run(
         [
             "clang-format",

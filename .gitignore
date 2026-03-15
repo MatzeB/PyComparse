@@ -4,3 +4,4 @@ __pycache__
 /.lvimrc
 /build-*
 /cpython-3.8
+/pycomparse-*

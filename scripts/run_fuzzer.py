@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
-import sys
 
 
 def get_nproc() -> int:
@@ -50,9 +49,12 @@ def main() -> int:
     subprocess.run(
         [
             "cmake",
-            "-S", ".",
-            "-B", build_dir,
-            "-G", "Ninja",
+            "-S",
+            ".",
+            "-B",
+            build_dir,
+            "-G",
+            "Ninja",
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
             f"-DCMAKE_C_COMPILER={args.clang}",
             "-DPYCOMPARSE_ENABLE_FUZZER=ON",
@@ -64,9 +66,12 @@ def main() -> int:
     subprocess.run(
         [
             "cmake",
-            "--build", build_dir,
-            "--target", "fuzz_compile",
-            "-j", str(args.jobs),
+            "--build",
+            build_dir,
+            "--target",
+            "fuzz_compile",
+            "-j",
+            str(args.jobs),
         ],
         check=True,
     )

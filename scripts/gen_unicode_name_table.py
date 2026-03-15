@@ -223,7 +223,6 @@ extern const uint8_t unicode_name_block_data[{block_data_bytes}];
         f"total={total_size} bytes"
     )
 
-
     subprocess.run(
         ["clang-format", "-i", str(OUT_C), str(OUT_H)],
         check=True,

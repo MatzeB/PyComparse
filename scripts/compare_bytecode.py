@@ -174,7 +174,9 @@ def compile_reference(
     return True, ""
 
 
-def compile_pycomparse(source: Path, out_pyc: Path, parser_test: Path) -> tuple[bool, str]:
+def compile_pycomparse(
+    source: Path, out_pyc: Path, parser_test: Path
+) -> tuple[bool, str]:
     proc = subprocess.run(
         [str(parser_test), "--out", str(out_pyc), str(source)],
         stdout=subprocess.PIPE,

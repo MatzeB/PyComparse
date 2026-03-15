@@ -56,7 +56,7 @@ RAN_TESTS_RE = re.compile(
     re.MULTILINE,
 )
 TRACEBACK_STRING_FRAME_RE = re.compile(
-    r'(?m)^(Traceback \(most recent call last\):\n)'
+    r"(?m)^(Traceback \(most recent call last\):\n)"
     r'  File "<string>", line 1, in <module>\n'
 )
 COMPILE_WITH_CPYTHON = (
@@ -459,7 +459,9 @@ def process_runtime(file_path: Path, cfg: Config) -> FileResult:
                 pyc_args, timeout=cfg.timeout, env=cfg.env
             )
             if pyc_timed_out:
-                return FileResult(file_path, False, "runtime_timeout", detail="compiled")
+                return FileResult(
+                    file_path, False, "runtime_timeout", detail="compiled"
+                )
             ref_out = normalize_text(
                 ref_out_raw.decode(errors="replace"), cfg.normalize_unittest_timing
             )
@@ -606,9 +608,7 @@ def main() -> int:
         parser_test=parser_test,
         cpython_lib=cpython_lib,
         path_globs=(
-            args.path_glob
-            if args.path_glob
-            else build_default_path_globs(cpython_lib)
+            args.path_glob if args.path_glob else build_default_path_globs(cpython_lib)
         ),
         python_cmd=python_cmd,
         python_cmd_raw=args.python_cmd,

@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 import ast
 import io
-from tokenize import tokenize, ENCODING, COMMENT, NL, ENDMARKER, OP, NAME, NEWLINE, NUMBER, STRING, INDENT, DEDENT, ERRORTOKEN
+from tokenize import (
+    tokenize,
+    ENCODING,
+    COMMENT,
+    NL,
+    ENDMARKER,
+    OP,
+    NAME,
+    NEWLINE,
+    NUMBER,
+    STRING,
+    INDENT,
+    DEDENT,
+    ERRORTOKEN,
+)
 import sys
 import unicodedata
 
@@ -502,10 +516,10 @@ def _format_string_token(raw):
         value = ast.literal_eval(raw)
         if isinstance(value, bytes):
             rendered = _render_bytes_for_scanner(value)
-            return f"b\"{rendered}\""
+            return f'b"{rendered}"'
         if isinstance(value, str):
             rendered = _render_bytes_for_scanner(value.encode("utf-8"))
-            return f"\"{rendered}\""
+            return f'"{rendered}"'
     except Exception:
         pass
 
@@ -515,7 +529,7 @@ def _format_string_token(raw):
             quote_pos = i
             break
     if quote_pos < 0:
-        return f"\"{raw}\""
+        return f'"{raw}"'
 
     prefix = raw[:quote_pos].lower()
     literal = raw[quote_pos:]
@@ -526,8 +540,9 @@ def _format_string_token(raw):
         value = literal[1:-1]
 
     if "b" in prefix and "f" not in prefix:
-        return f"b\"{value}\""
-    return f"\"{value}\""
+        return f'b"{value}"'
+    return f'"{value}"'
+
 
 def _num_pydigits(value):
     count = 0
@@ -535,6 +550,7 @@ def _num_pydigits(value):
         value >>= 15
         count += 1
     return count
+
 
 def _format_number_token(raw):
     value = ast.literal_eval(raw)
@@ -550,12 +566,14 @@ def _format_number_token(raw):
         return f"{value.real:f}"
     return str(value)
 
+
 def _is_combining_errortoken(token):
     if token.type != ERRORTOKEN:
         return False
     if len(token.string) != 1:
         return False
     return unicodedata.combining(token.string) != 0
+
 
 def _emit_name(pending_name):
     linenum = pending_name[0]
@@ -626,6 +644,7 @@ def main():
             _emit(linenum, t)
         if pending_name is not None:
             _emit_name(pending_name)
+
 
 if __name__ == "__main__":
     main()

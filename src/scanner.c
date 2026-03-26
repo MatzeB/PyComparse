@@ -1617,7 +1617,13 @@ scan_string_plain_span_find_stop_avx2_fmt_single(const char *cursor,
 #endif
 
 #if PYCOMPARSE_HAVE_GNU_IFUNC
-static void *resolve_scan_string_plain_span_find_stop_nofmt_double(void)
+/* Keep these resolvers non-static so the compiler cannot rename them. */
+void *resolve_scan_string_plain_span_find_stop_nofmt_double(void);
+void *resolve_scan_string_plain_span_find_stop_nofmt_single(void);
+void *resolve_scan_string_plain_span_find_stop_fmt_double(void);
+void *resolve_scan_string_plain_span_find_stop_fmt_single(void);
+
+void *resolve_scan_string_plain_span_find_stop_nofmt_double(void)
 {
   __builtin_cpu_init();
   if (__builtin_cpu_supports("avx2")) {
@@ -1626,7 +1632,7 @@ static void *resolve_scan_string_plain_span_find_stop_nofmt_double(void)
   return (void *)scan_string_plain_span_find_stop_scalar_nofmt_double;
 }
 
-static void *resolve_scan_string_plain_span_find_stop_nofmt_single(void)
+void *resolve_scan_string_plain_span_find_stop_nofmt_single(void)
 {
   __builtin_cpu_init();
   if (__builtin_cpu_supports("avx2")) {
@@ -1635,7 +1641,7 @@ static void *resolve_scan_string_plain_span_find_stop_nofmt_single(void)
   return (void *)scan_string_plain_span_find_stop_scalar_nofmt_single;
 }
 
-static void *resolve_scan_string_plain_span_find_stop_fmt_double(void)
+void *resolve_scan_string_plain_span_find_stop_fmt_double(void)
 {
   __builtin_cpu_init();
   if (__builtin_cpu_supports("avx2")) {
@@ -1644,7 +1650,7 @@ static void *resolve_scan_string_plain_span_find_stop_fmt_double(void)
   return (void *)scan_string_plain_span_find_stop_scalar_fmt_double;
 }
 
-static void *resolve_scan_string_plain_span_find_stop_fmt_single(void)
+void *resolve_scan_string_plain_span_find_stop_fmt_single(void)
 {
   __builtin_cpu_init();
   if (__builtin_cpu_supports("avx2")) {

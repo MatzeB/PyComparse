@@ -10,6 +10,19 @@ def break_case():
     return out
 
 
+def break_case_dead_tail():
+    out = []
+    for i in range(3):
+        try:
+            out.append("t" + str(i))
+            if i == 1:
+                break
+                break
+        finally:
+            out.append("f" + str(i))
+    return out
+
+
 def continue_case():
     out = []
     for i in range(3):
@@ -373,6 +386,7 @@ def return_expr_in_nested_try_except():
 
 
 print(break_case())
+print(break_case_dead_tail())
 print(continue_case())
 print(return_case())
 print(except_return_case())

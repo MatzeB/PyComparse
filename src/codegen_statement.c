@@ -1041,6 +1041,9 @@ static void emit_for_end(struct cg_state *s, struct for_while_state *state)
 
 static void emit_continue(struct cg_state *s)
 {
+  if (cg_unreachable(s)) {
+    return;
+  }
   struct basic_block *target = s->code.loop_state.continue_block;
   assert(target != NULL);
   unsigned saved_stacksize = s->code.stacksize;
@@ -1054,6 +1057,9 @@ static void emit_continue(struct cg_state *s)
 
 static void emit_break(struct cg_state *s)
 {
+  if (cg_unreachable(s)) {
+    return;
+  }
   struct basic_block *target = s->code.loop_state.break_block;
   assert(target != NULL);
   unsigned saved_stacksize = s->code.stacksize;
